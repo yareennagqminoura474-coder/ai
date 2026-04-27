@@ -290,6 +290,7 @@
 [data-theme="dark"] .wechat-card,
 [data-theme="dark"] .form-section,
 [data-theme="dark"] .recent-chat-item,
+[data-theme="dark"] .moment-card,
 [data-theme="dark"] .note-card,
 [data-theme="dark"] .photo-card,
 [data-theme="dark"] .theme-card,
@@ -489,7 +490,7 @@ button {
   min-height: 0;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 18px 16px 108px;
+  padding: 18px 16px 94px;
   -webkit-overflow-scrolling: touch;
 }
 
@@ -525,21 +526,21 @@ button {
 }
 
 .desktop-music-card {
-  min-height: 132px;
+  min-height: 106px;
   margin-top: 16px;
-  padding: 16px;
+  padding: 14px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.78);
   box-shadow: 0 14px 34px rgba(40, 47, 54, 0.1);
   display: grid;
-  grid-template-columns: 100px minmax(0, 1fr);
-  gap: 18px;
+  grid-template-columns: 74px minmax(0, 1fr);
+  gap: 14px;
   align-items: center;
 }
 
 .desktop-record {
-  width: 96px;
-  height: 96px;
+  width: 72px;
+  height: 72px;
   border-radius: 50%;
   background: radial-gradient(circle, #404040 0 10%, #181818 11% 68%, #242424 69% 100%);
   display: grid;
@@ -548,8 +549,8 @@ button {
 }
 
 .desktop-record span {
-  width: 30px;
-  height: 30px;
+  width: 24px;
+  height: 24px;
   border-radius: 50%;
   background: rgba(255, 255, 255, 0.28);
 }
@@ -594,7 +595,7 @@ button {
 
 .desktop-pages-viewport {
   display: flex;
-  min-height: 250px;
+  min-height: 194px;
   transition: transform 0.28s ease;
   touch-action: pan-y;
 }
@@ -607,13 +608,17 @@ button {
 .desktop-app-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  gap: 22px 12px;
-  padding: 24px 4px 0;
+  gap: 18px 10px;
+  padding: 20px 2px 0;
+}
+
+.desktop-pages-viewport.single-page .desktop-app-grid {
+  align-content: start;
 }
 
 .desktop-app-icon {
   min-width: 0;
-  min-height: 82px;
+  min-height: 76px;
   border: 0;
   background: transparent;
   color: var(--text);
@@ -627,9 +632,9 @@ button {
 }
 
 .desktop-icon-symbol {
-  width: 54px;
-  height: 54px;
-  border-radius: 14px;
+  width: 50px;
+  height: 50px;
+  border-radius: 16px;
   display: grid;
   place-items: center;
   color: #ffffff;
@@ -644,6 +649,14 @@ button {
 
 .desktop-photo {
   background: linear-gradient(135deg, #fdba6c, #e76f89);
+}
+
+.desktop-worldbook {
+  background: linear-gradient(135deg, #6f8bd8, #68bea3);
+}
+
+.desktop-diary {
+  background: linear-gradient(135deg, #f2a1b7, #7db7ff);
 }
 
 .desktop-note {
@@ -695,7 +708,7 @@ button {
   justify-content: center;
   align-items: center;
   gap: 7px;
-  padding: 8px 0 0;
+  padding: 6px 0 0;
 }
 
 .desktop-page-dots button {
@@ -713,10 +726,11 @@ button {
 }
 
 .desktop-dock {
-  background: rgba(255, 255, 255, 0.62);
-  border-color: rgba(255, 255, 255, 0.78);
+  background: rgba(255, 255, 255, 0.58);
+  border-color: rgba(255, 255, 255, 0.84);
   grid-template-columns: repeat(4, minmax(0, 1fr));
-  border-radius: 22px;
+  border-radius: 24px;
+  box-shadow: 0 14px 34px rgba(66, 88, 94, 0.14);
 }
 
 .wechat-content {
@@ -847,10 +861,23 @@ button {
   background: transparent;
   color: inherit;
   display: grid;
-  grid-template-columns: 48px minmax(0, 1fr);
+  grid-template-columns: 48px minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   text-align: left;
+}
+
+.recent-unread-badge {
+  min-width: 20px;
+  height: 20px;
+  padding: 0 6px;
+  border-radius: 999px;
+  background: #ef3d4f;
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+  font-weight: 900;
 }
 
 .recent-actions {
@@ -989,11 +1016,161 @@ button {
   min-height: 72px;
   padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 4px;
   background: rgba(255, 255, 255, 0.96);
   border-top: 1px solid rgba(228, 232, 226, 0.9);
   z-index: 8;
+}
+
+.moments-page {
+  display: grid;
+  gap: 14px;
+}
+
+.moments-composer,
+.moment-card {
+  border-radius: 16px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(29, 37, 33, 0.06);
+}
+
+.moments-composer {
+  padding: 14px;
+  display: grid;
+  gap: 12px;
+}
+
+.moments-composer-head {
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.moments-composer-head .me-avatar,
+.moment-avatar {
+  width: 48px;
+  height: 48px;
+  border-radius: 12px;
+  object-fit: cover;
+  display: grid;
+  place-items: center;
+}
+
+.moments-composer-head span,
+.moment-main,
+.moment-meta {
+  min-width: 0;
+}
+
+.moments-composer-head strong,
+.moment-meta strong {
+  display: block;
+  font-size: 15px;
+}
+
+.moments-composer-head em,
+.moment-meta time {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.moments-composer textarea {
+  width: 100%;
+  min-height: 78px;
+  resize: vertical;
+  border: 1px solid rgba(228, 232, 226, 0.95);
+  border-radius: 12px;
+  background: #f8faf8;
+  padding: 12px;
+  color: var(--text);
+  font: inherit;
+  line-height: 1.5;
+}
+
+.moments-composer-actions {
+  min-height: 38px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.moments-composer-actions span {
+  color: #c04b4b;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.moments-composer-actions button {
+  min-width: 78px;
+  height: 38px;
+  border: 0;
+  border-radius: 10px;
+  background: var(--green);
+  color: #ffffff;
+  font-weight: 900;
+}
+
+.moments-feed {
+  display: grid;
+  gap: 12px;
+}
+
+.moment-card {
+  padding: 13px;
+  display: grid;
+  grid-template-columns: 48px minmax(0, 1fr);
+  gap: 11px;
+}
+
+.moment-main p {
+  margin: 7px 0 10px;
+  color: var(--text);
+  line-height: 1.55;
+  word-break: break-word;
+}
+
+.moment-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.moment-actions button {
+  min-width: 58px;
+  height: 32px;
+  border: 0;
+  border-radius: 999px;
+  background: #f0f4f2;
+  color: var(--green-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.moment-comments {
+  margin-top: 9px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  background: #f6f8f7;
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.moment-placeholder {
+  border: 1px dashed rgba(104, 190, 163, 0.45);
+  background: rgba(255, 255, 255, 0.72);
+}
+
+.placeholder-avatar {
+  background: linear-gradient(135deg, var(--green), var(--blue));
+  color: #ffffff;
+  display: grid;
+  place-items: center;
+  font-weight: 900;
 }
 
 .wechat-tabbar button {
@@ -1068,7 +1245,14 @@ button {
 
 .me-page {
   display: grid;
-  gap: 12px;
+  gap: 10px;
+}
+
+.me-section-label {
+  margin: 6px 2px -2px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .me-profile-card,
@@ -1398,38 +1582,39 @@ button {
 
 .dock {
   position: absolute;
-  left: 14px;
-  right: 14px;
-  bottom: calc(12px + env(safe-area-inset-bottom));
-  height: 68px;
-  padding: 8px;
+  left: 18px;
+  right: 18px;
+  bottom: calc(10px + env(safe-area-inset-bottom));
+  height: 62px;
+  padding: 7px;
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 8px;
+  gap: 6px;
   background: rgba(255, 255, 255, 0.9);
   border: 1px solid rgba(228, 232, 226, 0.9);
-  border-radius: 8px;
+  border-radius: 20px;
   box-shadow: var(--shadow);
   backdrop-filter: blur(14px);
 }
 
 .dock-item {
   border: 0;
-  border-radius: 8px;
+  border-radius: 16px;
   color: var(--muted);
   background: transparent;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 3px;
+  gap: 2px;
   font-size: 11px;
   font-weight: 700;
 }
 
 .dock-item.active {
-  background: var(--surface-soft);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.94), rgba(233, 247, 241, 0.88));
   color: var(--green-dark);
+  box-shadow: 0 8px 18px rgba(104, 190, 163, 0.16);
 }
 
 .dock-icon {
@@ -3472,18 +3657,19 @@ textarea::placeholder {
 
 .wallet-content {
   padding: 22px 16px calc(28px + env(safe-area-inset-bottom));
-  background: #f3f4f5;
+  background: linear-gradient(180deg, #f3fbf7 0%, #f7f4ff 52%, #f8faf8 100%);
 }
 
 .wallet-card {
-  min-height: 246px;
-  padding: 28px 26px 22px;
-  border-radius: 24px;
-  color: #ffffff;
+  min-height: 220px;
+  padding: 24px 22px 20px;
+  border-radius: 20px;
+  color: #20322c;
   background:
-    linear-gradient(120deg, rgba(255, 255, 255, 0.08), transparent 36%),
-    linear-gradient(135deg, #222222, #121212);
-  box-shadow: 0 24px 42px rgba(0, 0, 0, 0.18);
+    linear-gradient(130deg, rgba(255, 255, 255, 0.92), rgba(255, 255, 255, 0.5) 42%, rgba(220, 246, 237, 0.66)),
+    linear-gradient(135deg, #e8fbf2, #eef4ff 62%, #fff5f8);
+  border: 1px solid rgba(255, 255, 255, 0.82);
+  box-shadow: 0 22px 42px rgba(81, 126, 118, 0.18);
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
@@ -3493,21 +3679,21 @@ textarea::placeholder {
   width: 54px;
   height: 42px;
   border-radius: 10px;
-  background: linear-gradient(135deg, #f3dc86, #cfa846);
-  box-shadow: inset 0 0 0 2px rgba(91, 66, 18, 0.16);
+  background: linear-gradient(135deg, rgba(104, 190, 163, 0.88), rgba(91, 159, 230, 0.82));
+  box-shadow: inset 0 0 0 2px rgba(255, 255, 255, 0.32);
 }
 
 .wallet-card > strong {
   align-self: start;
-  color: rgba(255, 255, 255, 0.58);
-  font-size: 22px;
-  letter-spacing: 4px;
+  color: rgba(32, 50, 44, 0.62);
+  font-size: 20px;
+  letter-spacing: 0;
 }
 
 .wallet-card > span {
   grid-column: 1 / -1;
   align-self: end;
-  color: rgba(255, 255, 255, 0.68);
+  color: rgba(32, 50, 44, 0.62);
   font-size: 15px;
 }
 
@@ -3532,9 +3718,9 @@ textarea::placeholder {
 }
 
 .wallet-card i {
-  color: rgba(255, 255, 255, 0.58);
+  color: rgba(32, 50, 44, 0.52);
   font-style: normal;
-  letter-spacing: 6px;
+  letter-spacing: 0;
 }
 
 .wallet-recharge-button {
@@ -3543,7 +3729,7 @@ textarea::placeholder {
   margin: 22px 0;
   border: 0;
   border-radius: 16px;
-  background: #050505;
+  background: linear-gradient(135deg, var(--green), var(--blue));
   color: #ffffff;
   box-shadow: 0 18px 30px rgba(72, 186, 151, 0.18);
   display: inline-flex;
@@ -3559,7 +3745,7 @@ textarea::placeholder {
   height: 24px;
   border-radius: 50%;
   background: #ffffff;
-  color: #050505;
+  color: var(--green-dark);
   display: grid;
   place-items: center;
 }
@@ -3597,7 +3783,7 @@ textarea::placeholder {
   width: 44px;
   height: 44px;
   border-radius: 12px;
-  background: #151515;
+  background: linear-gradient(135deg, rgba(104, 190, 163, 0.95), rgba(91, 159, 230, 0.92));
   color: #ffffff;
   display: grid;
   place-items: center;
@@ -3942,7 +4128,7 @@ textarea::placeholder {
   min-height: 76px;
   padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: 44px 44px minmax(0, 1fr) 58px 58px;
+  grid-template-columns: 42px minmax(0, 1fr) 56px 56px;
   gap: 6px;
   align-items: center;
   background: rgba(255, 255, 255, 0.96);
@@ -3950,10 +4136,9 @@ textarea::placeholder {
   backdrop-filter: blur(14px);
 }
 
-.composer-plus,
-.composer-bracket {
-  width: 44px;
-  height: 44px;
+.composer-plus {
+  width: 42px;
+  height: 42px;
   border: 0;
   border-radius: 50%;
   background: var(--surface-soft);
@@ -3962,21 +4147,41 @@ textarea::placeholder {
   font-weight: 700;
 }
 
-.composer-bracket {
+.chat-input-wrapper {
+  position: relative;
+  min-width: 0;
+}
+
+.chat-input-wrapper .chat-input {
+  width: 100%;
+  height: 44px;
+  padding-right: 48px;
   border-radius: 12px;
-  font-size: 15px;
+}
+
+.input-inside-bracket-btn {
+  position: absolute;
+  right: 8px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 34px;
+  height: 30px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(104, 190, 163, 0.13);
+  color: var(--green-dark);
+  font-size: 13px;
+  font-weight: 900;
   letter-spacing: 0;
 }
 
 #chatInput {
   height: 44px;
-  border-radius: 8px;
   background: #f4f7f5;
 }
 
 #groupChatInput {
   height: 44px;
-  border-radius: 8px;
   background: #f4f7f5;
 }
 
@@ -4141,7 +4346,7 @@ textarea::placeholder {
   min-height: 76px;
   padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr) 58px 58px;
+  grid-template-columns: minmax(0, 1fr) 56px 56px;
   gap: 6px;
   align-items: center;
   background: rgba(255, 255, 255, 0.96);
@@ -4151,30 +4356,32 @@ textarea::placeholder {
 
 #offlineInput {
   height: 44px;
-  border-radius: 8px;
   background: #fff7fa;
 }
 
 @media (max-width: 360px) {
   .chat-composer {
-    grid-template-columns: 40px 40px minmax(0, 1fr) 52px 52px;
+    grid-template-columns: 38px minmax(0, 1fr) 50px 50px;
     gap: 5px;
+    padding-left: 10px;
+    padding-right: 10px;
   }
 
   .offline-composer {
-    grid-template-columns: 40px minmax(0, 1fr) 52px 52px;
+    grid-template-columns: minmax(0, 1fr) 50px 50px;
     gap: 5px;
+    padding-left: 10px;
+    padding-right: 10px;
   }
 
-  .composer-plus,
-  .composer-bracket {
-    width: 40px;
-    height: 40px;
+  .composer-plus {
+    width: 38px;
+    height: 38px;
   }
 
   .send-button,
   .reply-button {
-    font-size: 13px;
+    font-size: 12px;
   }
 }
 

@@ -57,18 +57,11 @@
   var desktopApps = [
     { id: "wechat", name: "微信", icon: "微", className: "desktop-wechat", action: "wechat" },
     { id: "photo", name: "相册", icon: "相", className: "desktop-photo", action: "photo" },
-    { id: "notebook", name: "记事本", icon: "记", className: "desktop-note", action: "notebook" },
-    { id: "settings", name: "设置", icon: "设", className: "desktop-setting", action: "settings" },
     { id: "worldbook", name: "世界书", icon: "世", className: "desktop-worldbook", action: "worldbook" },
     { id: "diary", name: "日记", icon: "日", className: "desktop-diary", action: "diary" },
-    { id: "space", name: "角色空间", icon: "灵", className: "desktop-space", action: "space" },
-    { id: "backup", name: "备份", icon: "备", className: "desktop-backup", action: "backup" },
-    { id: "theme", name: "主题", icon: "题", className: "desktop-theme", action: "theme" },
-    { id: "thoughts", name: "心声", icon: "心", className: "desktop-thought", action: "thoughts" },
-    { id: "wallet", name: "钱包", icon: "¥", className: "desktop-wallet", action: "wallet" },
-    { id: "contacts", name: "联系人", icon: "录", className: "desktop-contacts", action: "contacts" },
-    { id: "emoji", name: "表情包图库", icon: "笑", className: "desktop-emoji", action: "emoji" },
-    { id: "me", name: "我的", icon: "我", className: "desktop-me", action: "me" }
+    { id: "space", name: "角色空间", icon: "屿", className: "desktop-space", action: "space" },
+    { id: "theme", name: "美化", icon: "美", className: "desktop-theme", action: "theme" },
+    { id: "settings", name: "设置", icon: "设", className: "desktop-setting", action: "settings" }
   ];
   var desktopPageSize = 10;
   var themePresets = [
@@ -225,11 +218,11 @@
     }
 
     dockHome.classList.toggle("active", pageId === "homeScreen" || pageId === "wechatScreen");
-    dockChat.classList.toggle("active", pageId === "wechatScreen" || pageId === "characterListScreen" || pageId === "chatScreen" || pageId === "groupListScreen" || pageId === "groupChatScreen" || pageId === "privateChatSettingsScreen" || pageId === "groupSettingsScreen" || pageId === "thoughtsScreen");
+    dockChat.classList.toggle("active", pageId === "characterListScreen" || pageId === "chatScreen" || pageId === "groupListScreen" || pageId === "groupChatScreen" || pageId === "privateChatSettingsScreen" || pageId === "groupSettingsScreen" || pageId === "characterSpaceScreen" || pageId === "diaryScreen");
     if (dockTheme) {
-      dockTheme.classList.toggle("active", pageId === "themeScreen");
+      dockTheme.classList.toggle("active", pageId === "photoScreen");
     }
-    dockSettings.classList.toggle("active", pageId === "settingsScreen" || pageId === "worldBookScreen" || pageId === "diaryScreen" || pageId === "characterSpaceScreen" || pageId === "walletScreen" || pageId === "walletBillScreen" || pageId === "familyCardScreen");
+    dockSettings.classList.toggle("active", pageId === "settingsScreen" || pageId === "worldBookScreen" || pageId === "themeScreen" || pageId === "walletScreen" || pageId === "walletBillScreen" || pageId === "familyCardScreen");
   }
 
   function refreshHomeSummary() {
@@ -273,9 +266,11 @@
     }).join("");
     viewport.style.transform = "translateX(-" + (currentDesktopPage * 100) + "%)";
 
-    dots.innerHTML = pages.map(function (pageApps, pageIndex) {
+    viewport.classList.toggle("single-page", pages.length <= 1);
+    dots.classList.toggle("hidden", pages.length <= 1);
+    dots.innerHTML = pages.length > 1 ? pages.map(function (pageApps, pageIndex) {
       return '<button type="button" data-desktop-dot="' + pageIndex + '" class="' + (pageIndex === currentDesktopPage ? "active" : "") + '" aria-label="第 ' + (pageIndex + 1) + ' 页"></button>';
-    }).join("");
+    }).join("") : "";
 
     bindDesktopPageActions(viewport, dots);
   }
@@ -413,9 +408,25 @@
     }
   }
 
+  function normalizeWechatTab(tab) {
+    var nextTab = String(tab || "wechat");
+
+    if (nextTab === "discover") {
+      return "moments";
+    }
+
+    if (nextTab === "spirit") {
+      return "wechat";
+    }
+
+    return ["wechat", "moments", "me"].indexOf(nextTab) === -1 ? "wechat" : nextTab;
+  }
+
   function setWechatTab(tab) {
+    var nextTab = normalizeWechatTab(tab);
+
     if (window.AppStorage.updateWechatState) {
-      window.AppStorage.updateWechatState({ tab: tab });
+      window.AppStorage.updateWechatState({ tab: nextTab });
     }
     renderWechatScreen();
   }
@@ -423,16 +434,20 @@
   function renderWechatScreen() {
     var content = getElement("wechatTabContent");
     var state = window.AppStorage.getWechatState ? window.AppStorage.getWechatState() : { tab: "wechat" };
-    var tab = state.tab || "wechat";
+    var tab = normalizeWechatTab(state.tab || "wechat");
 
     if (!content) {
       return;
     }
 
+    if (state.tab !== tab && window.AppStorage.updateWechatState) {
+      window.AppStorage.updateWechatState({ tab: tab });
+    }
+
     renderWechatTabbar(tab);
 
-    if (tab === "discover") {
-      renderWechatDiscoverTab(content);
+    if (tab === "moments") {
+      renderWechatMomentsTab(content);
       return;
     }
 
@@ -441,17 +456,14 @@
       return;
     }
 
-    if (tab === "spirit") {
-      renderWechatSpiritTab(content);
-      return;
-    }
-
     renderWechatChatsTab(content);
   }
 
   function renderWechatTabbar(activeTab) {
+    var tab = normalizeWechatTab(activeTab);
+
     Array.prototype.forEach.call(document.querySelectorAll("[data-wechat-tab]"), function (button) {
-      button.classList.toggle("active", button.dataset.wechatTab === activeTab);
+      button.classList.toggle("active", button.dataset.wechatTab === tab);
     });
   }
 
@@ -547,6 +559,99 @@
     }
   }
 
+  function renderWechatMomentsTab(content) {
+    var profile = window.AppStorage.getUserProfile();
+    var moments = window.AppStorage.getMoments ? window.AppStorage.getMoments() : [];
+
+    content.innerHTML = [
+      '<section class="moments-page">',
+      '  <form id="momentsComposer" class="moments-composer" autocomplete="off">',
+      '    <div class="moments-composer-head">',
+      renderProfileAvatar(profile),
+      '      <span><strong>' + escapeHtml(profile.name || "林澈") + '</strong><em>发布一条只属于心屿的近况</em></span>',
+      "    </div>",
+      '    <textarea id="momentsInput" maxlength="280" placeholder="写点此刻想留下的话"></textarea>',
+      '    <div class="moments-composer-actions"><span id="momentsPublishTip"></span><button type="submit">发布</button></div>',
+      "  </form>",
+      '  <section class="moments-feed" aria-label="朋友圈列表">',
+      moments.length ? moments.map(renderMomentItem).join("") : renderEmptyMoments(),
+      '    <article class="moment-card moment-placeholder">',
+      '      <span class="moment-avatar placeholder-avatar" aria-hidden="true">屿</span>',
+      '      <div class="moment-main"><strong>角色动态</strong><p>角色自动发布朋友圈的位置已经留好，之后可以接入角色日常和智能互评。</p><div class="moment-actions"><button type="button" disabled>赞</button><button type="button" disabled>评论</button></div></div>',
+      "    </article>",
+      "  </section>",
+      "</section>"
+    ].join("");
+
+    bindMomentsActions(content);
+  }
+
+  function renderEmptyMoments() {
+    return '<div class="soft-empty moments-empty">还没有朋友圈，先发一条文字动态吧。</div>';
+  }
+
+  function renderMomentItem(moment) {
+    var source = moment || {};
+    var profile = window.AppStorage.getUserProfile();
+    var character = source.authorType === "character" && source.authorId ? getCharacterById(source.authorId) : null;
+    var author = character || {
+      name: source.authorName || profile.name || "林澈",
+      avatar: source.authorAvatar || profile.avatar || ""
+    };
+
+    return [
+      '<article class="moment-card" data-moment-id="' + escapeHtml(source.id) + '">',
+      renderSmallAvatar(author, "moment-avatar"),
+      '  <div class="moment-main">',
+      '    <div class="moment-meta"><strong>' + escapeHtml(author.name || "林澈") + '</strong><time>' + escapeHtml(formatDateTime(source.createdAt)) + "</time></div>",
+      '    <p>' + escapeHtml(source.content || "") + "</p>",
+      '    <div class="moment-actions"><button type="button" data-moment-action="like">赞' + (source.likes && source.likes.length ? " " + source.likes.length : "") + '</button><button type="button" data-moment-action="comment">评论</button></div>',
+      source.comments && source.comments.length ? '<div class="moment-comments">' + source.comments.slice(0, 3).map(function (comment) {
+        return '<span><strong>' + escapeHtml(comment.authorName || "我") + '：</strong>' + escapeHtml(comment.content || "") + "</span>";
+      }).join("") + "</div>" : "",
+      "  </div>",
+      "</article>"
+    ].join("");
+  }
+
+  function bindMomentsActions(content) {
+    var form = content.querySelector("#momentsComposer");
+    var input = content.querySelector("#momentsInput");
+    var tip = content.querySelector("#momentsPublishTip");
+
+    if (form && input) {
+      form.addEventListener("submit", function (event) {
+        var text = input.value.trim();
+        event.preventDefault();
+        if (!text) {
+          if (tip) {
+            tip.textContent = "先写一点内容";
+          }
+          return;
+        }
+
+        if (window.AppStorage.addMoment) {
+          window.AppStorage.addMoment({
+            authorType: "user",
+            content: text
+          });
+        }
+        input.value = "";
+        renderWechatMomentsTab(content);
+      });
+    }
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-moment-action]"), function (button) {
+      button.addEventListener("click", function () {
+        if (button.dataset.momentAction === "like") {
+          window.alert("点赞占位已保留，后续可接入角色互动。");
+          return;
+        }
+        window.alert("评论占位已保留，后续可接入角色回复。");
+      });
+    });
+  }
+
   function renderWechatDiscoverTab(content) {
     content.innerHTML = [
       '<section class="discover-grid">',
@@ -580,26 +685,24 @@
     var profile = window.AppStorage.getUserProfile();
     var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { balance: 0, ledger: [], familyCards: [] };
     var listItems = [
-      ["收藏", "bookmark", "常用片段与收藏内容"],
       ["联系人分组", "layers", "管理角色关系"],
       ["日记本", "diary", "我的日记和角色日记"],
       ["多重人设", "persona", "聊天里的我"],
-      ["表情包图库", "emoji", "导入与发送表情"],
-      ["一起听歌", "music", "音乐卡片"],
-      ["书城", "book", "故事与设定"],
-      ["选择", "choice", "选择困难？让朋友帮你决定"],
-      ["更多", "more", "更多本地工具"]
+      ["表情包图库", "emoji", "导入与发送表情"]
     ];
 
     content.innerHTML = [
       '<section class="me-page">',
+      '  <div class="me-section-label">账户</div>',
       '  <button class="me-profile-card" type="button" data-me-action="profile">',
       renderProfileAvatar(profile),
       '    <span class="me-profile-main"><strong>' + escapeHtml(profile.name || "林澈") + "</strong><em>微信号：" + escapeHtml(profile.wxid) + "</em></span>",
       '    <span class="me-arrow">›</span>',
       "  </button>",
       '  <button class="me-wallet-entry" type="button" data-me-action="wallet"><span>▣</span><strong>钱包</strong><em>余额 ¥' + formatMoney(wallet.balance) + "</em><i>›</i></button>",
+      '  <div class="me-section-label">互动</div>',
       '  <label class="me-switch-card"><span>朋友圈智能互评</span><input id="momentsAutoReviewToggle" type="checkbox"' + (profile.momentsAutoReview ? " checked" : "") + "><i></i></label>",
+      '  <div class="me-section-label">工具</div>',
       '  <section class="me-list-card">',
       listItems.map(function (item) {
         return '<button type="button" data-me-action="' + item[1] + '"><span>' + escapeHtml(item[0].slice(0, 1)) + '</span><strong>' + escapeHtml(item[0]) + '</strong><em>' + escapeHtml(item[2]) + '</em><i>›</i></button>';
@@ -667,6 +770,11 @@
       return;
     }
 
+    if (action === "layers") {
+      setActivePage("characterListScreen");
+      return;
+    }
+
     if (action === "emoji") {
       window.alert("表情包图库可在聊天输入栏的表情面板中导入使用。");
       return;
@@ -729,6 +837,7 @@
         fallback: character.name ? character.name.slice(0, 1) : "心",
         preview: last ? formatRecentPreview(last) : "还没有聊天记录",
         time: last ? last.createdAt : 0,
+        unread: window.AppStorage.getUnreadThoughtCount ? window.AppStorage.getUnreadThoughtCount([character.id], character.id) : 0,
         pinned: Boolean(chatSettings.pinned)
       };
     });
@@ -744,6 +853,7 @@
         memberIds: group.memberIds || [],
         preview: last ? formatRecentPreview(last) : "还没有群聊消息",
         time: last ? last.createdAt : 0,
+        unread: window.AppStorage.getUnreadThoughtCount ? window.AppStorage.getUnreadThoughtCount(group.memberIds || [], group.id) : 0,
         pinned: Boolean(groupSettings.pinned)
       };
     });
@@ -904,6 +1014,7 @@
       item.originalTitle && item.originalTitle !== item.title ? '      <small>原名：' + escapeHtml(item.originalTitle) + "</small>" : "",
       "      <em>" + escapeHtml(item.preview) + "</em>",
       "    </span>",
+      item.unread ? '    <span class="recent-unread-badge">' + escapeHtml(item.unread > 99 ? "99+" : item.unread) + "</span>" : "",
       "  </button>",
       '  <div class="recent-actions">',
       '    <button type="button" data-recent-action="' + (item.pinned ? "unpin" : "pin") + '" data-recent-type="' + escapeHtml(item.type) + '" data-recent-id="' + escapeHtml(item.id) + '" data-recent-time="' + escapeHtml(item.time) + '">' + (item.pinned ? "取消置顶" : "置顶") + "</button>",
@@ -958,7 +1069,7 @@
       setActivePage("characterListScreen");
     });
     addClick("dockTheme", function () {
-      setActivePage("themeScreen");
+      setActivePage("photoScreen");
     });
     addClick("dockSettings", function () {
       setActivePage("settingsScreen");
@@ -1048,7 +1159,7 @@
     });
 
     addClick("privateBracketBtn", function () {
-      insertBracketText("chatInput");
+      insertBracketIntoInput(getElement("chatInput"));
     });
 
     Array.prototype.forEach.call(document.querySelectorAll("#chatToolPanel [data-message-type]"), function (button) {
@@ -1089,7 +1200,7 @@
     });
 
     addClick("groupBracketBtn", function () {
-      insertBracketText("groupChatInput");
+      insertBracketIntoInput(getElement("groupChatInput"));
     });
 
     Array.prototype.forEach.call(document.querySelectorAll("#groupToolPanel [data-message-type]"), function (button) {
@@ -1113,7 +1224,7 @@
     });
 
     addClick("offlineBracketBtn", function () {
-      insertBracketText("offlineInput");
+      insertBracketIntoInput(getElement("offlineInput"));
     });
 
     getElement("settingsForm").addEventListener("submit", function (event) {
@@ -1140,8 +1251,8 @@
     });
   }
 
-  function insertBracketText(inputId) {
-    var input = getElement(inputId);
+  function insertBracketIntoInput(inputElement) {
+    var input = inputElement;
     var start;
     var end;
     var before;
@@ -1199,7 +1310,6 @@
 
     getElement("chatEditCharacterBtn").addEventListener("click", window.CharacterManager.editActiveCharacter);
     getElement("chatSettingsBtn").addEventListener("click", window.CharacterManager.openActivePrivateSettings);
-    getElement("chatThoughtsBtn").addEventListener("click", window.CharacterManager.openActiveCharacterThoughtsDrawer);
     getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
     getElement("chatOfflineBtn").addEventListener("click", window.CharacterManager.openActiveCharacterOffline);
@@ -1230,7 +1340,6 @@
     }
 
     getElement("groupSettingsBtn").addEventListener("click", window.GroupManager.openActiveGroupSettings);
-    getElement("groupThoughtsBtn").addEventListener("click", window.GroupManager.openActiveGroupThoughtsDrawer);
     getElement("groupSearchBtn").addEventListener("click", window.GroupManager.openActiveGroupSearch);
     getElement("groupBatchMessageSelectBtn").addEventListener("click", window.GroupManager.openGroupMessageSelectionMode);
     getElement("groupOfflineBtn").addEventListener("click", window.GroupManager.openActiveGroupOffline);
@@ -3563,6 +3672,10 @@
     }
   }
 
+  function updateThoughtHeartBadge(buttonId, count, active) {
+    updateThoughtButton(buttonId, count, active);
+  }
+
   function updatePrivateThoughtsButton(characterId) {
     var origin = characterId ? "private:" + characterId : "";
     var count = characterId ? getUnreadThoughtCount([characterId], characterId) : 0;
@@ -4181,6 +4294,7 @@
     closeThoughtsDrawer: closeThoughtsDrawer,
     renderThoughtsDrawer: renderThoughtsDrawer,
     markThoughtsRead: markThoughtsRead,
+    updateThoughtHeartBadge: updateThoughtHeartBadge,
     openThoughtsDrawerForCharacter: openThoughtsDrawerForCharacter,
     openThoughtsDrawerForGroup: openThoughtsDrawerForGroup,
     openThoughtsDrawerForOfflineSession: openThoughtsDrawerForOfflineSession,
@@ -4188,6 +4302,7 @@
     updateGroupThoughtsButton: updateGroupThoughtsButton,
     updateOfflineThoughtsButton: updateOfflineThoughtsButton,
     updateThoughtHeartButtons: updateThoughtHeartButtons,
+    insertBracketIntoInput: insertBracketIntoInput,
     openCharacterSpaceScreen: openCharacterSpaceScreen,
     openDiaryScreen: openDiaryScreen,
     renderWorldBookScreen: renderWorldBookScreen,

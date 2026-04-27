@@ -30,7 +30,7 @@
         <div class="desktop-wallpaper">
           <div class="desktop-widget">
             <span id="homeCharacterCount">0 个角色 · 0 个群聊</span>
-            <strong>心屿</strong>
+            <strong>心屿空间</strong>
             <small id="homeCharacterSummary">还没有角色，先创建你的第一个角色。</small>
           </div>
 
@@ -38,7 +38,7 @@
             <div class="desktop-record" aria-hidden="true"><span></span></div>
             <div class="desktop-music-copy">
               <strong>时光不老，我们不散</strong>
-              <span>一起听歌 · 05:20 / 13:14</span>
+              <span>心屿电台 · 05:20 / 13:14</span>
               <div class="desktop-progress"><i></i></div>
             </div>
           </section>
@@ -53,12 +53,12 @@
             <span>微信</span>
           </button>
           <button id="dockChat" class="dock-item" type="button">
-            <span class="dock-icon" aria-hidden="true">聊</span>
-            <span>聊天</span>
+            <span class="dock-icon" aria-hidden="true">屿</span>
+            <span>故事</span>
           </button>
           <button id="dockTheme" class="dock-item" type="button">
-            <span class="dock-icon" aria-hidden="true">美</span>
-            <span>美化</span>
+            <span class="dock-icon" aria-hidden="true">相</span>
+            <span>相册</span>
           </button>
           <button id="dockSettings" class="dock-item" type="button">
             <span class="dock-icon" aria-hidden="true">设</span>
@@ -81,17 +81,13 @@
             <span aria-hidden="true">●</span>
             <em>微信</em>
           </button>
-          <button type="button" data-wechat-tab="discover">
-            <span aria-hidden="true">◆</span>
-            <em>发现</em>
+          <button type="button" data-wechat-tab="moments">
+            <span aria-hidden="true">◎</span>
+            <em>朋友圈</em>
           </button>
           <button type="button" data-wechat-tab="me">
             <span aria-hidden="true">●</span>
             <em>我</em>
-          </button>
-          <button type="button" data-wechat-tab="spirit">
-            <span aria-hidden="true">✦</span>
-            <em>精灵</em>
           </button>
         </nav>
       </section>
@@ -205,7 +201,6 @@
         <div id="chatActionMenu" class="action-menu chat-action-menu hidden" aria-label="聊天操作菜单">
           <button id="chatEditCharacterBtn" type="button">编辑角色</button>
           <button id="chatSettingsBtn" type="button">聊天设置</button>
-          <button id="chatThoughtsBtn" type="button">查看心声</button>
           <button id="chatSearchBtn" type="button">搜索聊天记录</button>
           <button id="chatBatchSelectBtn" type="button">多选消息</button>
           <button id="chatOfflineBtn" type="button">进入线下模式</button>
@@ -236,8 +231,10 @@
 
         <form id="chatComposer" class="chat-composer" autocomplete="off">
           <button id="chatPlusBtn" class="composer-plus" type="button" aria-label="添加">+</button>
-          <button id="privateBracketBtn" class="composer-bracket" type="button" aria-label="插入动作括号">（）</button>
-          <input id="chatInput" type="text" placeholder="输入消息" maxlength="500">
+          <div class="chat-input-wrapper">
+            <input id="chatInput" class="chat-input" type="text" placeholder="输入消息" maxlength="500">
+            <button id="privateBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">（）</button>
+          </div>
           <button class="send-button" type="submit">发送</button>
           <button id="replyButton" class="reply-button" type="button">回复</button>
         </form>
@@ -295,7 +292,6 @@
 
         <div id="groupChatActionMenu" class="action-menu chat-action-menu hidden" aria-label="群聊操作菜单">
           <button id="groupSettingsBtn" type="button">群聊设置</button>
-          <button id="groupThoughtsBtn" type="button">查看成员心声</button>
           <button id="groupSearchBtn" type="button">搜索聊天记录</button>
           <button id="groupBatchMessageSelectBtn" type="button">多选消息</button>
           <button id="groupOfflineBtn" type="button">进入线下模式</button>
@@ -323,8 +319,10 @@
 
         <form id="groupChatComposer" class="chat-composer" autocomplete="off">
           <button id="groupPlusBtn" class="composer-plus" type="button" aria-label="添加">+</button>
-          <button id="groupBracketBtn" class="composer-bracket" type="button" aria-label="插入动作括号">（）</button>
-          <input id="groupChatInput" type="text" placeholder="输入群聊消息" maxlength="500">
+          <div class="chat-input-wrapper">
+            <input id="groupChatInput" class="chat-input" type="text" placeholder="输入群聊消息" maxlength="500">
+            <button id="groupBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">（）</button>
+          </div>
           <button class="send-button" type="submit">发送</button>
           <button id="groupReplyButton" class="reply-button" type="button">回复</button>
         </form>
@@ -346,17 +344,19 @@
         <div id="offlineMessages" class="screen-content offline-messages"></div>
 
         <form id="offlineComposer" class="offline-composer" autocomplete="off">
-          <button id="offlineBracketBtn" class="composer-bracket" type="button" aria-label="插入动作括号">（）</button>
-          <input id="offlineInput" type="text" placeholder="说点什么，或描述你的动作..." maxlength="500">
+          <div class="chat-input-wrapper offline-input-wrapper">
+            <input id="offlineInput" class="chat-input" type="text" placeholder="说点什么，或描述你的动作..." maxlength="500">
+            <button id="offlineBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">（）</button>
+          </div>
           <button id="offlineSendBtn" class="send-button" type="submit">发送</button>
           <button id="offlineAdvanceBtn" class="reply-button" type="button">推进</button>
         </form>
       </section>
 
-      <section id="themeScreen" class="screen" aria-label="主题">
+      <section id="themeScreen" class="screen" aria-label="美化">
         <header class="nav-bar">
           <button id="themeBackBtn" class="nav-button" type="button" aria-label="返回首页">‹</button>
-          <h2>主题</h2>
+          <h2>美化</h2>
           <span class="nav-spacer" aria-hidden="true"></span>
         </header>
         <div id="themeContent" class="screen-content theme-content"></div>
@@ -451,7 +451,7 @@
       <section id="walletScreen" class="screen" aria-label="钱包">
         <header class="nav-bar">
           <button id="walletBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
-          <h2>钱包</h2>
+          <h2>心屿钱包</h2>
           <span class="nav-spacer" aria-hidden="true"></span>
         </header>
         <div id="walletContent" class="screen-content wallet-content"></div>

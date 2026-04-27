@@ -13,6 +13,7 @@
     userProfile: "myAiApp.userProfile",
     desktopState: "myAiApp.desktopState",
     wechatState: "myAiApp.wechatState",
+    moments: "myAiApp.moments",
     wallet: "myAiApp.wallet",
     recentHidden: "myAiApp.recentHidden",
     theme: "myAiApp.theme",
@@ -696,6 +697,30 @@
     return getWechatState();
   }
 
+  function getMoments() {
+    return normalizeMoments(parseJson(localStorage.getItem(STORAGE_KEYS.moments), []));
+  }
+
+  function saveMoments(moments) {
+    localStorage.setItem(STORAGE_KEYS.moments, JSON.stringify(normalizeMoments(moments || [])));
+  }
+
+  function addMoment(moment) {
+    var moments = getMoments();
+    var profile = getUserProfile();
+    var next = normalizeMoment(Object.assign({
+      id: createId("moment"),
+      authorType: "user",
+      authorName: profile.name,
+      authorAvatar: profile.avatar,
+      createdAt: Date.now()
+    }, moment || {}), 0);
+
+    moments.unshift(next);
+    saveMoments(moments.slice(0, 200));
+    return next;
+  }
+
   function getRecentHidden() {
     var hidden = parseJson(localStorage.getItem(STORAGE_KEYS.recentHidden), {});
     return hidden && typeof hidden === "object" && !Array.isArray(hidden) ? hidden : {};
@@ -1010,6 +1035,7 @@
       userPersonas: getUserProfile(),
       desktopState: getDesktopState(),
       wechatState: getWechatState(),
+      moments: getMoments(),
       wallet: getWallet(),
       themes: getTheme(),
       photos: getPhotos(),
@@ -1041,6 +1067,7 @@
     saveUserProfile(normalized.userProfile);
     saveDesktopState(normalized.desktopState);
     saveWechatState(normalized.wechatState);
+    saveMoments(normalized.moments);
     saveWallet(normalized.wallet);
     saveTheme(normalized.themes);
     savePhotos(normalized.photos);
@@ -1084,6 +1111,7 @@
       userProfile: normalizeUserProfile(data.userProfile || data.userPersonas || {}),
       desktopState: normalizeDesktopState(data.desktopState || data.desktop || {}),
       wechatState: normalizeWechatState(data.wechatState || data.wechat || {}),
+      moments: normalizeMoments(data.moments || data.momentPosts || []),
       wallet: normalizeWallet(data.wallet || {}),
       themes: normalizeTheme(data.themes || data.theme || {}),
       photos: normalizePhotos(data.photos || []),
@@ -1398,11 +1426,54 @@
   function normalizeWechatState(state) {
     var source = state && typeof state === "object" && !Array.isArray(state) ? state : {};
     var tab = String(source.tab || "wechat");
-    if (["wechat", "discover", "me", "spirit"].indexOf(tab) === -1) {
+
+    if (tab === "discover") {
+      tab = "moments";
+    }
+
+    if (tab === "spirit") {
+      tab = "wechat";
+    }
+
+    if (["wechat", "moments", "me"].indexOf(tab) === -1) {
       tab = "wechat";
     }
     return {
       tab: tab
+    };
+  }
+
+  function normalizeMoments(moments) {
+    return Array.isArray(moments) ? moments.map(normalizeMoment).filter(function (moment) {
+      return moment.content;
+    }) : [];
+  }
+
+  function normalizeMoment(moment, index) {
+    var source = moment && typeof moment === "object" ? moment : { content: moment };
+    var authorType = source.authorType === "character" ? "character" : "user";
+    var now = Date.now();
+
+    return {
+      id: String(source.id || createId("moment") + "_" + (index || 0)),
+      authorType: authorType,
+      authorId: String(source.authorId || ""),
+      authorName: String(source.authorName || ""),
+      authorAvatar: String(source.authorAvatar || ""),
+      content: String(source.content || "").trim(),
+      likes: Array.isArray(source.likes) ? source.likes.map(String) : [],
+      comments: Array.isArray(source.comments) ? source.comments.map(function (comment, commentIndex) {
+        var item = comment && typeof comment === "object" ? comment : { content: comment };
+        return {
+          id: String(item.id || createId("momentComment") + "_" + commentIndex),
+          authorName: String(item.authorName || "我"),
+          content: String(item.content || "").trim(),
+          createdAt: Number(item.createdAt) || now
+        };
+      }).filter(function (comment) {
+        return comment.content;
+      }) : [],
+      createdAt: Number(source.createdAt) || now
     };
   }
 
@@ -1532,6 +1603,7 @@
     localStorage.removeItem(STORAGE_KEYS.userProfile);
     localStorage.removeItem(STORAGE_KEYS.desktopState);
     localStorage.removeItem(STORAGE_KEYS.wechatState);
+    localStorage.removeItem(STORAGE_KEYS.moments);
     localStorage.removeItem(STORAGE_KEYS.wallet);
     localStorage.removeItem(STORAGE_KEYS.recentHidden);
     localStorage.removeItem(STORAGE_KEYS.theme);
@@ -1619,6 +1691,9 @@
     getWechatState: getWechatState,
     saveWechatState: saveWechatState,
     updateWechatState: updateWechatState,
+    getMoments: getMoments,
+    saveMoments: saveMoments,
+    addMoment: addMoment,
     getRecentHidden: getRecentHidden,
     hideRecentChat: hideRecentChat,
     getRecentHiddenAt: getRecentHiddenAt,
