@@ -367,9 +367,11 @@
   }
 
   function getMatchedWorldBookEntries(contextText, scope, targetId) {
-    var text = String(contextText || "").toLowerCase();
+    var rawText = String(contextText || "");
+    var text = rawText.toLowerCase();
     var target = String(targetId || "");
     var matched = [];
+    var contextTokens = extractWorldBookTokens(rawText);
 
     getWorldBooks().forEach(function (book) {
       if (!book.enabled || !isWorldBookInScope(book, scope, target)) {
@@ -378,23 +380,66 @@
 
       (book.entries || []).forEach(function (entry) {
         var keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
-        var hasKeyword = keywords.some(function (keyword) {
-          return keyword && text.indexOf(String(keyword).toLowerCase()) !== -1;
-        });
+        var keywordScore = keywords.reduce(function (score, keyword) {
+          var value = String(keyword || "").trim().toLowerCase();
 
-        if (entry.enabled && keywords.length && hasKeyword) {
+          if (!value) {
+            return score;
+          }
+
+          if (text.indexOf(value) !== -1) {
+            return score + 8 + Math.min(6, value.length);
+          }
+
+          if (contextTokens.indexOf(value) !== -1) {
+            return score + 4;
+          }
+
+          return score;
+        }, 0);
+        var titleScore = entry.title && text.indexOf(String(entry.title).toLowerCase()) !== -1 ? 5 : 0;
+        var contentScore = contextTokens.reduce(function (score, token) {
+          if (!token || token.length < 2) {
+            return score;
+          }
+          return String(entry.content || "").toLowerCase().indexOf(token) !== -1 ? score + 1 : score;
+        }, 0);
+        var score = keywordScore + titleScore + Math.min(contentScore, 6) + (Number(entry.priority) || 0);
+
+        if (entry.enabled && score > 0) {
           matched.push(Object.assign({}, entry, {
             bookName: book.name,
             bookDescription: book.description,
-            bookScope: book.scope
+            bookScope: book.scope,
+            matchScore: score
           }));
         }
       });
     });
 
     return matched.sort(function (a, b) {
+      var scoreGap = (Number(b.matchScore) || 0) - (Number(a.matchScore) || 0);
+
+      if (scoreGap) {
+        return scoreGap;
+      }
+
       return (Number(b.priority) || 0) - (Number(a.priority) || 0);
     }).slice(0, 10);
+  }
+
+  function extractWorldBookTokens(text) {
+    var value = String(text || "").toLowerCase();
+    var tokens = value.match(/[\u4e00-\u9fa5]{2,}|[a-z0-9_]{2,}/g) || [];
+    var seen = {};
+
+    return tokens.filter(function (token) {
+      if (seen[token]) {
+        return false;
+      }
+      seen[token] = true;
+      return true;
+    }).slice(0, 80);
   }
 
   function isWorldBookInScope(book, scope, targetId) {
@@ -446,6 +491,8 @@
       mood: String(source.mood || ""),
       visibleSummary: String(source.visibleSummary || source.summary || ""),
       relatedMessageIds: Array.isArray(source.relatedMessageIds) ? source.relatedMessageIds.map(String) : [],
+      readAt: source.readAt !== undefined ? Number(source.readAt) || 0 : 0,
+      unread: source.unread === false ? false : true,
       createdAt: Number(source.createdAt) || Date.now()
     });
     saveCharacterThoughts(characterId, thoughts.slice(0, 300));
@@ -466,6 +513,75 @@
     saveCharacterThoughts(characterId, getCharacterThoughts(characterId).filter(function (thought) {
       return thought.id !== thoughtId;
     }));
+  }
+
+  function isThoughtUnread(thought) {
+    if (!thought) {
+      return false;
+    }
+
+    if (thought.unread === true) {
+      return true;
+    }
+
+    if (thought.unread === false) {
+      return false;
+    }
+
+    if (Object.prototype.hasOwnProperty.call(thought, "readAt")) {
+      return !Number(thought.readAt);
+    }
+
+    return false;
+  }
+
+  function getUnreadThoughtCount(characterIds, chatId) {
+    var ids = Array.isArray(characterIds) ? characterIds : [characterIds];
+    var targetChatId = String(chatId || "");
+    var count = 0;
+
+    ids.filter(Boolean).forEach(function (characterId) {
+      getCharacterThoughts(characterId).forEach(function (thought) {
+        if (targetChatId && String(thought.chatId || "") !== targetChatId) {
+          return;
+        }
+
+        if (isThoughtUnread(thought)) {
+          count += 1;
+        }
+      });
+    });
+
+    return count;
+  }
+
+  function markThoughtsRead(characterIds, chatId) {
+    var ids = Array.isArray(characterIds) ? characterIds : [characterIds];
+    var targetChatId = String(chatId || "");
+    var now = Date.now();
+
+    ids.filter(Boolean).forEach(function (characterId) {
+      var changed = false;
+      var thoughts = getCharacterThoughts(characterId).map(function (thought) {
+        if (targetChatId && String(thought.chatId || "") !== targetChatId) {
+          return thought;
+        }
+
+        if (!isThoughtUnread(thought)) {
+          return thought;
+        }
+
+        changed = true;
+        return Object.assign({}, thought, {
+          readAt: now,
+          unread: false
+        });
+      });
+
+      if (changed) {
+        saveCharacterThoughts(characterId, thoughts);
+      }
+    });
   }
 
   function getDiaries() {
@@ -1224,6 +1340,8 @@
       mood: String(source.mood || ""),
       visibleSummary: String(source.visibleSummary || source.summary || ""),
       relatedMessageIds: Array.isArray(source.relatedMessageIds) ? source.relatedMessageIds.map(String) : [],
+      readAt: source.readAt !== undefined ? Number(source.readAt) || 0 : (source.unread ? 0 : Number(source.createdAt) || Date.now()),
+      unread: source.unread === true && !Number(source.readAt),
       createdAt: Number(source.createdAt) || Date.now()
     };
   }
@@ -1482,6 +1600,8 @@
     saveCharacterThoughts: saveCharacterThoughts,
     addCharacterThought: addCharacterThought,
     getRecentThoughts: getRecentThoughts,
+    getUnreadThoughtCount: getUnreadThoughtCount,
+    markThoughtsRead: markThoughtsRead,
     clearCharacterThoughts: clearCharacterThoughts,
     deleteCharacterThought: deleteCharacterThought,
     getDiaries: getDiaries,

@@ -41,6 +41,14 @@
     sourceFilter: "all",
     moodFilter: "all"
   };
+  var thoughtsDrawerState = {
+    title: "心声",
+    characterIds: [],
+    chatId: "",
+    characterFilter: "all",
+    open: false,
+    origin: ""
+  };
   var noteSearchKeyword = "";
   var currentThemeId = "default";
   var currentDesktopPage = 0;
@@ -718,7 +726,7 @@
         title: chatSettings.remarkName || character.name,
         originalTitle: character.name,
         avatar: character.avatar,
-        fallback: character.name ? character.name.slice(0, 1) : "AI",
+        fallback: character.name ? character.name.slice(0, 1) : "心",
         preview: last ? formatRecentPreview(last) : "还没有聊天记录",
         time: last ? last.createdAt : 0,
         pinned: Boolean(chatSettings.pinned)
@@ -910,7 +918,7 @@
       return '<img class="recent-chat-avatar" src="' + escapeHtml(item.avatar) + '" alt="">';
     }
 
-    return '<span class="recent-chat-avatar" aria-hidden="true">' + escapeHtml(item.fallback || "AI") + "</span>";
+    return '<span class="recent-chat-avatar" aria-hidden="true">' + escapeHtml(item.fallback || "心") + "</span>";
   }
 
   function renderRecentGroupAvatar(memberIds) {
@@ -927,7 +935,7 @@
           return '<img src="' + escapeHtml(character.avatar) + '" alt="">';
         }
 
-        return '<i>' + escapeHtml(character.name ? character.name.slice(0, 1) : "AI") + "</i>";
+        return '<i>' + escapeHtml(character.name ? character.name.slice(0, 1) : "心") + "</i>";
       }).join(""),
       "</span>"
     ].join("");
@@ -1039,6 +1047,10 @@
       window.CharacterManager.toggleToolPanel();
     });
 
+    addClick("privateBracketBtn", function () {
+      insertBracketText("chatInput");
+    });
+
     Array.prototype.forEach.call(document.querySelectorAll("#chatToolPanel [data-message-type]"), function (button) {
       button.addEventListener("click", function (event) {
         event.stopPropagation();
@@ -1076,6 +1088,10 @@
       window.GroupManager.toggleToolPanel();
     });
 
+    addClick("groupBracketBtn", function () {
+      insertBracketText("groupChatInput");
+    });
+
     Array.prototype.forEach.call(document.querySelectorAll("#groupToolPanel [data-message-type]"), function (button) {
       button.addEventListener("click", function (event) {
         event.stopPropagation();
@@ -1094,6 +1110,10 @@
 
     getElement("offlineAdvanceBtn").addEventListener("click", function () {
       window.OfflineManager.advanceOffline();
+    });
+
+    addClick("offlineBracketBtn", function () {
+      insertBracketText("offlineInput");
     });
 
     getElement("settingsForm").addEventListener("submit", function (event) {
@@ -1120,12 +1140,55 @@
     });
   }
 
+  function insertBracketText(inputId) {
+    var input = getElement(inputId);
+    var start;
+    var end;
+    var before;
+    var selected;
+    var after;
+    var nextValue;
+    var nextCursor;
+    var maxLength;
+
+    if (!input) {
+      return;
+    }
+
+    input.focus();
+    start = input.selectionStart === null || input.selectionStart === undefined ? input.value.length : input.selectionStart;
+    end = input.selectionEnd === null || input.selectionEnd === undefined ? start : input.selectionEnd;
+    before = input.value.slice(0, start);
+    selected = input.value.slice(start, end);
+    after = input.value.slice(end);
+    nextValue = selected ? before + "（" + selected + "）" + after : before + "（）" + after;
+    maxLength = Number(input.getAttribute("maxlength")) || 0;
+
+    if (maxLength && nextValue.length > maxLength) {
+      nextValue = nextValue.slice(0, maxLength);
+    }
+
+    input.value = nextValue;
+    nextCursor = selected ? Math.min(maxLength || nextValue.length, end + 2) : Math.min(maxLength || nextValue.length, start + 1);
+
+    if (input.setSelectionRange) {
+      input.setSelectionRange(nextCursor, nextCursor);
+    }
+
+    input.dispatchEvent(new Event("input", { bubbles: true }));
+  }
+
   function bindChatMenuActions() {
     var chatMenu = getElement("chatActionMenu");
 
     getElement("chatMoreBtn").addEventListener("click", function (event) {
       event.stopPropagation();
       window.CharacterManager.toggleChatActionMenu();
+    });
+
+    addClick("chatThoughtsHeartBtn", function (event) {
+      event.stopPropagation();
+      window.CharacterManager.openActiveCharacterThoughtsDrawer();
     });
 
     if (chatMenu) {
@@ -1136,7 +1199,7 @@
 
     getElement("chatEditCharacterBtn").addEventListener("click", window.CharacterManager.editActiveCharacter);
     getElement("chatSettingsBtn").addEventListener("click", window.CharacterManager.openActivePrivateSettings);
-    getElement("chatThoughtsBtn").addEventListener("click", window.CharacterManager.openActiveCharacterThoughts);
+    getElement("chatThoughtsBtn").addEventListener("click", window.CharacterManager.openActiveCharacterThoughtsDrawer);
     getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
     getElement("chatOfflineBtn").addEventListener("click", window.CharacterManager.openActiveCharacterOffline);
@@ -1155,6 +1218,11 @@
       window.GroupManager.toggleGroupActionMenu();
     });
 
+    addClick("groupThoughtsHeartBtn", function (event) {
+      event.stopPropagation();
+      window.GroupManager.openActiveGroupThoughtsDrawer();
+    });
+
     if (groupMenu) {
       groupMenu.addEventListener("click", function (event) {
         event.stopPropagation();
@@ -1162,12 +1230,19 @@
     }
 
     getElement("groupSettingsBtn").addEventListener("click", window.GroupManager.openActiveGroupSettings);
-    getElement("groupThoughtsBtn").addEventListener("click", window.GroupManager.openActiveGroupThoughts);
+    getElement("groupThoughtsBtn").addEventListener("click", window.GroupManager.openActiveGroupThoughtsDrawer);
     getElement("groupSearchBtn").addEventListener("click", window.GroupManager.openActiveGroupSearch);
     getElement("groupBatchMessageSelectBtn").addEventListener("click", window.GroupManager.openGroupMessageSelectionMode);
     getElement("groupOfflineBtn").addEventListener("click", window.GroupManager.openActiveGroupOffline);
     getElement("groupOfflineExitBtn").addEventListener("click", function () {
       window.OfflineManager.disableInlineOffline();
+    });
+
+    addClick("offlineThoughtsHeartBtn", function (event) {
+      event.stopPropagation();
+      if (window.OfflineManager && window.OfflineManager.openActiveOfflineThoughtsDrawer) {
+        window.OfflineManager.openActiveOfflineThoughtsDrawer();
+      }
     });
   }
 
@@ -2025,7 +2100,7 @@
       return '<img class="' + className + ' has-image" src="' + escapeHtml(character.avatar) + '" alt="' + escapeHtml(character.name || "角色") + '头像">';
     }
 
-    return '<span class="' + className + '" aria-hidden="true">' + escapeHtml(character && character.name ? character.name.slice(0, 1) : "AI") + "</span>";
+    return '<span class="' + className + '" aria-hidden="true">' + escapeHtml(character && character.name ? character.name.slice(0, 1) : "心") + "</span>";
   }
 
   function createWorldBook() {
@@ -2057,7 +2132,7 @@
         '<div class="empty-state compact-empty">',
         '  <div class="empty-visual" aria-hidden="true"><span class="empty-dot"></span></div>',
         "  <h3>世界书还是空的</h3>",
-        "  <p>把世界观、地点、规则和长期设定整理成资料卡，AI 回复时会按关键词引用。</p>",
+        "  <p>把世界观、地点、规则和长期设定整理成资料卡，角色回复时会按关键词引用。</p>",
         '  <button class="full-button" type="button" data-world-action="create">新建世界书</button>',
         "</div>"
       ].join("");
@@ -3301,6 +3376,274 @@
     };
   }
 
+  function openThoughtsDrawer(options) {
+    var source = options || {};
+    var characterIds = Array.isArray(source.characterIds) ? source.characterIds.filter(Boolean) : [];
+    var chatId = String(source.chatId || "");
+    var mask = getElement("thoughtsDrawerMask");
+
+    thoughtsDrawerState = {
+      title: source.title || "心声",
+      characterIds: characterIds,
+      chatId: chatId,
+      characterFilter: source.characterFilter || "all",
+      open: true,
+      origin: source.origin || ""
+    };
+
+    markThoughtsRead(characterIds, chatId);
+    renderThoughtsDrawer();
+
+    if (mask) {
+      mask.classList.remove("hidden");
+    }
+
+    updateThoughtHeartButtons();
+  }
+
+  function closeThoughtsDrawer() {
+    var mask = getElement("thoughtsDrawerMask");
+    var drawer = getElement("thoughtsDrawer");
+
+    thoughtsDrawerState.open = false;
+    thoughtsDrawerState.origin = "";
+
+    if (mask) {
+      mask.classList.add("hidden");
+    }
+
+    if (drawer) {
+      drawer.innerHTML = "";
+    }
+
+    updateThoughtHeartButtons();
+  }
+
+  function renderThoughtsDrawer() {
+    var drawer = getElement("thoughtsDrawer");
+    var items = collectThoughtDrawerItems();
+    var visibleItems = items.filter(function (thought) {
+      return thoughtsDrawerState.characterFilter === "all" || thought.characterId === thoughtsDrawerState.characterFilter;
+    });
+
+    if (!drawer) {
+      return;
+    }
+
+    drawer.innerHTML = [
+      '<div class="thoughts-drawer-handle" aria-hidden="true"></div>',
+      '<div class="thoughts-drawer-header">',
+      '  <div><span>心声</span><h3 id="thoughtsDrawerTitle">' + escapeHtml(thoughtsDrawerState.title || "心声") + "</h3></div>",
+      '  <button class="nav-button thoughts-drawer-close" type="button" data-thought-drawer-close aria-label="关闭">×</button>',
+      "</div>",
+      renderThoughtDrawerTabs(items),
+      '<div class="thoughts-drawer-list">',
+      visibleItems.length ? visibleItems.map(renderThoughtDrawerCard).join("") : '<div class="thoughts-drawer-empty">还没有新的心声</div>',
+      "</div>"
+    ].join("");
+  }
+
+  function collectThoughtDrawerItems() {
+    var items = [];
+
+    (thoughtsDrawerState.characterIds || []).forEach(function (characterId) {
+      var character = getCharacterById(characterId);
+      window.AppStorage.getCharacterThoughts(characterId).forEach(function (thought) {
+        if (thoughtsDrawerState.chatId && String(thought.chatId || "") !== thoughtsDrawerState.chatId) {
+          return;
+        }
+
+        items.push(Object.assign({}, thought, {
+          characterId: characterId,
+          characterName: character ? character.name : "角色",
+          characterAvatar: character ? character.avatar : ""
+        }));
+      });
+    });
+
+    return items.sort(function (a, b) {
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+  }
+
+  function renderThoughtDrawerTabs(items) {
+    var ids = thoughtsDrawerState.characterIds || [];
+
+    if (ids.length <= 1) {
+      return '<div class="thoughts-drawer-count">' + items.length + " 条心声</div>";
+    }
+
+    return [
+      '<div class="thoughts-drawer-tabs" aria-label="按角色筛选心声">',
+      '<button type="button" data-drawer-character="all" class="' + (thoughtsDrawerState.characterFilter === "all" ? "active" : "") + '">全部</button>',
+      ids.map(function (characterId) {
+        var character = getCharacterById(characterId);
+        return '<button type="button" data-drawer-character="' + escapeHtml(characterId) + '" class="' + (thoughtsDrawerState.characterFilter === characterId ? "active" : "") + '">' + escapeHtml(character ? character.name : "角色") + "</button>";
+      }).join(""),
+      "</div>"
+    ].join("");
+  }
+
+  function renderThoughtDrawerCard(thought) {
+    var sourceMap = { private: "私聊", group: "群聊", offline: "线下" };
+    var character = {
+      name: thought.characterName,
+      avatar: thought.characterAvatar
+    };
+
+    return [
+      '<article class="thought-drawer-card">',
+      '  <div class="thought-drawer-card-head">',
+      renderSmallAvatar(character, "thought-drawer-avatar"),
+      '    <span><strong>' + escapeHtml(thought.characterName || "角色") + "</strong><em>" + escapeHtml(formatDateTime(thought.createdAt)) + "</em></span>",
+      "  </div>",
+      '  <div class="thought-drawer-meta"><span>' + escapeHtml(thought.mood || "未记录") + "</span><span>" + escapeHtml(sourceMap[thought.source] || thought.source || "私聊") + "</span></div>",
+      thought.visibleSummary ? '  <p class="thought-drawer-summary">' + escapeHtml(thought.visibleSummary) + "</p>" : "",
+      '  <p class="thought-drawer-content">' + escapeHtml(thought.content || "") + "</p>",
+      "</article>"
+    ].join("");
+  }
+
+  function bindThoughtsDrawer() {
+    var mask = getElement("thoughtsDrawerMask");
+
+    if (!mask) {
+      return;
+    }
+
+    mask.addEventListener("click", function (event) {
+      var filter = event.target.closest("[data-drawer-character]");
+
+      if (event.target === mask || event.target.closest("[data-thought-drawer-close]")) {
+        closeThoughtsDrawer();
+        return;
+      }
+
+      if (filter) {
+        thoughtsDrawerState.characterFilter = filter.dataset.drawerCharacter || "all";
+        renderThoughtsDrawer();
+      }
+    });
+  }
+
+  function markThoughtsRead(characterIds, chatId) {
+    if (window.AppStorage && window.AppStorage.markThoughtsRead) {
+      window.AppStorage.markThoughtsRead(characterIds || [], chatId || "");
+    }
+  }
+
+  function getUnreadThoughtCount(characterIds, chatId) {
+    if (!window.AppStorage || !window.AppStorage.getUnreadThoughtCount) {
+      return 0;
+    }
+
+    return window.AppStorage.getUnreadThoughtCount(characterIds || [], chatId || "");
+  }
+
+  function updateThoughtButton(buttonId, count, active) {
+    var button = getElement(buttonId);
+    var badge = button ? button.querySelector(".thought-badge") : null;
+    var glyph = button ? button.querySelector(".heart-glyph") : null;
+    var unreadCount = Number(count) || 0;
+
+    if (!button) {
+      return;
+    }
+
+    button.classList.toggle("active", Boolean(active));
+    button.classList.toggle("has-unread", unreadCount > 0);
+
+    if (glyph) {
+      glyph.textContent = active ? "♥" : "♡";
+    }
+
+    if (badge) {
+      badge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
+      badge.classList.toggle("hidden", unreadCount <= 0);
+    }
+  }
+
+  function updatePrivateThoughtsButton(characterId) {
+    var origin = characterId ? "private:" + characterId : "";
+    var count = characterId ? getUnreadThoughtCount([characterId], characterId) : 0;
+    updateThoughtButton("chatThoughtsHeartBtn", count, thoughtsDrawerState.open && thoughtsDrawerState.origin === origin);
+  }
+
+  function updateGroupThoughtsButton(groupId) {
+    var group = groupId && window.AppStorage.getGroups ? window.AppStorage.getGroups().find(function (item) {
+      return item.id === groupId;
+    }) : null;
+    var origin = groupId ? "group:" + groupId : "";
+    var count = group ? getUnreadThoughtCount(group.memberIds || [], group.id) : 0;
+    updateThoughtButton("groupThoughtsHeartBtn", count, thoughtsDrawerState.open && thoughtsDrawerState.origin === origin);
+  }
+
+  function updateOfflineThoughtsButton(session) {
+    var source = session || {};
+    var origin = source.id ? "offline:" + source.id : "";
+    var count = source.id ? getUnreadThoughtCount(source.participantIds || [], source.id) : 0;
+    updateThoughtButton("offlineThoughtsHeartBtn", count, thoughtsDrawerState.open && thoughtsDrawerState.origin === origin);
+  }
+
+  function updateThoughtHeartButtons() {
+    if (window.CharacterManager && window.CharacterManager.getActiveCharacterId) {
+      updatePrivateThoughtsButton(window.CharacterManager.getActiveCharacterId());
+    }
+
+    if (window.GroupManager && window.GroupManager.getActiveGroupId) {
+      updateGroupThoughtsButton(window.GroupManager.getActiveGroupId());
+    }
+
+    if (window.OfflineManager && window.OfflineManager.getCurrentSession) {
+      updateOfflineThoughtsButton(window.OfflineManager.getCurrentSession());
+    }
+  }
+
+  function openThoughtsDrawerForCharacter(characterId) {
+    var character = getCharacterById(characterId);
+
+    if (!characterId) {
+      return;
+    }
+
+    openThoughtsDrawer({
+      title: character ? character.name + "的心声" : "心声",
+      characterIds: [characterId],
+      chatId: characterId,
+      origin: "private:" + characterId
+    });
+  }
+
+  function openThoughtsDrawerForGroup(groupId) {
+    var group = groupId && window.AppStorage.getGroups ? window.AppStorage.getGroups().find(function (item) {
+      return item.id === groupId;
+    }) : null;
+
+    if (!group) {
+      return;
+    }
+
+    openThoughtsDrawer({
+      title: group.name + " · 成员心声",
+      characterIds: group.memberIds || [],
+      chatId: group.id,
+      origin: "group:" + group.id
+    });
+  }
+
+  function openThoughtsDrawerForOfflineSession(session) {
+    if (!session) {
+      return;
+    }
+
+    openThoughtsDrawer({
+      title: (session.title || "线下模式") + " · 心声",
+      characterIds: session.participantIds || [],
+      chatId: session.id,
+      origin: "offline:" + session.id
+    });
+  }
+
   function renderWalletScreen() {
     var content = getElement("walletContent");
     var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { balance: 0, ledger: [], familyCards: [] };
@@ -3316,7 +3659,7 @@
     content.innerHTML = [
       '<section class="wallet-card">',
       '  <div class="wallet-chip" aria-hidden="true"></div>',
-      '  <strong>YAN PAY</strong>',
+      '  <strong>心屿 PAY</strong>',
       '  <span>账户余额</span>',
       '  <em>¥ ' + escapeHtml(formatMoney(wallet.balance)) + "</em>",
       '  <div><b>' + escapeHtml(profile.name || "林澈") + "</b><i>**** **** **** " + escapeHtml(getWalletCardTail(profile.wxid)) + "</i></div>",
@@ -3689,7 +4032,7 @@
     var link = document.createElement("a");
 
     link.href = url;
-    link.download = "my-ai-app-backup-" + Date.now() + ".json";
+    link.download = "xinyu-backup-" + Date.now() + ".json";
     document.body.appendChild(link);
     link.click();
     link.remove();
@@ -3786,6 +4129,7 @@
   }
 
   function initApp() {
+    document.title = "心屿";
     applySavedTheme();
     bindHomeActions();
     bindNavigationActions();
@@ -3796,6 +4140,7 @@
     bindGlobalActions();
     bindMessageActionSheet();
     bindWeChatModal();
+    bindThoughtsDrawer();
     updateStatusTime();
     window.setInterval(updateStatusTime, 30000);
     window.CharacterManager.renderCharacterList();
@@ -3832,6 +4177,17 @@
   window.AppExtras = {
     openThoughtsForCharacter: openThoughtsForCharacter,
     openThoughtsForGroup: openThoughtsForGroup,
+    openThoughtsDrawer: openThoughtsDrawer,
+    closeThoughtsDrawer: closeThoughtsDrawer,
+    renderThoughtsDrawer: renderThoughtsDrawer,
+    markThoughtsRead: markThoughtsRead,
+    openThoughtsDrawerForCharacter: openThoughtsDrawerForCharacter,
+    openThoughtsDrawerForGroup: openThoughtsDrawerForGroup,
+    openThoughtsDrawerForOfflineSession: openThoughtsDrawerForOfflineSession,
+    updatePrivateThoughtsButton: updatePrivateThoughtsButton,
+    updateGroupThoughtsButton: updateGroupThoughtsButton,
+    updateOfflineThoughtsButton: updateOfflineThoughtsButton,
+    updateThoughtHeartButtons: updateThoughtHeartButtons,
     openCharacterSpaceScreen: openCharacterSpaceScreen,
     openDiaryScreen: openDiaryScreen,
     renderWorldBookScreen: renderWorldBookScreen,

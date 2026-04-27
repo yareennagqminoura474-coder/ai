@@ -41,7 +41,7 @@
 
   function getAvatarText(character) {
     var name = character && character.name ? character.name.trim() : "";
-    return name ? name.slice(0, 1) : "AI";
+    return name ? name.slice(0, 1) : "心";
   }
 
   function renderAvatar(character, className) {
@@ -418,6 +418,7 @@
     closeAllMenus();
     renderGroupChatMessages(groupId);
     window.setActivePage("groupChatScreen");
+    updateThoughtButton(groupId);
   }
 
   function renderGroupChatMessages(groupId) {
@@ -499,6 +500,8 @@
         wrap.scrollTop = wrap.scrollHeight;
       });
     }
+
+    updateThoughtButton(groupId);
   }
 
   function applyGroupChatBackground(wrap, background) {
@@ -1431,7 +1434,7 @@
         role: "character",
         characterId: characters[0].id,
         characterName: characters[0].name,
-        content: "AI 回复失败：" + (error && error.message ? error.message : "未知错误"),
+        content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
         type: "error",
         createdAt: Date.now()
       }], after);
@@ -1509,6 +1512,8 @@
     } catch (error) {
       console.warn("群聊心声保存失败，群聊回复已保留。", error);
     }
+
+    updateThoughtButton(group.id);
 
     if (group.settings && group.settings.memorySharingEnabled === false) {
       return;
@@ -1689,7 +1694,7 @@
         role: "character",
         characterId: characters[0].id,
         characterName: characters[0].name,
-        content: "AI 回复失败：" + (error && error.message ? error.message : "未知错误"),
+        content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
         type: "error",
         createdAt: Date.now()
       });
@@ -1870,7 +1875,7 @@
       '<div class="field-group"><label>我的群人设</label><textarea data-group-settings-field="userPersona">' + escapeHtml(persona.persona || "") + '</textarea></div>',
       "</section>",
       '<section class="form-section">',
-      '<div class="section-title-row"><h3>群聊回复设置</h3><span>AI</span></div>',
+      '<div class="section-title-row"><h3>群聊回复设置</h3><span>生成</span></div>',
       '<div class="settings-inline-grid">',
       '<label><span>最少回复条数</span><input data-group-settings-field="minReplyCount" type="number" min="1" max="50" value="' + escapeHtml(settings.minReplyCount || 10) + '"></label>',
       '<label><span>最多安全条数</span><input data-group-settings-field="maxReplyCount" type="number" min="10" max="50" value="' + escapeHtml(settings.maxReplyCount || 50) + '"></label>',
@@ -1919,7 +1924,7 @@
     }
 
     if (button.dataset.groupSettingsAction === "view-thoughts") {
-      openActiveGroupThoughts();
+      openActiveGroupThoughtsDrawer();
       return;
     }
 
@@ -2008,6 +2013,22 @@
     }
   }
 
+  function openActiveGroupThoughtsDrawer() {
+    closeAllMenus();
+
+    if (activeGroupId && window.AppExtras && window.AppExtras.openThoughtsDrawerForGroup) {
+      window.AppExtras.openThoughtsDrawerForGroup(activeGroupId);
+    }
+  }
+
+  function updateThoughtButton(groupId) {
+    var targetId = groupId || activeGroupId;
+
+    if (targetId && window.AppExtras && window.AppExtras.updateGroupThoughtsButton) {
+      window.AppExtras.updateGroupThoughtsButton(targetId);
+    }
+  }
+
   function openActiveGroupSearch() {
     var group = activeGroupId ? getGroupById(activeGroupId) : null;
 
@@ -2084,6 +2105,8 @@
     openActiveGroupSettings: openActiveGroupSettings,
     saveGroupSettings: saveGroupSettings,
     openActiveGroupThoughts: openActiveGroupThoughts,
+    openActiveGroupThoughtsDrawer: openActiveGroupThoughtsDrawer,
+    updateThoughtButton: updateThoughtButton,
     openActiveGroupSearch: openActiveGroupSearch,
     getActiveGroupId: getActiveGroupId
   };

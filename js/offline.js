@@ -40,7 +40,7 @@
 
   function getAvatarText(character) {
     var name = character && character.name ? character.name.trim() : "";
-    return name ? name.slice(0, 1) : "AI";
+    return name ? name.slice(0, 1) : "心";
   }
 
   function renderAvatar(character, className) {
@@ -109,6 +109,7 @@
   function openSession(session) {
     getElement("offlineTitle").textContent = session.title || "线下模式";
     renderOfflineMessages();
+    updateOfflineThoughtButton(session);
   }
 
   function goBack() {
@@ -117,6 +118,20 @@
 
   function getCurrentSession() {
     return currentSessionId ? window.AppStorage.getOfflineSession(currentSessionId) : null;
+  }
+
+  function openActiveOfflineThoughtsDrawer() {
+    var session = getCurrentSession();
+
+    if (session && window.AppExtras && window.AppExtras.openThoughtsDrawerForOfflineSession) {
+      window.AppExtras.openThoughtsDrawerForOfflineSession(session);
+    }
+  }
+
+  function updateOfflineThoughtButton(session) {
+    if (window.AppExtras && window.AppExtras.updateOfflineThoughtsButton) {
+      window.AppExtras.updateOfflineThoughtsButton(session || getCurrentSession());
+    }
   }
 
   function getParticipants(session) {
@@ -141,6 +156,8 @@
     requestAnimationFrame(function () {
       wrap.scrollTop = wrap.scrollHeight;
     });
+
+    updateOfflineThoughtButton(session);
   }
 
   function renderOfflineEvent(event) {
@@ -346,6 +363,8 @@
     } catch (error) {
       console.warn("线下心声保存失败，剧情推进已保留。", error);
     }
+
+    updateOfflineThoughtButton(session);
 
     try {
       (result.memories || []).forEach(function (memory) {
@@ -775,6 +794,15 @@
       console.warn("线下心声保存失败，剧情推进已保留。", error);
     }
 
+    if (window.AppExtras) {
+      if (mode === "group" && window.AppExtras.updateGroupThoughtsButton) {
+        window.AppExtras.updateGroupThoughtsButton(chatId);
+      }
+      if (mode !== "group" && window.AppExtras.updatePrivateThoughtsButton) {
+        window.AppExtras.updatePrivateThoughtsButton(chatId);
+      }
+    }
+
     try {
       (result.memories || []).forEach(function (memory) {
         if (!memory.characterId || !memory.content) {
@@ -823,6 +851,9 @@
     disableInlineOffline: disableInlineOffline,
     isInlineOfflineActive: isInlineOfflineActive,
     requestInlineOfflineAdvance: requestInlineOfflineAdvance,
+    getCurrentSession: getCurrentSession,
+    openActiveOfflineThoughtsDrawer: openActiveOfflineThoughtsDrawer,
+    updateOfflineThoughtButton: updateOfflineThoughtButton,
     goBack: goBack,
     renderOfflineMessages: renderOfflineMessages,
     sendOfflineUserInput: sendOfflineUserInput,

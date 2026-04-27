@@ -7,8 +7,8 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="AI手机">
-  <title>AI 角色互动手机</title>
+  <meta name="apple-mobile-web-app-title" content="心屿">
+  <title>心屿</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="./assets/icons/icon.svg">
   <link rel="apple-touch-icon" href="./assets/icons/icon-192.png">
@@ -30,7 +30,7 @@
         <div class="desktop-wallpaper">
           <div class="desktop-widget">
             <span id="homeCharacterCount">0 个角色 · 0 个群聊</span>
-            <strong>我的手机空间</strong>
+            <strong>心屿</strong>
             <small id="homeCharacterSummary">还没有角色，先创建你的第一个角色。</small>
           </div>
 
@@ -190,10 +190,16 @@
         <header class="nav-bar">
           <button id="chatBackBtn" class="nav-button" type="button" aria-label="返回角色列表">‹</button>
           <div class="chat-title-wrap">
-            <span id="chatHeaderAvatar" class="chat-header-avatar" aria-hidden="true">AI</span>
+            <span id="chatHeaderAvatar" class="chat-header-avatar" aria-hidden="true">心</span>
             <h2 id="chatTitle">聊天</h2>
           </div>
-          <button id="chatMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+          <div class="nav-actions chat-top-actions">
+            <button id="chatThoughtsHeartBtn" class="nav-button heart-button" type="button" aria-label="查看心声">
+              <span class="heart-glyph" aria-hidden="true">♡</span>
+              <span class="thought-badge hidden" aria-hidden="true"></span>
+            </button>
+            <button id="chatMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+          </div>
         </header>
 
         <div id="chatActionMenu" class="action-menu chat-action-menu hidden" aria-label="聊天操作菜单">
@@ -230,6 +236,7 @@
 
         <form id="chatComposer" class="chat-composer" autocomplete="off">
           <button id="chatPlusBtn" class="composer-plus" type="button" aria-label="添加">+</button>
+          <button id="privateBracketBtn" class="composer-bracket" type="button" aria-label="插入动作括号">（）</button>
           <input id="chatInput" type="text" placeholder="输入消息" maxlength="500">
           <button class="send-button" type="submit">发送</button>
           <button id="replyButton" class="reply-button" type="button">回复</button>
@@ -277,7 +284,13 @@
         <header class="nav-bar">
           <button id="groupChatBackBtn" class="nav-button" type="button" aria-label="返回群聊列表">‹</button>
           <h2 id="groupChatTitle">群聊</h2>
-          <button id="groupChatMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+          <div class="nav-actions chat-top-actions">
+            <button id="groupThoughtsHeartBtn" class="nav-button heart-button" type="button" aria-label="查看成员心声">
+              <span class="heart-glyph" aria-hidden="true">♡</span>
+              <span class="thought-badge hidden" aria-hidden="true"></span>
+            </button>
+            <button id="groupChatMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+          </div>
         </header>
 
         <div id="groupChatActionMenu" class="action-menu chat-action-menu hidden" aria-label="群聊操作菜单">
@@ -310,6 +323,7 @@
 
         <form id="groupChatComposer" class="chat-composer" autocomplete="off">
           <button id="groupPlusBtn" class="composer-plus" type="button" aria-label="添加">+</button>
+          <button id="groupBracketBtn" class="composer-bracket" type="button" aria-label="插入动作括号">（）</button>
           <input id="groupChatInput" type="text" placeholder="输入群聊消息" maxlength="500">
           <button class="send-button" type="submit">发送</button>
           <button id="groupReplyButton" class="reply-button" type="button">回复</button>
@@ -320,12 +334,19 @@
         <header class="nav-bar offline-nav">
           <button id="offlineBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
           <h2 id="offlineTitle">线下模式</h2>
-          <button id="offlineMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+          <div class="nav-actions chat-top-actions">
+            <button id="offlineThoughtsHeartBtn" class="nav-button heart-button" type="button" aria-label="查看线下心声">
+              <span class="heart-glyph" aria-hidden="true">♡</span>
+              <span class="thought-badge hidden" aria-hidden="true"></span>
+            </button>
+            <button id="offlineMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+          </div>
         </header>
 
         <div id="offlineMessages" class="screen-content offline-messages"></div>
 
         <form id="offlineComposer" class="offline-composer" autocomplete="off">
+          <button id="offlineBracketBtn" class="composer-bracket" type="button" aria-label="插入动作括号">（）</button>
           <input id="offlineInput" type="text" placeholder="说点什么，或描述你的动作..." maxlength="500">
           <button id="offlineSendBtn" class="send-button" type="submit">发送</button>
           <button id="offlineAdvanceBtn" class="reply-button" type="button">推进</button>
@@ -499,6 +520,10 @@
         <button type="button" data-action="memory">写入记忆</button>
         <button type="button" data-action="cancel">取消</button>
       </div>
+    </div>
+
+    <div id="thoughtsDrawerMask" class="thoughts-drawer-mask hidden" aria-label="心声查看面板">
+      <section id="thoughtsDrawer" class="thoughts-drawer" role="dialog" aria-modal="true" aria-labelledby="thoughtsDrawerTitle"></section>
     </div>
 
     <div id="wechatModalMask" class="wechat-modal-mask hidden" aria-label="微信功能弹窗">

@@ -55,7 +55,7 @@
 
   function getAvatarText(character) {
     var name = character && character.name ? character.name.trim() : "";
-    return name ? name.slice(0, 1) : "AI";
+    return name ? name.slice(0, 1) : "心";
   }
 
   function renderAvatar(character, className) {
@@ -101,7 +101,7 @@
         '<div class="empty-state">',
         '  <div class="empty-visual" aria-hidden="true"><span class="empty-dot"></span></div>',
         "  <h3>还没有角色</h3>",
-        "  <p>创建你的第一个 AI 角色，开始一段新的故事</p>",
+        "  <p>创建你的第一个角色，开始一段新的故事</p>",
         '  <button id="emptyCreateCharacterBtn" class="full-button" type="button">创建角色</button>',
         "</div>"
       ].join("");
@@ -588,6 +588,7 @@
     ensureOpeningMessage(character);
     renderChatMessages(characterId);
     window.setActivePage("chatScreen");
+    updateThoughtButton();
   }
 
   function updateChatHeader(character) {
@@ -703,6 +704,8 @@
         messagesWrap.scrollTop = messagesWrap.scrollHeight;
       });
     }
+
+    updateThoughtButton(characterId);
   }
 
   function applyChatBackground(wrap, background) {
@@ -1678,7 +1681,7 @@
         id: String(Date.now()),
         role: "character",
         type: "error",
-        content: "AI 回复失败：" + (error && error.message ? error.message : "未知错误"),
+        content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
         createdAt: Date.now()
       }], after);
     } finally {
@@ -1754,6 +1757,8 @@
     } catch (error) {
       console.warn("角色心声保存失败，聊天回复已保留。", error);
     }
+
+    updateThoughtButton(characterId);
 
     if (character.chatSettings && character.chatSettings.memoryEnabled === false) {
       return;
@@ -1918,7 +1923,7 @@
     } catch (error) {
       errorContent = error && error.message === window.AIService.MISSING_SETTINGS_MESSAGE
         ? window.AIService.MISSING_SETTINGS_MESSAGE
-        : "AI 回复失败：" + (error && error.message ? error.message : "未知错误");
+        : "回复失败：" + (error && error.message ? error.message : "未知错误");
 
       messages = removeLoadingMessages(window.AppStorage.getChatHistory(requestCharacterId));
       messages.push({
@@ -2204,7 +2209,7 @@
     }
 
     if (button.dataset.privateAction === "view-thoughts") {
-      openActiveCharacterThoughts();
+      openActiveCharacterThoughtsDrawer();
     }
   }
 
@@ -2293,6 +2298,22 @@
 
     if (activeCharacterId && window.AppExtras && window.AppExtras.openThoughtsForCharacter) {
       window.AppExtras.openThoughtsForCharacter(activeCharacterId, "chatScreen");
+    }
+  }
+
+  function openActiveCharacterThoughtsDrawer() {
+    closeAllMenus();
+
+    if (activeCharacterId && window.AppExtras && window.AppExtras.openThoughtsDrawerForCharacter) {
+      window.AppExtras.openThoughtsDrawerForCharacter(activeCharacterId);
+    }
+  }
+
+  function updateThoughtButton(characterId) {
+    var targetId = characterId || activeCharacterId;
+
+    if (targetId && window.AppExtras && window.AppExtras.updatePrivateThoughtsButton) {
+      window.AppExtras.updatePrivateThoughtsButton(targetId);
     }
   }
 
@@ -2415,6 +2436,11 @@
     openActivePrivateSettings: openActivePrivateSettings,
     savePrivateChatSettings: savePrivateChatSettings,
     openActiveCharacterThoughts: openActiveCharacterThoughts,
+    openActiveCharacterThoughtsDrawer: openActiveCharacterThoughtsDrawer,
+    updateThoughtButton: updateThoughtButton,
+    getActiveCharacterId: function () {
+      return activeCharacterId;
+    },
     openActiveChatSearch: openActiveChatSearch,
     deleteCharacterWithConfirm: deleteCharacterWithConfirm,
     resetState: resetState
