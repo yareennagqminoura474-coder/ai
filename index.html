@@ -1,0 +1,506 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#f6f7f4">
+  <title>AI 角色互动 App</title>
+  <link rel="manifest" href="manifest.json">
+  <link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+  <div class="phone">
+    <div class="status-bar" aria-label="状态栏">
+      <span id="statusTime">9:41</span>
+      <div class="status-icons" aria-hidden="true">
+        <span class="signal-icon"></span>
+        <span class="wifi-icon"></span>
+        <span class="battery-icon"></span>
+      </div>
+    </div>
+
+    <main class="app-body">
+      <section id="homeScreen" class="screen home-screen desktop-home active" aria-label="首页">
+        <div class="desktop-wallpaper">
+          <div class="desktop-widget">
+            <span id="homeCharacterCount">0 个角色 · 0 个群聊</span>
+            <strong>我的手机空间</strong>
+            <small id="homeCharacterSummary">还没有角色，先创建你的第一个角色。</small>
+          </div>
+
+          <div class="desktop-app-grid">
+            <button id="openWeChat" class="desktop-app-icon" type="button">
+              <span class="desktop-icon-symbol desktop-wechat" aria-hidden="true">微</span>
+              <span>微信</span>
+            </button>
+            <button class="desktop-app-icon desktop-coming" type="button">
+              <span class="desktop-icon-symbol desktop-photo" aria-hidden="true">相</span>
+              <span>相册</span>
+            </button>
+            <button class="desktop-app-icon desktop-coming" type="button">
+              <span class="desktop-icon-symbol desktop-note" aria-hidden="true">记</span>
+              <span>记事本</span>
+            </button>
+            <button id="openSettings" class="desktop-app-icon" type="button">
+              <span class="desktop-icon-symbol desktop-setting" aria-hidden="true">设</span>
+              <span>设置</span>
+            </button>
+            <button id="openWorldBook" class="desktop-app-icon" type="button">
+              <span class="desktop-icon-symbol desktop-worldbook" aria-hidden="true">世</span>
+              <span>世界书</span>
+            </button>
+            <button id="openDiary" class="desktop-app-icon" type="button">
+              <span class="desktop-icon-symbol desktop-diary" aria-hidden="true">日</span>
+              <span>日记</span>
+            </button>
+            <button id="openCharacterSpace" class="desktop-app-icon" type="button">
+              <span class="desktop-icon-symbol desktop-space" aria-hidden="true">角</span>
+              <span>角色空间</span>
+            </button>
+            <button id="openBackup" class="desktop-app-icon" type="button">
+              <span class="desktop-icon-symbol desktop-backup" aria-hidden="true">备</span>
+              <span>备份</span>
+            </button>
+            <button class="desktop-app-icon desktop-coming" type="button">
+              <span class="desktop-icon-symbol desktop-theme" aria-hidden="true">题</span>
+              <span>主题</span>
+            </button>
+          </div>
+        </div>
+
+        <nav class="dock desktop-dock" aria-label="底部导航">
+          <button id="dockHome" class="dock-item active" type="button">
+            <span class="dock-icon" aria-hidden="true">⌂</span>
+            <span>首页</span>
+          </button>
+          <button id="dockChat" class="dock-item" type="button">
+            <span class="dock-icon" aria-hidden="true">◇</span>
+            <span>聊天</span>
+          </button>
+          <button id="dockSettings" class="dock-item" type="button">
+            <span class="dock-icon" aria-hidden="true">◎</span>
+            <span>设置</span>
+          </button>
+        </nav>
+      </section>
+
+      <section id="wechatScreen" class="screen" aria-label="微信">
+        <header class="nav-bar">
+          <button id="wechatBackBtn" class="nav-button" type="button" aria-label="返回首页">‹</button>
+          <h2>微信</h2>
+          <button id="wechatAddBtn" class="nav-button primary" type="button" aria-label="创建角色">+</button>
+        </header>
+
+        <div class="screen-content wechat-content">
+          <section class="wechat-card">
+            <div class="section-title-row">
+              <h3>聊天入口</h3>
+              <span>AI 角色</span>
+            </div>
+            <div class="wechat-entry-grid">
+              <button id="wechatOpenCharacterList" class="wechat-entry" type="button">
+                <span class="wechat-entry-icon tile-chat" aria-hidden="true">私</span>
+                <strong>角色聊天</strong>
+                <em>一对一私聊</em>
+              </button>
+              <button id="wechatOpenGroupList" class="wechat-entry" type="button">
+                <span class="wechat-entry-icon tile-group" aria-hidden="true">群</span>
+                <strong>群聊</strong>
+                <em>多人互动</em>
+              </button>
+              <button id="wechatOpenCreateCharacter" class="wechat-entry" type="button">
+                <span class="wechat-entry-icon tile-create" aria-hidden="true">+</span>
+                <strong>创建角色</strong>
+                <em>添加新朋友</em>
+              </button>
+              <button id="wechatOpenCreateGroup" class="wechat-entry" type="button">
+                <span class="wechat-entry-icon tile-group" aria-hidden="true">群</span>
+                <strong>创建群聊</strong>
+                <em>选择多个角色</em>
+              </button>
+              <button id="wechatOpenContacts" class="wechat-entry" type="button">
+                <span class="wechat-entry-icon tile-contacts" aria-hidden="true">录</span>
+                <strong>通讯录</strong>
+                <em>角色列表</em>
+              </button>
+              <button id="wechatOpenData" class="wechat-entry" type="button">
+                <span class="wechat-entry-icon tile-data" aria-hidden="true">数</span>
+                <strong>数据管理</strong>
+                <em>备份与恢复</em>
+              </button>
+            </div>
+          </section>
+
+          <section class="wechat-card">
+            <div class="section-title-row">
+              <h3>最近聊天</h3>
+              <span id="wechatRecentCount">0 条</span>
+            </div>
+            <div id="wechatRecentList" class="recent-chat-list"></div>
+          </section>
+        </div>
+      </section>
+
+      <section id="characterListScreen" class="screen" aria-label="角色聊天">
+        <header class="nav-bar">
+          <button id="characterListBack" class="nav-button" type="button" aria-label="返回首页">‹</button>
+          <h2>角色聊天</h2>
+          <div class="nav-actions">
+            <button id="newCharacterBtn" class="nav-button primary compact" type="button" aria-label="创建角色">+</button>
+            <button id="characterBatchSelectBtn" class="nav-text-button slim" type="button">选择</button>
+          </div>
+        </header>
+        <div id="characterListContent" class="screen-content list-content"></div>
+      </section>
+
+      <section id="createCharacterScreen" class="screen" aria-label="创建或编辑角色">
+        <header class="nav-bar">
+          <button id="createBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2 id="createCharacterTitle">创建角色</h2>
+          <button id="saveCharacterBtn" class="nav-text-button" type="button">保存</button>
+        </header>
+
+        <form id="createCharacterForm" class="screen-content form-content" autocomplete="off">
+          <div id="formError" class="form-error" role="alert" aria-live="polite"></div>
+
+          <section class="form-section" aria-label="基础信息">
+            <div class="field-group">
+              <label for="characterName">角色名称</label>
+              <input id="characterName" name="characterName" type="text" placeholder="请输入角色名称" maxlength="30">
+            </div>
+
+            <div class="field-group">
+              <span class="field-label">头像</span>
+              <button id="avatarPicker" class="avatar-picker" type="button">
+                <span class="avatar-preview" aria-hidden="true">
+                  <img id="avatarImagePreview" class="avatar-preview-img hidden" src="" alt="">
+                  <span id="avatarTextPreview">+</span>
+                </span>
+                <span class="avatar-picker-text">
+                  <strong>选择本地图片</strong>
+                  <small>保存后会作为角色头像显示</small>
+                </span>
+              </button>
+              <input id="avatarInput" class="visually-hidden" type="file" accept="image/*">
+            </div>
+
+            <div class="field-group">
+              <label for="characterGender">性别</label>
+              <select id="characterGender" name="characterGender">
+                <option value="未设定">未设定</option>
+                <option value="男">男</option>
+                <option value="女">女</option>
+                <option value="其他">其他</option>
+              </select>
+            </div>
+
+            <div class="field-group">
+              <label for="characterIdentity">角色身份</label>
+              <input id="characterIdentity" name="characterIdentity" type="text" placeholder="同学、朋友、恋人、老师、虚拟偶像等" maxlength="40">
+            </div>
+          </section>
+
+          <section class="form-section" aria-label="角色设定">
+            <div class="field-group">
+              <label for="characterPersonality">性格设定</label>
+              <textarea id="characterPersonality" name="characterPersonality" placeholder="例如温柔、理性、慢热、喜欢开玩笑"></textarea>
+            </div>
+
+            <div class="field-group">
+              <label for="characterBackground">背景故事</label>
+              <textarea id="characterBackground" name="characterBackground" placeholder="写下角色的经历、世界观或关键记忆"></textarea>
+            </div>
+
+            <div class="field-group">
+              <label for="characterSpeakingStyle">说话风格</label>
+              <textarea id="characterSpeakingStyle" name="characterSpeakingStyle" placeholder="例如简短直接、轻松幽默、古风、像朋友聊天"></textarea>
+            </div>
+          </section>
+
+          <section class="form-section" aria-label="互动信息">
+            <div class="field-group">
+              <label for="characterRelationship">和我的关系</label>
+              <input id="characterRelationship" name="characterRelationship" type="text" placeholder="例如邻居、搭档、同桌、旧友" maxlength="40">
+            </div>
+
+            <div class="field-group">
+              <label for="characterOpeningMessage">开场白</label>
+              <textarea id="characterOpeningMessage" name="characterOpeningMessage" placeholder="角色第一次见到你时会说什么"></textarea>
+            </div>
+          </section>
+        </form>
+      </section>
+
+      <section id="chatScreen" class="screen chat-screen" aria-label="聊天">
+        <header class="nav-bar">
+          <button id="chatBackBtn" class="nav-button" type="button" aria-label="返回角色列表">‹</button>
+          <div class="chat-title-wrap">
+            <span id="chatHeaderAvatar" class="chat-header-avatar" aria-hidden="true">AI</span>
+            <h2 id="chatTitle">聊天</h2>
+          </div>
+          <button id="chatMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+        </header>
+
+        <div id="chatActionMenu" class="action-menu chat-action-menu hidden" aria-label="聊天操作菜单">
+          <button id="chatEditCharacterBtn" type="button">编辑角色</button>
+          <button id="chatSettingsBtn" type="button">聊天设置</button>
+          <button id="chatThoughtsBtn" type="button">查看心声</button>
+          <button id="chatBatchSelectBtn" type="button">多选消息</button>
+          <button id="chatOfflineBtn" type="button">进入线下模式</button>
+          <button id="clearChatHistoryBtn" type="button">清空聊天记录</button>
+          <button id="chatDeleteCharacterBtn" class="danger-text" type="button">删除角色</button>
+        </div>
+
+        <div id="privateOfflineModeBar" class="inline-offline-bar hidden">
+          <span>
+            <strong>线下模式中</strong>
+            <em>回复将以动作和对话推进</em>
+          </span>
+          <button id="privateOfflineExitBtn" type="button">退出</button>
+        </div>
+
+        <div id="chatMessages" class="screen-content chat-messages"></div>
+
+        <div id="chatToolPanel" class="chat-tool-panel hidden" aria-label="消息类型面板">
+          <button type="button" data-message-type="image">图片</button>
+          <button type="button" data-message-type="emoji">表情</button>
+          <button type="button" data-message-type="voice">语音</button>
+          <button type="button" data-message-type="location">位置</button>
+          <button type="button" data-message-type="pat">拍一拍</button>
+          <button type="button" data-message-type="transfer">转账</button>
+          <button type="button" data-message-type="redPacket">红包</button>
+        </div>
+
+        <form id="chatComposer" class="chat-composer" autocomplete="off">
+          <button id="chatPlusBtn" class="composer-plus" type="button" aria-label="添加">+</button>
+          <input id="chatInput" type="text" placeholder="输入消息" maxlength="500">
+          <button class="send-button" type="submit">发送</button>
+          <button id="replyButton" class="reply-button" type="button">回复</button>
+        </form>
+      </section>
+
+      <section id="groupListScreen" class="screen" aria-label="群聊">
+        <header class="nav-bar">
+          <button id="groupListBack" class="nav-button" type="button" aria-label="返回首页">‹</button>
+          <h2>群聊</h2>
+          <div class="nav-actions">
+            <button id="newGroupBtn" class="nav-button primary compact" type="button" aria-label="创建群聊">+</button>
+            <button id="groupBatchSelectBtn" class="nav-text-button slim" type="button">选择</button>
+          </div>
+        </header>
+        <div id="groupListContent" class="screen-content list-content"></div>
+      </section>
+
+      <section id="createGroupScreen" class="screen" aria-label="创建群聊">
+        <header class="nav-bar">
+          <button id="createGroupBackBtn" class="nav-button" type="button" aria-label="返回群聊">‹</button>
+          <h2>创建群聊</h2>
+          <button id="saveGroupBtn" class="nav-text-button" type="button">保存</button>
+        </header>
+
+        <form id="createGroupForm" class="screen-content form-content" autocomplete="off">
+          <div id="groupFormError" class="form-error" role="alert" aria-live="polite"></div>
+          <section class="form-section" aria-label="群聊信息">
+            <div class="field-group">
+              <label for="groupName">群聊名称</label>
+              <input id="groupName" name="groupName" type="text" placeholder="请输入群聊名称" maxlength="30">
+            </div>
+          </section>
+          <section class="form-section" aria-label="选择群成员">
+            <div class="section-title-row">
+              <h3>选择角色</h3>
+              <span id="groupSelectedCount">已选 0 个</span>
+            </div>
+            <div id="groupMemberList" class="member-select-list"></div>
+          </section>
+        </form>
+      </section>
+
+      <section id="groupChatScreen" class="screen chat-screen" aria-label="群聊聊天">
+        <header class="nav-bar">
+          <button id="groupChatBackBtn" class="nav-button" type="button" aria-label="返回群聊列表">‹</button>
+          <h2 id="groupChatTitle">群聊</h2>
+          <button id="groupChatMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+        </header>
+
+        <div id="groupChatActionMenu" class="action-menu chat-action-menu hidden" aria-label="群聊操作菜单">
+          <button id="groupSettingsBtn" type="button">群聊设置</button>
+          <button id="groupThoughtsBtn" type="button">查看成员心声</button>
+          <button id="groupBatchMessageSelectBtn" type="button">多选消息</button>
+          <button id="groupOfflineBtn" type="button">进入线下模式</button>
+        </div>
+
+        <div id="groupOfflineModeBar" class="inline-offline-bar hidden">
+          <span>
+            <strong>群聊线下模式中</strong>
+            <em>回复将以动作和对话推进</em>
+          </span>
+          <button id="groupOfflineExitBtn" type="button">退出</button>
+        </div>
+
+        <div id="groupChatMessages" class="screen-content chat-messages group-chat-messages"></div>
+
+        <div id="groupToolPanel" class="chat-tool-panel hidden" aria-label="群聊消息类型面板">
+          <button type="button" data-message-type="image">图片</button>
+          <button type="button" data-message-type="emoji">表情</button>
+          <button type="button" data-message-type="voice">语音</button>
+          <button type="button" data-message-type="location">位置</button>
+          <button type="button" data-message-type="pat">拍一拍</button>
+          <button type="button" data-message-type="transfer">转账</button>
+          <button type="button" data-message-type="redPacket">红包</button>
+        </div>
+
+        <form id="groupChatComposer" class="chat-composer" autocomplete="off">
+          <button id="groupPlusBtn" class="composer-plus" type="button" aria-label="添加">+</button>
+          <input id="groupChatInput" type="text" placeholder="输入群聊消息" maxlength="500">
+          <button class="send-button" type="submit">发送</button>
+          <button id="groupReplyButton" class="reply-button" type="button">回复</button>
+        </form>
+      </section>
+
+      <section id="offlineScreen" class="screen offline-screen" aria-label="线下模式">
+        <header class="nav-bar offline-nav">
+          <button id="offlineBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2 id="offlineTitle">线下模式</h2>
+          <button id="offlineMoreBtn" class="nav-button" type="button" aria-label="更多">···</button>
+        </header>
+
+        <div id="offlineMessages" class="screen-content offline-messages"></div>
+
+        <form id="offlineComposer" class="offline-composer" autocomplete="off">
+          <input id="offlineInput" type="text" placeholder="说点什么，或描述你的动作..." maxlength="500">
+          <button id="offlineSendBtn" class="send-button" type="submit">发送</button>
+          <button id="offlineAdvanceBtn" class="reply-button" type="button">推进</button>
+        </form>
+      </section>
+
+      <section id="settingsScreen" class="screen" aria-label="设置">
+        <header class="nav-bar">
+          <button id="settingsBackBtn" class="nav-button" type="button" aria-label="返回首页">‹</button>
+          <h2>设置</h2>
+          <span class="nav-spacer" aria-hidden="true"></span>
+        </header>
+
+        <form id="settingsForm" class="screen-content form-content" autocomplete="off">
+          <section class="form-section" aria-label="接口设置">
+            <div class="field-group">
+              <label for="apiUrl">API 地址</label>
+              <input id="apiUrl" name="apiUrl" type="url" placeholder="https://api.example.com/v1/chat/completions">
+            </div>
+
+            <div class="field-group">
+              <label for="apiKey">API Key</label>
+              <input id="apiKey" name="apiKey" type="password" placeholder="请输入 API Key">
+            </div>
+
+            <div class="field-group">
+              <label for="modelName">模型名称</label>
+              <input id="modelName" name="modelName" type="text" placeholder="gpt-4o-mini 或其他">
+            </div>
+
+            <div class="field-group">
+              <button id="fetchModelsBtn" class="outline-button" type="button">拉取模型列表</button>
+              <div id="modelFetchTip" class="model-fetch-tip" aria-live="polite"></div>
+              <div id="modelListBox" class="model-list-box hidden" aria-label="模型列表"></div>
+            </div>
+          </section>
+
+          <button class="full-button" type="submit">保存设置</button>
+
+          <section class="form-section data-section" aria-label="数据管理">
+            <div class="section-title-row">
+              <h3>数据管理</h3>
+              <span>本地备份</span>
+            </div>
+            <div class="data-actions">
+              <button id="exportDataBtn" class="outline-button" type="button">导出全部数据</button>
+              <button id="importDataBtn" class="outline-button" type="button">导入数据</button>
+              <button id="clearAllDataBtn" class="outline-button danger" type="button">清空全部数据</button>
+            </div>
+            <input id="importDataInput" class="visually-hidden" type="file" accept="application/json,.json">
+          </section>
+
+          <p id="settingsSavedTip" class="saved-tip" aria-live="polite"></p>
+        </form>
+      </section>
+
+      <section id="privateChatSettingsScreen" class="screen" aria-label="私聊设置">
+        <header class="nav-bar">
+          <button id="privateChatSettingsBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2>聊天设置</h2>
+          <button id="savePrivateChatSettingsBtn" class="nav-text-button" type="button">保存</button>
+        </header>
+        <form id="privateChatSettingsForm" class="screen-content form-content" autocomplete="off"></form>
+      </section>
+
+      <section id="groupSettingsScreen" class="screen" aria-label="群聊设置">
+        <header class="nav-bar">
+          <button id="groupSettingsBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2>群聊设置</h2>
+          <button id="saveGroupSettingsBtn" class="nav-text-button" type="button">保存</button>
+        </header>
+        <form id="groupSettingsForm" class="screen-content form-content" autocomplete="off"></form>
+      </section>
+
+      <section id="worldBookScreen" class="screen" aria-label="世界书">
+        <header class="nav-bar">
+          <button id="worldBookBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2>世界书</h2>
+          <button id="newWorldBookBtn" class="nav-text-button" type="button">新建</button>
+        </header>
+        <div id="worldBookContent" class="screen-content notebook-content"></div>
+      </section>
+
+      <section id="diaryScreen" class="screen" aria-label="日记">
+        <header class="nav-bar">
+          <button id="diaryBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2>日记</h2>
+          <span class="nav-spacer" aria-hidden="true"></span>
+        </header>
+        <div id="diaryContent" class="screen-content diary-content"></div>
+      </section>
+
+      <section id="characterSpaceScreen" class="screen" aria-label="角色空间">
+        <header class="nav-bar">
+          <button id="characterSpaceBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2>角色空间</h2>
+          <span class="nav-spacer" aria-hidden="true"></span>
+        </header>
+        <div id="characterSpaceContent" class="screen-content space-content"></div>
+      </section>
+
+      <section id="thoughtsScreen" class="screen" aria-label="心声">
+        <header class="nav-bar">
+          <button id="thoughtsBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2 id="thoughtsTitle">心声</h2>
+          <span class="nav-spacer" aria-hidden="true"></span>
+        </header>
+        <div id="thoughtsContent" class="screen-content thoughts-content"></div>
+      </section>
+    </main>
+
+    <div id="messageActionSheet" class="message-action-sheet hidden" aria-label="消息操作菜单">
+      <div class="message-action-panel">
+        <button type="button" data-action="copy">复制</button>
+        <button type="button" data-action="delete">删除</button>
+        <button type="button" data-action="regenerate">重新生成</button>
+        <button type="button" data-action="memory">写入记忆</button>
+        <button type="button" data-action="cancel">取消</button>
+      </div>
+    </div>
+
+    <div id="wechatModalMask" class="wechat-modal-mask hidden" aria-label="微信功能弹窗">
+      <section id="wechatSheet" class="wechat-sheet" role="dialog" aria-modal="true"></section>
+    </div>
+    <input id="emojiImportInput" class="visually-hidden" type="file" accept="image/*">
+    <input id="messageImageInput" class="visually-hidden" type="file" accept="image/*">
+  </div>
+
+  <script src="js/storage.js"></script>
+  <script src="js/ai.js"></script>
+  <script src="js/character.js"></script>
+  <script src="js/group.js"></script>
+  <script src="js/offline.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>

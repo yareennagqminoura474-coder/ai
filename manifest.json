@@ -1,0 +1,10 @@
+{
+  "name": "AI 角色互动 App",
+  "short_name": "AI 角色",
+  "description": "一个用于创建和管理 AI 角色互动体验的移动端网页框架。",
+  "start_url": "index.html",
+  "display": "standalone",
+  "background_color": "#f6f7f4",
+  "theme_color": "#f6f7f4",
+  "orientation": "portrait"
+}
