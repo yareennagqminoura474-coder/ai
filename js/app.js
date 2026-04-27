@@ -17,6 +17,9 @@
     "settingsScreen",
     "privateChatSettingsScreen",
     "groupSettingsScreen",
+    "walletScreen",
+    "walletBillScreen",
+    "familyCardScreen",
     "worldBookScreen",
     "diaryScreen",
     "characterSpaceScreen",
@@ -40,6 +43,26 @@
   };
   var noteSearchKeyword = "";
   var currentThemeId = "default";
+  var currentDesktopPage = 0;
+  var desktopTouchStartX = 0;
+  var desktopTouchDeltaX = 0;
+  var desktopApps = [
+    { id: "wechat", name: "微信", icon: "微", className: "desktop-wechat", action: "wechat" },
+    { id: "photo", name: "相册", icon: "相", className: "desktop-photo", action: "photo" },
+    { id: "notebook", name: "记事本", icon: "记", className: "desktop-note", action: "notebook" },
+    { id: "settings", name: "设置", icon: "设", className: "desktop-setting", action: "settings" },
+    { id: "worldbook", name: "世界书", icon: "世", className: "desktop-worldbook", action: "worldbook" },
+    { id: "diary", name: "日记", icon: "日", className: "desktop-diary", action: "diary" },
+    { id: "space", name: "角色空间", icon: "灵", className: "desktop-space", action: "space" },
+    { id: "backup", name: "备份", icon: "备", className: "desktop-backup", action: "backup" },
+    { id: "theme", name: "主题", icon: "题", className: "desktop-theme", action: "theme" },
+    { id: "thoughts", name: "心声", icon: "心", className: "desktop-thought", action: "thoughts" },
+    { id: "wallet", name: "钱包", icon: "¥", className: "desktop-wallet", action: "wallet" },
+    { id: "contacts", name: "联系人", icon: "录", className: "desktop-contacts", action: "contacts" },
+    { id: "emoji", name: "表情包图库", icon: "笑", className: "desktop-emoji", action: "emoji" },
+    { id: "me", name: "我的", icon: "我", className: "desktop-me", action: "me" }
+  ];
+  var desktopPageSize = 10;
   var themePresets = [
     { id: "default", name: "默认浅色", bg: "#f6f7f4", surface: "#ffffff", text: "#1d2521", muted: "#73817a", blue: "#5b9fe6", green: "#68bea3" },
     { id: "pink", name: "粉色", bg: "#fff5f8", surface: "#ffffff", text: "#2b2025", muted: "#8d6f7b", blue: "#7aa7ea", green: "#69bda3" },
@@ -65,6 +88,13 @@
 
   function getElement(id) {
     return document.getElementById(id);
+  }
+
+  function addClick(id, handler) {
+    var element = getElement(id);
+    if (element) {
+      element.addEventListener("click", handler);
+    }
   }
 
   function escapeHtml(value) {
@@ -108,10 +138,23 @@
 
     if (pageId === "homeScreen") {
       refreshHomeSummary();
+      renderDesktop();
     }
 
     if (pageId === "wechatScreen") {
       renderWechatScreen();
+    }
+
+    if (pageId === "walletScreen") {
+      renderWalletScreen();
+    }
+
+    if (pageId === "walletBillScreen") {
+      renderWalletBillScreen();
+    }
+
+    if (pageId === "familyCardScreen") {
+      renderFamilyCardScreen();
     }
 
     if (pageId === "characterListScreen") {
@@ -166,15 +209,19 @@
   function updateDockState(pageId) {
     var dockHome = getElement("dockHome");
     var dockChat = getElement("dockChat");
+    var dockTheme = getElement("dockTheme");
     var dockSettings = getElement("dockSettings");
 
     if (!dockHome || !dockChat || !dockSettings) {
       return;
     }
 
-    dockHome.classList.toggle("active", pageId === "homeScreen");
+    dockHome.classList.toggle("active", pageId === "homeScreen" || pageId === "wechatScreen");
     dockChat.classList.toggle("active", pageId === "wechatScreen" || pageId === "characterListScreen" || pageId === "chatScreen" || pageId === "groupListScreen" || pageId === "groupChatScreen" || pageId === "privateChatSettingsScreen" || pageId === "groupSettingsScreen" || pageId === "thoughtsScreen");
-    dockSettings.classList.toggle("active", pageId === "settingsScreen" || pageId === "worldBookScreen" || pageId === "diaryScreen" || pageId === "characterSpaceScreen");
+    if (dockTheme) {
+      dockTheme.classList.toggle("active", pageId === "themeScreen");
+    }
+    dockSettings.classList.toggle("active", pageId === "settingsScreen" || pageId === "worldBookScreen" || pageId === "diaryScreen" || pageId === "characterSpaceScreen" || pageId === "walletScreen" || pageId === "walletBillScreen" || pageId === "familyCardScreen");
   }
 
   function refreshHomeSummary() {
@@ -196,27 +243,231 @@
     }
   }
 
+  function renderDesktop() {
+    var viewport = getElement("desktopPagesViewport");
+    var dots = getElement("desktopPageDots");
+    var state = window.AppStorage.getDesktopState ? window.AppStorage.getDesktopState() : { currentPage: 0 };
+    var pages = getDesktopPages();
+
+    if (!viewport || !dots) {
+      return;
+    }
+
+    currentDesktopPage = Math.max(0, Math.min(Number(state.currentPage) || 0, pages.length - 1));
+    viewport.innerHTML = pages.map(function (pageApps, pageIndex) {
+      return [
+        '<div class="desktop-page" data-desktop-page="' + pageIndex + '">',
+        '  <div class="desktop-app-grid">',
+        pageApps.map(renderDesktopApp).join(""),
+        "  </div>",
+        "</div>"
+      ].join("");
+    }).join("");
+    viewport.style.transform = "translateX(-" + (currentDesktopPage * 100) + "%)";
+
+    dots.innerHTML = pages.map(function (pageApps, pageIndex) {
+      return '<button type="button" data-desktop-dot="' + pageIndex + '" class="' + (pageIndex === currentDesktopPage ? "active" : "") + '" aria-label="第 ' + (pageIndex + 1) + ' 页"></button>';
+    }).join("");
+
+    bindDesktopPageActions(viewport, dots);
+  }
+
+  function getDesktopPages() {
+    var pages = [];
+    var index;
+
+    for (index = 0; index < desktopApps.length; index += desktopPageSize) {
+      pages.push(desktopApps.slice(index, index + desktopPageSize));
+    }
+
+    return pages.length ? pages : [[]];
+  }
+
+  function renderDesktopApp(app) {
+    return [
+      '<button class="desktop-app-icon" type="button" data-desktop-action="' + escapeHtml(app.action) + '">',
+      '  <span class="desktop-icon-symbol ' + escapeHtml(app.className) + '" aria-hidden="true">' + escapeHtml(app.icon) + "</span>",
+      "  <span>" + escapeHtml(app.name) + "</span>",
+      "</button>"
+    ].join("");
+  }
+
+  function bindDesktopPageActions(viewport, dots) {
+    Array.prototype.forEach.call(viewport.querySelectorAll("[data-desktop-action]"), function (button) {
+      button.addEventListener("click", function () {
+        handleDesktopAction(button.dataset.desktopAction);
+      });
+    });
+
+    Array.prototype.forEach.call(dots.querySelectorAll("[data-desktop-dot]"), function (button) {
+      button.addEventListener("click", function () {
+        setDesktopPage(Number(button.dataset.desktopDot));
+      });
+    });
+  }
+
+  function bindDesktopSwipe() {
+    var viewport = getElement("desktopPagesViewport");
+
+    if (!viewport) {
+      return;
+    }
+
+    viewport.addEventListener("touchstart", function (event) {
+      desktopTouchStartX = event.touches && event.touches[0] ? event.touches[0].clientX : 0;
+      desktopTouchDeltaX = 0;
+    }, { passive: true });
+
+    viewport.addEventListener("touchmove", function (event) {
+      var currentX = event.touches && event.touches[0] ? event.touches[0].clientX : desktopTouchStartX;
+      desktopTouchDeltaX = currentX - desktopTouchStartX;
+    }, { passive: true });
+
+    viewport.addEventListener("touchend", function () {
+      if (Math.abs(desktopTouchDeltaX) > 46) {
+        setDesktopPage(currentDesktopPage + (desktopTouchDeltaX < 0 ? 1 : -1));
+      }
+      desktopTouchStartX = 0;
+      desktopTouchDeltaX = 0;
+    }, { passive: true });
+  }
+
+  function setDesktopPage(pageIndex) {
+    var pages = getDesktopPages();
+    var nextPage = Math.max(0, Math.min(Number(pageIndex) || 0, pages.length - 1));
+    currentDesktopPage = nextPage;
+    if (window.AppStorage.updateDesktopState) {
+      window.AppStorage.updateDesktopState({ currentPage: nextPage });
+    }
+    renderDesktop();
+  }
+
+  function handleDesktopAction(action) {
+    if (action === "wechat") {
+      setWechatTab("wechat");
+      setActivePage("wechatScreen");
+      return;
+    }
+    if (action === "photo") {
+      setActivePage("photoScreen");
+      return;
+    }
+    if (action === "notebook") {
+      setActivePage("notebookScreen");
+      return;
+    }
+    if (action === "settings") {
+      setActivePage("settingsScreen");
+      return;
+    }
+    if (action === "worldbook") {
+      setActivePage("worldBookScreen");
+      return;
+    }
+    if (action === "diary") {
+      openDiaryScreen();
+      return;
+    }
+    if (action === "space") {
+      openCharacterSpaceScreen();
+      return;
+    }
+    if (action === "backup") {
+      setActivePage("settingsScreen");
+      return;
+    }
+    if (action === "theme") {
+      setActivePage("themeScreen");
+      return;
+    }
+    if (action === "wallet") {
+      setActivePage("walletScreen");
+      return;
+    }
+    if (action === "contacts") {
+      setActivePage("characterListScreen");
+      return;
+    }
+    if (action === "thoughts") {
+      renderThoughtsScreen("全部心声", window.AppStorage.getCharacters().map(function (character) {
+        return character.id;
+      }));
+      setActivePage("thoughtsScreen");
+      return;
+    }
+    if (action === "me") {
+      setWechatTab("me");
+      setActivePage("wechatScreen");
+      return;
+    }
+    if (action === "emoji") {
+      window.alert("表情包图库在聊天表情面板里导入和使用。");
+    }
+  }
+
+  function setWechatTab(tab) {
+    if (window.AppStorage.updateWechatState) {
+      window.AppStorage.updateWechatState({ tab: tab });
+    }
+    renderWechatScreen();
+  }
+
   function renderWechatScreen() {
-    var list = getElement("wechatRecentList");
-    var count = getElement("wechatRecentCount");
+    var content = getElement("wechatTabContent");
+    var state = window.AppStorage.getWechatState ? window.AppStorage.getWechatState() : { tab: "wechat" };
+    var tab = state.tab || "wechat";
+
+    if (!content) {
+      return;
+    }
+
+    renderWechatTabbar(tab);
+
+    if (tab === "discover") {
+      renderWechatDiscoverTab(content);
+      return;
+    }
+
+    if (tab === "me") {
+      renderWechatMeTab(content);
+      return;
+    }
+
+    if (tab === "spirit") {
+      renderWechatSpiritTab(content);
+      return;
+    }
+
+    renderWechatChatsTab(content);
+  }
+
+  function renderWechatTabbar(activeTab) {
+    Array.prototype.forEach.call(document.querySelectorAll("[data-wechat-tab]"), function (button) {
+      button.classList.toggle("active", button.dataset.wechatTab === activeTab);
+    });
+  }
+
+  function renderWechatChatsTab(content) {
     var recentItems = getRecentChats();
 
-    if (!list) {
-      return;
-    }
+    content.innerHTML = [
+      '<section class="wechat-quick-row" aria-label="聊天快捷入口">',
+      '  <button type="button" data-wechat-entry="private"><span class="wechat-entry-icon tile-chat">私</span><strong>私聊</strong></button>',
+      '  <button type="button" data-wechat-entry="group"><span class="wechat-entry-icon tile-group">群</span><strong>群聊</strong></button>',
+      '  <button type="button" data-wechat-entry="new-character"><span class="wechat-entry-icon tile-create">+</span><strong>角色</strong></button>',
+      '  <button type="button" data-wechat-entry="new-group"><span class="wechat-entry-icon tile-group">群</span><strong>建群</strong></button>',
+      "</section>",
+      '<section class="wechat-list-panel">',
+      '  <div class="section-title-row"><h3>最近聊天</h3><span id="wechatRecentCount">' + recentItems.length + " 条</span></div>",
+      '  <div id="wechatRecentList" class="recent-chat-list">',
+      recentItems.length ? recentItems.map(renderRecentChatItem).join("") : '<div class="soft-empty">暂无最近聊天，先发一句话，让角色出现在这里。</div>',
+      "  </div>",
+      "</section>"
+    ].join("");
 
-    if (count) {
-      count.textContent = recentItems.length + " 条";
-    }
+    bindWechatEntryActions(content);
 
-    if (!recentItems.length) {
-      list.innerHTML = '<div class="soft-empty">暂无最近聊天，先从上方入口开始</div>';
-      return;
-    }
-
-    list.innerHTML = recentItems.map(renderRecentChatItem).join("");
-
-    Array.prototype.forEach.call(list.querySelectorAll("[data-recent-open]"), function (item) {
+    Array.prototype.forEach.call(content.querySelectorAll("[data-recent-open]"), function (item) {
       item.addEventListener("click", function () {
         if (item.dataset.recentType === "private") {
           window.CharacterManager.openChatScreen(item.dataset.recentId);
@@ -226,12 +477,231 @@
       });
     });
 
-    Array.prototype.forEach.call(list.querySelectorAll("[data-recent-action]"), function (button) {
+    Array.prototype.forEach.call(content.querySelectorAll("[data-recent-action]"), function (button) {
       button.addEventListener("click", function (event) {
         event.stopPropagation();
         handleRecentAction(button.dataset.recentAction, button.dataset.recentType, button.dataset.recentId, Number(button.dataset.recentTime) || Date.now());
       });
     });
+  }
+
+  function bindWechatEntryActions(content) {
+    Array.prototype.forEach.call(content.querySelectorAll("[data-wechat-entry]"), function (button) {
+      button.addEventListener("click", function () {
+        handleWechatEntryAction(button.dataset.wechatEntry);
+      });
+    });
+  }
+
+  function handleWechatEntryAction(action) {
+    if (action === "private" || action === "contacts") {
+      setActivePage("characterListScreen");
+      return;
+    }
+    if (action === "group") {
+      setActivePage("groupListScreen");
+      return;
+    }
+    if (action === "new-character") {
+      window.CharacterManager.openCreateCharacterScreen();
+      return;
+    }
+    if (action === "new-group") {
+      window.GroupManager.openCreateGroupScreen();
+      return;
+    }
+    if (action === "wallet") {
+      setActivePage("walletScreen");
+      return;
+    }
+    if (action === "photo") {
+      setActivePage("photoScreen");
+      return;
+    }
+    if (action === "diary") {
+      openDiaryScreen();
+      return;
+    }
+    if (action === "worldbook") {
+      setActivePage("worldBookScreen");
+      return;
+    }
+    if (action === "space") {
+      openCharacterSpaceScreen();
+      return;
+    }
+    if (action === "theme") {
+      setActivePage("themeScreen");
+      return;
+    }
+    if (action === "backup") {
+      setActivePage("settingsScreen");
+    }
+  }
+
+  function renderWechatDiscoverTab(content) {
+    content.innerHTML = [
+      '<section class="discover-grid">',
+      renderDiscoverCard("photo", "相册", "照片和图片消息", "相"),
+      renderDiscoverCard("diary", "日记", "角色日记与我的日记", "日"),
+      renderDiscoverCard("worldbook", "世界书", "共享设定与关键词", "世"),
+      renderDiscoverCard("theme", "主题", "桌面和聊天外观", "题"),
+      renderDiscoverCard("backup", "备份", "导入导出全部数据", "备"),
+      renderDiscoverCard("contacts", "联系人", "角色列表", "录"),
+      "</section>"
+    ].join("");
+    bindWechatEntryActions(content);
+    Array.prototype.forEach.call(content.querySelectorAll("[data-character-space-id]"), function (button) {
+      button.addEventListener("click", function () {
+        openCharacterSpaceScreen(button.dataset.characterSpaceId);
+      });
+    });
+  }
+
+  function renderDiscoverCard(action, title, subtitle, icon) {
+    return [
+      '<button class="discover-card" type="button" data-wechat-entry="' + escapeHtml(action) + '">',
+      '  <span class="discover-icon">' + escapeHtml(icon) + "</span>",
+      "  <strong>" + escapeHtml(title) + "</strong>",
+      "  <em>" + escapeHtml(subtitle) + "</em>",
+      "</button>"
+    ].join("");
+  }
+
+  function renderWechatMeTab(content) {
+    var profile = window.AppStorage.getUserProfile();
+    var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { balance: 0, ledger: [], familyCards: [] };
+    var listItems = [
+      ["收藏", "bookmark", "常用片段与收藏内容"],
+      ["联系人分组", "layers", "管理角色关系"],
+      ["日记本", "diary", "我的日记和角色日记"],
+      ["多重人设", "persona", "聊天里的我"],
+      ["表情包图库", "emoji", "导入与发送表情"],
+      ["一起听歌", "music", "音乐卡片"],
+      ["书城", "book", "故事与设定"],
+      ["选择", "choice", "选择困难？让朋友帮你决定"],
+      ["更多", "more", "更多本地工具"]
+    ];
+
+    content.innerHTML = [
+      '<section class="me-page">',
+      '  <button class="me-profile-card" type="button" data-me-action="profile">',
+      renderProfileAvatar(profile),
+      '    <span class="me-profile-main"><strong>' + escapeHtml(profile.name || "林澈") + "</strong><em>微信号：" + escapeHtml(profile.wxid) + "</em></span>",
+      '    <span class="me-arrow">›</span>',
+      "  </button>",
+      '  <button class="me-wallet-entry" type="button" data-me-action="wallet"><span>▣</span><strong>钱包</strong><em>余额 ¥' + formatMoney(wallet.balance) + "</em><i>›</i></button>",
+      '  <label class="me-switch-card"><span>朋友圈智能互评</span><input id="momentsAutoReviewToggle" type="checkbox"' + (profile.momentsAutoReview ? " checked" : "") + "><i></i></label>",
+      '  <section class="me-list-card">',
+      listItems.map(function (item) {
+        return '<button type="button" data-me-action="' + item[1] + '"><span>' + escapeHtml(item[0].slice(0, 1)) + '</span><strong>' + escapeHtml(item[0]) + '</strong><em>' + escapeHtml(item[2]) + '</em><i>›</i></button>';
+      }).join(""),
+      "  </section>",
+      "</section>"
+    ].join("");
+    bindMeActions(content);
+  }
+
+  function renderProfileAvatar(profile) {
+    if (profile.avatar) {
+      return '<img class="me-avatar" src="' + escapeHtml(profile.avatar) + '" alt="">';
+    }
+
+    return '<span class="me-avatar" aria-hidden="true">' + escapeHtml((profile.name || "我").slice(0, 1)) + "</span>";
+  }
+
+  function bindMeActions(content) {
+    Array.prototype.forEach.call(content.querySelectorAll("[data-me-action]"), function (button) {
+      button.addEventListener("click", function () {
+        handleMeAction(button.dataset.meAction);
+      });
+    });
+
+    var toggle = content.querySelector("#momentsAutoReviewToggle");
+    if (toggle) {
+      toggle.addEventListener("change", function () {
+        var profile = window.AppStorage.getUserProfile();
+        profile.momentsAutoReview = toggle.checked;
+        window.AppStorage.saveUserProfile(profile);
+      });
+    }
+  }
+
+  function handleMeAction(action) {
+    var profile;
+    var name;
+    var wxid;
+
+    if (action === "wallet") {
+      setActivePage("walletScreen");
+      return;
+    }
+
+    if (action === "profile") {
+      profile = window.AppStorage.getUserProfile();
+      name = window.prompt("昵称", profile.name || "林澈");
+      if (name === null) {
+        return;
+      }
+      wxid = window.prompt("微信号", profile.wxid || "");
+      if (wxid === null) {
+        return;
+      }
+      profile.name = name.trim() || "林澈";
+      profile.wxid = wxid.trim() || profile.wxid;
+      window.AppStorage.saveUserProfile(profile);
+      renderWechatScreen();
+      return;
+    }
+
+    if (action === "diary") {
+      openDiaryScreen();
+      return;
+    }
+
+    if (action === "emoji") {
+      window.alert("表情包图库可在聊天输入栏的表情面板中导入使用。");
+      return;
+    }
+
+    if (action === "persona") {
+      setActivePage("settingsScreen");
+      return;
+    }
+
+    window.alert("这个入口已保留，后续可以继续扩展。");
+  }
+
+  function renderWechatSpiritTab(content) {
+    var characters = window.AppStorage.getCharacters();
+    var groups = window.AppStorage.getGroups ? window.AppStorage.getGroups() : [];
+
+    content.innerHTML = [
+      '<section class="spirit-summary">',
+      '  <strong>' + characters.length + "</strong><span>个角色</span>",
+      '  <strong>' + groups.length + "</strong><span>个群聊</span>",
+      "</section>",
+      '<section class="wechat-list-panel">',
+      '  <div class="section-title-row"><h3>精灵空间</h3><span>角色管理</span></div>',
+      '  <div class="spirit-actions">',
+      '    <button type="button" data-wechat-entry="space">角色空间</button>',
+      '    <button type="button" data-wechat-entry="contacts">联系人</button>',
+      '    <button type="button" data-wechat-entry="new-character">创建角色</button>',
+      '    <button type="button" data-wechat-entry="new-group">创建群聊</button>',
+      "  </div>",
+      characters.length ? characters.slice(0, 6).map(renderSpiritCharacter).join("") : '<div class="soft-empty">还没有角色，先创建一个精灵吧。</div>',
+      "</section>"
+    ].join("");
+    bindWechatEntryActions(content);
+  }
+
+  function renderSpiritCharacter(character) {
+    return [
+      '<button class="spirit-character-row" type="button" data-character-space-id="' + escapeHtml(character.id) + '">',
+      renderSmallAvatar(character, "spirit-avatar"),
+      '  <span><strong>' + escapeHtml(character.name || "未命名角色") + "</strong><em>" + escapeHtml(character.identity || character.relationship || "未设置身份") + "</em></span>",
+      "</button>"
+    ].join("");
   }
 
   function getRecentChats() {
@@ -391,13 +861,38 @@
     return message.content || "暂无内容";
   }
 
+  function formatRecentTime(timestamp) {
+    var date;
+    var now;
+
+    if (!timestamp) {
+      return "";
+    }
+
+    date = new Date(timestamp);
+    now = new Date();
+    if (date.toDateString() === now.toDateString()) {
+      return String(date.getHours()).padStart(2, "0") + ":" + String(date.getMinutes()).padStart(2, "0");
+    }
+
+    return String(date.getMonth() + 1).padStart(2, "0") + "/" + String(date.getDate()).padStart(2, "0");
+  }
+
+  function formatMoney(value) {
+    var amount = Number(value);
+    if (!Number.isFinite(amount)) {
+      amount = 0;
+    }
+    return amount.toFixed(2);
+  }
+
   function renderRecentChatItem(item) {
     return [
       '<article class="recent-chat-item' + (item.pinned ? " pinned" : "") + '">',
       '  <button class="recent-open" type="button" data-recent-open data-recent-type="' + escapeHtml(item.type) + '" data-recent-id="' + escapeHtml(item.id) + '">',
       item.type === "group" ? renderRecentGroupAvatar(item.memberIds) : renderRecentSingleAvatar(item),
       '    <span class="recent-chat-main">',
-      '      <strong>' + (item.pinned ? '<i>置顶</i>' : "") + escapeHtml(item.title) + "</strong>",
+      '      <strong>' + (item.pinned ? '<i>置顶</i>' : "") + escapeHtml(item.title) + (item.type === "group" ? '<b aria-label="群聊">♟</b>' : "") + '<time>' + escapeHtml(formatRecentTime(item.time)) + "</time></strong>",
       item.originalTitle && item.originalTitle !== item.title ? '      <small>原名：' + escapeHtml(item.originalTitle) + "</small>" : "",
       "      <em>" + escapeHtml(item.preview) + "</em>",
       "    </span>",
@@ -439,41 +934,7 @@
   }
 
   function bindHomeActions() {
-    getElement("openWeChat").addEventListener("click", function () {
-      setActivePage("wechatScreen");
-    });
-
-    getElement("openSettings").addEventListener("click", function () {
-      setActivePage("settingsScreen");
-    });
-
-    getElement("openWorldBook").addEventListener("click", function () {
-      setActivePage("worldBookScreen");
-    });
-
-    getElement("openDiary").addEventListener("click", function () {
-      openDiaryScreen();
-    });
-
-    getElement("openCharacterSpace").addEventListener("click", function () {
-      openCharacterSpaceScreen();
-    });
-
-    getElement("openBackup").addEventListener("click", function () {
-      setActivePage("settingsScreen");
-    });
-
-    getElement("openTheme").addEventListener("click", function () {
-      setActivePage("themeScreen");
-    });
-
-    getElement("openPhoto").addEventListener("click", function () {
-      setActivePage("photoScreen");
-    });
-
-    getElement("openNotebook").addEventListener("click", function () {
-      setActivePage("notebookScreen");
-    });
+    bindDesktopSwipe();
 
     Array.prototype.forEach.call(document.querySelectorAll(".desktop-coming"), function (button) {
       button.addEventListener("click", function () {
@@ -481,11 +942,17 @@
       });
     });
 
-    getElement("dockHome").addEventListener("click", goHome);
-    getElement("dockChat").addEventListener("click", function () {
+    addClick("dockHome", function () {
+      setWechatTab("wechat");
       setActivePage("wechatScreen");
     });
-    getElement("dockSettings").addEventListener("click", function () {
+    addClick("dockChat", function () {
+      setActivePage("characterListScreen");
+    });
+    addClick("dockTheme", function () {
+      setActivePage("themeScreen");
+    });
+    addClick("dockSettings", function () {
       setActivePage("settingsScreen");
     });
   }
@@ -516,6 +983,17 @@
     getElement("wechatAddBtn").addEventListener("click", function () {
       window.CharacterManager.openCreateCharacterScreen();
     });
+    getElement("walletBackBtn").addEventListener("click", function () {
+      setWechatTab("me");
+      setActivePage("wechatScreen");
+    });
+    getElement("walletBillBackBtn").addEventListener("click", function () {
+      setActivePage("walletScreen");
+    });
+    getElement("familyCardBackBtn").addEventListener("click", function () {
+      setActivePage("walletScreen");
+    });
+    getElement("newFamilyCardBtn").addEventListener("click", openFamilyCardEditor);
     getElement("settingsBackBtn").addEventListener("click", goHome);
     getElement("privateChatSettingsBackBtn").addEventListener("click", function () {
       setActivePage("chatScreen");
@@ -572,28 +1050,10 @@
       window.CharacterManager.requestCharacterReply();
     });
 
-    getElement("wechatOpenCharacterList").addEventListener("click", function () {
-      setActivePage("characterListScreen");
-    });
-
-    getElement("wechatOpenGroupList").addEventListener("click", function () {
-      setActivePage("groupListScreen");
-    });
-
-    getElement("wechatOpenCreateCharacter").addEventListener("click", function () {
-      window.CharacterManager.openCreateCharacterScreen();
-    });
-
-    getElement("wechatOpenCreateGroup").addEventListener("click", function () {
-      window.GroupManager.openCreateGroupScreen();
-    });
-
-    getElement("wechatOpenContacts").addEventListener("click", function () {
-      setActivePage("characterListScreen");
-    });
-
-    getElement("wechatOpenData").addEventListener("click", function () {
-      setActivePage("settingsScreen");
+    Array.prototype.forEach.call(document.querySelectorAll("[data-wechat-tab]"), function (button) {
+      button.addEventListener("click", function () {
+        setWechatTab(button.dataset.wechatTab);
+      });
     });
 
     getElement("saveGroupBtn").addEventListener("click", window.GroupManager.saveGroupFromForm);
@@ -2585,6 +3045,13 @@
     var memories = window.AppStorage.getCharacterMemory(character.id);
     var thoughts = window.AppStorage.getCharacterThoughts(character.id);
     var diaries = window.AppStorage.getDiariesByCharacter(character.id);
+    var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { ledger: [], familyCards: [] };
+    var relatedLedger = wallet.ledger.filter(function (record) {
+      return record.characterId === character.id;
+    }).slice(0, 5);
+    var familyCards = wallet.familyCards.filter(function (card) {
+      return card.targetCharacterId === character.id;
+    });
     var groups = window.AppStorage.getGroups().filter(function (group) {
       return (group.memberIds || []).indexOf(character.id) !== -1;
     });
@@ -2601,6 +3068,7 @@
       '<div class="settings-action-row"><button class="outline-button" type="button" data-space-action="open-chat">和 TA 私聊</button><button class="outline-button" type="button" data-space-action="edit-character">编辑角色</button></div></section>',
       '<section class="form-section"><div class="section-title-row"><h3>角色记忆</h3><span>' + memories.length + " 条</span></div>" + renderSimpleList(memories.map(function (memory) { return memory.content; }), "暂无记忆") + '<button class="outline-button danger" type="button" data-space-action="clear-memory">清空记忆</button></section>',
       '<section class="form-section"><div class="section-title-row"><h3>角色心声</h3><span>' + thoughts.length + " 条</span></div>" + renderSimpleList(thoughts.slice(0, 5).map(function (thought) { return thought.visibleSummary || thought.content; }), "暂无心声") + '<div class="settings-action-row"><button class="outline-button" type="button" data-space-action="open-thoughts">查看全部心声</button><button class="outline-button danger" type="button" data-space-action="clear-thoughts">清空心声</button></div></section>',
+      '<section class="form-section"><div class="section-title-row"><h3>钱包关联</h3><span>' + relatedLedger.length + " 条账单</span></div>" + renderSimpleList(familyCards.map(function (card) { return card.name + "：剩余 ¥" + formatMoney(Math.max(0, card.totalLimit - card.usedAmount)); }), "未绑定亲属卡") + renderSimpleList(relatedLedger.map(function (record) { return getLedgerTypeName(record.type) + " " + (record.direction === "income" ? "+" : "-") + "¥" + formatMoney(record.amount); }), "暂无相关账单") + "</section>",
       '<section class="form-section"><div class="section-title-row"><h3>角色日记</h3><span>' + diaries.length + " 篇</span></div>" + renderSimpleList(diaries.slice(0, 5).map(function (diary) { return diary.date + " · " + diary.title; }), "暂无日记") + "</section>",
       '<section class="form-section"><div class="section-title-row"><h3>参与群聊</h3><span>' + groups.length + " 个</span></div>" + (groups.length ? '<div class="simple-list">' + groups.map(function (group) { return '<button type="button" data-space-group-id="' + escapeHtml(group.id) + '">' + escapeHtml(group.name) + "</button>"; }).join("") + "</div>" : '<div class="soft-empty">还没有参与群聊</div>') + "</section>"
     ].join("");
@@ -2831,6 +3299,276 @@
         window.alert("已写入记忆。");
       }
     };
+  }
+
+  function renderWalletScreen() {
+    var content = getElement("walletContent");
+    var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { balance: 0, ledger: [], familyCards: [] };
+    var profile = window.AppStorage.getUserProfile();
+    var activeCards = wallet.familyCards.filter(function (card) {
+      return card.enabled;
+    });
+
+    if (!content) {
+      return;
+    }
+
+    content.innerHTML = [
+      '<section class="wallet-card">',
+      '  <div class="wallet-chip" aria-hidden="true"></div>',
+      '  <strong>YAN PAY</strong>',
+      '  <span>账户余额</span>',
+      '  <em>¥ ' + escapeHtml(formatMoney(wallet.balance)) + "</em>",
+      '  <div><b>' + escapeHtml(profile.name || "林澈") + "</b><i>**** **** **** " + escapeHtml(getWalletCardTail(profile.wxid)) + "</i></div>",
+      "</section>",
+      '<button id="walletRechargeBtn" class="wallet-recharge-button" type="button"><span>+</span>充值</button>',
+      '<section class="wallet-menu-list">',
+      '  <button type="button" data-wallet-action="bill"><span>▤</span><strong>账单</strong><em>共 ' + wallet.ledger.length + ' 条记录</em><i>›</i></button>',
+      '  <button type="button" data-wallet-action="family"><span>☷</span><strong>亲属卡</strong><em>' + activeCards.length + ' 张有效亲属卡</em><i>›</i></button>',
+      "</section>"
+    ].join("");
+
+    addClick("walletRechargeBtn", openRechargeSheet);
+    Array.prototype.forEach.call(content.querySelectorAll("[data-wallet-action]"), function (button) {
+      button.addEventListener("click", function () {
+        if (button.dataset.walletAction === "bill") {
+          setActivePage("walletBillScreen");
+        } else {
+          setActivePage("familyCardScreen");
+        }
+      });
+    });
+  }
+
+  function getWalletCardTail(seed) {
+    var text = String(seed || "0816").replace(/\D/g, "");
+    if (text.length < 4) {
+      text = (text + "0816").slice(0, 4);
+    }
+    return text.slice(-4);
+  }
+
+  function openRechargeSheet() {
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      "  <h3>钱包充值</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<form id="walletRechargeForm" class="wechat-sheet-form" autocomplete="off">',
+      '  <label class="wechat-sheet-field"><span>充值金额</span><input id="walletRechargeAmount" type="number" inputmode="decimal" step="0.01" min="0" placeholder="请输入金额"></label>',
+      '  <label class="wechat-sheet-field"><span>备注</span><input id="walletRechargeNote" type="text" maxlength="40" placeholder="钱包充值"></label>',
+      '  <p id="walletRechargeError" class="sheet-error" role="alert"></p>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">确认充值</button></div>',
+      "</form>"
+    ].join(""), function (sheet) {
+      var form = sheet.querySelector("#walletRechargeForm");
+      bindSheetCloseButtons(sheet);
+      form.addEventListener("submit", function (event) {
+        var error = sheet.querySelector("#walletRechargeError");
+        var amount;
+        event.preventDefault();
+        try {
+          amount = normalizeAmount(sheet.querySelector("#walletRechargeAmount").value);
+        } catch (amountError) {
+          error.textContent = amountError.message;
+          return;
+        }
+        window.AppStorage.rechargeWallet(amount, sheet.querySelector("#walletRechargeNote").value.trim() || "钱包充值");
+        closeWeChatSheet();
+        renderWalletScreen();
+      });
+    });
+  }
+
+  function renderWalletBillScreen() {
+    var content = getElement("walletBillContent");
+    var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { ledger: [] };
+
+    if (!content) {
+      return;
+    }
+
+    content.innerHTML = [
+      '<section class="bill-summary"><strong>' + wallet.ledger.length + "</strong><span>条账单记录</span><em>余额 ¥" + escapeHtml(formatMoney(wallet.balance)) + "</em></section>",
+      '<section class="bill-list">',
+      wallet.ledger.length ? wallet.ledger.map(renderLedgerRecord).join("") : '<div class="soft-empty">暂无账单。红包、转账、充值和亲属卡消费会出现在这里。</div>',
+      "</section>"
+    ].join("");
+  }
+
+  function renderLedgerRecord(record) {
+    var income = record.direction === "income";
+    var sourceName = getLedgerSourceName(record);
+    return [
+      '<article class="bill-record ' + (income ? "income" : "expense") + '">',
+      '  <span class="bill-icon">' + escapeHtml(getLedgerTypeIcon(record.type)) + "</span>",
+      '  <div class="bill-main"><strong>' + escapeHtml(getLedgerTypeName(record.type)) + "</strong><em>" + escapeHtml(sourceName) + (record.note ? " · " + escapeHtml(record.note) : "") + "</em><small>" + escapeHtml(formatDateTime(record.createdAt)) + "</small></div>",
+      '  <b>' + (income ? "+" : "-") + "¥" + escapeHtml(formatMoney(record.amount)) + "</b>",
+      "</article>"
+    ].join("");
+  }
+
+  function getLedgerTypeIcon(type) {
+    var map = {
+      recharge: "+",
+      transfer_in: "转",
+      transfer_out: "转",
+      redpacket_in: "福",
+      redpacket_out: "福",
+      familycard_pay: "亲",
+      gift: "礼",
+      system: "账"
+    };
+    return map[type] || "账";
+  }
+
+  function getLedgerTypeName(type) {
+    var map = {
+      recharge: "充值",
+      transfer_in: "收到转账",
+      transfer_out: "转账支出",
+      redpacket_in: "收到红包",
+      redpacket_out: "红包支出",
+      familycard_pay: "亲属卡支付",
+      gift: "礼物",
+      system: "系统记录"
+    };
+    return map[type] || type || "账单";
+  }
+
+  function getLedgerSourceName(record) {
+    var character;
+    var group;
+
+    if (record.characterId) {
+      character = getCharacterById(record.characterId);
+      if (character) {
+        return character.name;
+      }
+    }
+
+    if (record.groupId) {
+      group = (window.AppStorage.getGroups ? window.AppStorage.getGroups() : []).find(function (item) {
+        return item.id === record.groupId;
+      });
+      if (group) {
+        return group.name;
+      }
+    }
+
+    if (record.sourceType === "group") {
+      return "群聊";
+    }
+
+    if (record.sourceType === "offline") {
+      return "线下模式";
+    }
+
+    return "系统";
+  }
+
+  function renderFamilyCardScreen() {
+    var content = getElement("familyCardContent");
+    var cards = window.AppStorage.getFamilyCards ? window.AppStorage.getFamilyCards() : [];
+
+    if (!content) {
+      return;
+    }
+
+    content.innerHTML = [
+      '<section class="family-card-list">',
+      cards.length ? cards.map(renderFamilyCard).join("") : '<div class="soft-empty">还没有亲属卡，点右上角新增一张。</div>',
+      "</section>"
+    ].join("");
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-family-card-action]"), function (button) {
+      button.addEventListener("click", function () {
+        var action = button.dataset.familyCardAction;
+        var cardId = button.dataset.familyCardId;
+
+        if (action === "edit") {
+          openFamilyCardEditor(cardId);
+        } else if (action === "delete" && window.confirm("确定删除这张亲属卡吗？")) {
+          window.AppStorage.deleteFamilyCard(cardId);
+          renderFamilyCardScreen();
+        }
+      });
+    });
+  }
+
+  function renderFamilyCard(card) {
+    var character = getCharacterById(card.targetCharacterId);
+    var left = Math.max(0, Number(card.totalLimit || 0) - Number(card.usedAmount || 0));
+    var percent = card.totalLimit ? Math.min(100, Math.round(card.usedAmount / card.totalLimit * 100)) : 0;
+
+    return [
+      '<article class="family-card-item ' + (card.enabled ? "" : "disabled") + '">',
+      '  <div class="family-card-top"><strong>' + escapeHtml(card.name) + "</strong><span>" + (card.enabled ? "启用中" : "已停用") + "</span></div>",
+      '  <p>关联角色：' + escapeHtml(character ? character.name : "未绑定") + "</p>",
+      '  <div class="family-progress"><i style="width:' + percent + '%"></i></div>',
+      '  <div class="family-card-meta"><span>总额度 ¥' + escapeHtml(formatMoney(card.totalLimit)) + "</span><span>已用 ¥" + escapeHtml(formatMoney(card.usedAmount)) + "</span><span>剩余 ¥" + escapeHtml(formatMoney(left)) + "</span></div>",
+      '  <div class="settings-action-row"><button class="outline-button" type="button" data-family-card-action="edit" data-family-card-id="' + escapeHtml(card.id) + '">修改额度</button><button class="outline-button danger" type="button" data-family-card-action="delete" data-family-card-id="' + escapeHtml(card.id) + '">删除</button></div>',
+      "</article>"
+    ].join("");
+  }
+
+  function openFamilyCardEditor(cardId) {
+    var card = cardId && window.AppStorage.getFamilyCardById ? window.AppStorage.getFamilyCardById(cardId) : null;
+    var characters = window.AppStorage.getCharacters();
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      "  <h3>" + (card ? "修改亲属卡" : "新增亲属卡") + "</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<form id="familyCardForm" class="wechat-sheet-form" autocomplete="off">',
+      '  <label class="wechat-sheet-field"><span>卡名</span><input id="familyCardName" type="text" maxlength="24" value="' + escapeHtml(card ? card.name : "亲属卡") + '"></label>',
+      '  <label class="wechat-sheet-field"><span>关联角色</span><select id="familyCardCharacter">' + characters.map(function (character) {
+        return '<option value="' + escapeHtml(character.id) + '"' + (card && card.targetCharacterId === character.id ? " selected" : "") + ">" + escapeHtml(character.name || "未命名角色") + "</option>";
+      }).join("") + "</select></label>",
+      '  <label class="wechat-sheet-field"><span>总额度</span><input id="familyCardLimit" type="number" inputmode="decimal" step="0.01" min="0" value="' + escapeHtml(card ? card.totalLimit : 1000) + '"></label>',
+      '  <label class="switch-row family-sheet-switch"><input id="familyCardEnabled" type="checkbox"' + (!card || card.enabled ? " checked" : "") + '>启用亲属卡</label>',
+      '  <p id="familyCardError" class="sheet-error" role="alert"></p>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">保存</button></div>',
+      "</form>"
+    ].join(""), function (sheet) {
+      var form = sheet.querySelector("#familyCardForm");
+      bindSheetCloseButtons(sheet);
+      form.addEventListener("submit", function (event) {
+        var error = sheet.querySelector("#familyCardError");
+        var totalLimit = Number(sheet.querySelector("#familyCardLimit").value);
+        event.preventDefault();
+
+        if (!characters.length) {
+          error.textContent = "请先创建角色。";
+          return;
+        }
+
+        if (!totalLimit || totalLimit <= 0) {
+          error.textContent = "请输入有效额度。";
+          return;
+        }
+
+        if (card) {
+          window.AppStorage.updateFamilyCard(card.id, {
+            name: sheet.querySelector("#familyCardName").value.trim() || "亲属卡",
+            targetCharacterId: sheet.querySelector("#familyCardCharacter").value,
+            totalLimit: totalLimit,
+            enabled: sheet.querySelector("#familyCardEnabled").checked
+          });
+        } else {
+          window.AppStorage.addFamilyCard({
+            name: sheet.querySelector("#familyCardName").value.trim() || "亲属卡",
+            targetCharacterId: sheet.querySelector("#familyCardCharacter").value,
+            totalLimit: totalLimit,
+            enabled: sheet.querySelector("#familyCardEnabled").checked
+          });
+        }
+
+        closeWeChatSheet();
+        renderFamilyCardScreen();
+      });
+    });
   }
 
   function loadSettingsIntoForm() {

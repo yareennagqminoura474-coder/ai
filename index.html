@@ -10,6 +10,7 @@
   <meta name="apple-mobile-web-app-title" content="AI手机">
   <title>AI 角色互动手机</title>
   <link rel="manifest" href="./manifest.json">
+  <link rel="icon" href="./assets/icons/icon.svg">
   <link rel="apple-touch-icon" href="./assets/icons/icon-192.png">
   <link rel="stylesheet" href="css/style.css">
 </head>
@@ -33,57 +34,34 @@
             <small id="homeCharacterSummary">还没有角色，先创建你的第一个角色。</small>
           </div>
 
-          <div class="desktop-app-grid">
-            <button id="openWeChat" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-wechat" aria-hidden="true">微</span>
-              <span>微信</span>
-            </button>
-            <button id="openPhoto" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-photo" aria-hidden="true">相</span>
-              <span>相册</span>
-            </button>
-            <button id="openNotebook" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-note" aria-hidden="true">记</span>
-              <span>记事本</span>
-            </button>
-            <button id="openSettings" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-setting" aria-hidden="true">设</span>
-              <span>设置</span>
-            </button>
-            <button id="openWorldBook" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-worldbook" aria-hidden="true">世</span>
-              <span>世界书</span>
-            </button>
-            <button id="openDiary" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-diary" aria-hidden="true">日</span>
-              <span>日记</span>
-            </button>
-            <button id="openCharacterSpace" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-space" aria-hidden="true">角</span>
-              <span>角色空间</span>
-            </button>
-            <button id="openBackup" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-backup" aria-hidden="true">备</span>
-              <span>备份</span>
-            </button>
-            <button id="openTheme" class="desktop-app-icon" type="button">
-              <span class="desktop-icon-symbol desktop-theme" aria-hidden="true">题</span>
-              <span>主题</span>
-            </button>
-          </div>
+          <section class="desktop-music-card" aria-label="音乐卡片">
+            <div class="desktop-record" aria-hidden="true"><span></span></div>
+            <div class="desktop-music-copy">
+              <strong>时光不老，我们不散</strong>
+              <span>一起听歌 · 05:20 / 13:14</span>
+              <div class="desktop-progress"><i></i></div>
+            </div>
+          </section>
+
+          <div id="desktopPagesViewport" class="desktop-pages-viewport" aria-label="桌面 App"></div>
+          <div id="desktopPageDots" class="desktop-page-dots" aria-label="桌面页码"></div>
         </div>
 
         <nav class="dock desktop-dock" aria-label="底部导航">
           <button id="dockHome" class="dock-item active" type="button">
-            <span class="dock-icon" aria-hidden="true">⌂</span>
-            <span>首页</span>
+            <span class="dock-icon" aria-hidden="true">微</span>
+            <span>微信</span>
           </button>
           <button id="dockChat" class="dock-item" type="button">
-            <span class="dock-icon" aria-hidden="true">◇</span>
+            <span class="dock-icon" aria-hidden="true">聊</span>
             <span>聊天</span>
           </button>
+          <button id="dockTheme" class="dock-item" type="button">
+            <span class="dock-icon" aria-hidden="true">美</span>
+            <span>美化</span>
+          </button>
           <button id="dockSettings" class="dock-item" type="button">
-            <span class="dock-icon" aria-hidden="true">◎</span>
+            <span class="dock-icon" aria-hidden="true">设</span>
             <span>设置</span>
           </button>
         </nav>
@@ -96,54 +74,26 @@
           <button id="wechatAddBtn" class="nav-button primary" type="button" aria-label="创建角色">+</button>
         </header>
 
-        <div class="screen-content wechat-content">
-          <section class="wechat-card">
-            <div class="section-title-row">
-              <h3>聊天入口</h3>
-              <span>AI 角色</span>
-            </div>
-            <div class="wechat-entry-grid">
-              <button id="wechatOpenCharacterList" class="wechat-entry" type="button">
-                <span class="wechat-entry-icon tile-chat" aria-hidden="true">私</span>
-                <strong>角色聊天</strong>
-                <em>一对一私聊</em>
-              </button>
-              <button id="wechatOpenGroupList" class="wechat-entry" type="button">
-                <span class="wechat-entry-icon tile-group" aria-hidden="true">群</span>
-                <strong>群聊</strong>
-                <em>多人互动</em>
-              </button>
-              <button id="wechatOpenCreateCharacter" class="wechat-entry" type="button">
-                <span class="wechat-entry-icon tile-create" aria-hidden="true">+</span>
-                <strong>创建角色</strong>
-                <em>添加新朋友</em>
-              </button>
-              <button id="wechatOpenCreateGroup" class="wechat-entry" type="button">
-                <span class="wechat-entry-icon tile-group" aria-hidden="true">群</span>
-                <strong>创建群聊</strong>
-                <em>选择多个角色</em>
-              </button>
-              <button id="wechatOpenContacts" class="wechat-entry" type="button">
-                <span class="wechat-entry-icon tile-contacts" aria-hidden="true">录</span>
-                <strong>通讯录</strong>
-                <em>角色列表</em>
-              </button>
-              <button id="wechatOpenData" class="wechat-entry" type="button">
-                <span class="wechat-entry-icon tile-data" aria-hidden="true">数</span>
-                <strong>数据管理</strong>
-                <em>备份与恢复</em>
-              </button>
-            </div>
-          </section>
+        <div id="wechatTabContent" class="screen-content wechat-content"></div>
 
-          <section class="wechat-card">
-            <div class="section-title-row">
-              <h3>最近聊天</h3>
-              <span id="wechatRecentCount">0 条</span>
-            </div>
-            <div id="wechatRecentList" class="recent-chat-list"></div>
-          </section>
-        </div>
+        <nav class="wechat-tabbar" aria-label="微信底部导航">
+          <button type="button" data-wechat-tab="wechat" class="active">
+            <span aria-hidden="true">●</span>
+            <em>微信</em>
+          </button>
+          <button type="button" data-wechat-tab="discover">
+            <span aria-hidden="true">◆</span>
+            <em>发现</em>
+          </button>
+          <button type="button" data-wechat-tab="me">
+            <span aria-hidden="true">●</span>
+            <em>我</em>
+          </button>
+          <button type="button" data-wechat-tab="spirit">
+            <span aria-hidden="true">✦</span>
+            <em>精灵</em>
+          </button>
+        </nav>
       </section>
 
       <section id="characterListScreen" class="screen" aria-label="角色聊天">
@@ -275,6 +225,7 @@
           <button type="button" data-message-type="pat">拍一拍</button>
           <button type="button" data-message-type="transfer">转账</button>
           <button type="button" data-message-type="redPacket">红包</button>
+          <button type="button" data-message-type="familyCardPay">亲属卡</button>
         </div>
 
         <form id="chatComposer" class="chat-composer" autocomplete="off">
@@ -474,6 +425,33 @@
           <button id="saveGroupSettingsBtn" class="nav-text-button" type="button">保存</button>
         </header>
         <form id="groupSettingsForm" class="screen-content form-content" autocomplete="off"></form>
+      </section>
+
+      <section id="walletScreen" class="screen" aria-label="钱包">
+        <header class="nav-bar">
+          <button id="walletBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
+          <h2>钱包</h2>
+          <span class="nav-spacer" aria-hidden="true"></span>
+        </header>
+        <div id="walletContent" class="screen-content wallet-content"></div>
+      </section>
+
+      <section id="walletBillScreen" class="screen" aria-label="账单">
+        <header class="nav-bar">
+          <button id="walletBillBackBtn" class="nav-button" type="button" aria-label="返回钱包">‹</button>
+          <h2>账单</h2>
+          <span class="nav-spacer" aria-hidden="true"></span>
+        </header>
+        <div id="walletBillContent" class="screen-content wallet-content"></div>
+      </section>
+
+      <section id="familyCardScreen" class="screen" aria-label="亲属卡">
+        <header class="nav-bar">
+          <button id="familyCardBackBtn" class="nav-button" type="button" aria-label="返回钱包">‹</button>
+          <h2>亲属卡</h2>
+          <button id="newFamilyCardBtn" class="nav-text-button" type="button">新增</button>
+        </header>
+        <div id="familyCardContent" class="screen-content wallet-content"></div>
       </section>
 
       <section id="worldBookScreen" class="screen" aria-label="世界书">

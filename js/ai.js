@@ -383,6 +383,7 @@
     });
     var fallbackId = validIds[0] || "";
     var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
+    var normalizedEvents;
     var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(parsed && parsed.thoughts), validIds);
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
@@ -390,21 +391,16 @@
       events = [{ type: "action", characterId: "", content: rawContent }];
     }
 
-    return {
-      events: events.map(function (event, index) {
-        var type = event && event.type === "speech" ? "speech" : "action";
-        var characterId = validIds.indexOf(event && event.characterId) !== -1
-          ? event.characterId
-          : (type === "speech" ? (context.mode === "group" && validIds.length ? validIds[index % validIds.length] : fallbackId) : "");
+    normalizedEvents = normalizeOfflineEventList(events, rawContent, {
+      validIds: validIds,
+      fallbackId: fallbackId,
+      mode: context.mode,
+      min: 10,
+      max: 20
+    });
 
-        return {
-          type: type,
-          characterId: characterId,
-          content: String(event && event.content || "").trim()
-        };
-      }).filter(function (event) {
-        return event.content && (event.type === "action" || event.characterId);
-      }).slice(0, 20),
+    return {
+      events: normalizedEvents,
       thoughts: thoughts,
       memories: memories
     };
@@ -448,12 +444,13 @@
           sceneText || "场景：未指定，请沿用当前聊天氛围。",
           "你要把用户输入理解为一句话、一个动作或一个场景推进点。",
           "本轮只调用一次 API，必须同一次返回 events、thoughts、memories。",
-          "events 一次至少 6 条，最多 20 条。action 是旁白/动作描写，speech 是角色说话。",
+          "events 一次至少 10 条，最多 20 条。action 是旁白/动作描写，speech 是角色说话。",
+          "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":20,\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           "动作描写要短而有画面感；角色发言要像真实当面对话，不要写成长作文。",
           "thoughts 是角色心声，memories 是长期记忆，不要为了心声或记忆额外调用 API。",
           "只返回 JSON，不要 Markdown，不要解释。",
-          "JSON 格式：{\"events\":[{\"type\":\"action\",\"content\":\"动作旁白\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"角色说的话\"}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心想法\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"可写入长期记忆的内容\"}]}",
+          "JSON 格式：{\"events\":[{\"type\":\"action\",\"content\":\"动作旁白\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"角色说的话\",\"money\":{\"type\":\"transfer\",\"amount\":20,\"direction\":\"income\",\"note\":\"补偿\"}}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心想法\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"可写入长期记忆的内容\"}]}",
           "",
           "世界书设定：",
           worldBookContext || "暂无匹配世界书。",
@@ -514,6 +511,7 @@
     });
     var fallbackId = validIds[0] || "";
     var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
+    var normalizedEvents;
     var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(parsed && parsed.thoughts), validIds);
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
@@ -521,21 +519,16 @@
       events = [{ type: "action", characterId: "", content: rawContent }];
     }
 
-    return {
-      events: events.map(function (event) {
-      var type = event.type === "speech" ? "speech" : "action";
-      var characterId = validIds.indexOf(event.characterId) !== -1
-        ? event.characterId
-        : (type === "speech" ? fallbackId : "");
+    normalizedEvents = normalizeOfflineEventList(events, rawContent, {
+      validIds: validIds,
+      fallbackId: fallbackId,
+      mode: context.mode,
+      min: 10,
+      max: 50
+    });
 
-      return {
-        type: type,
-        characterId: characterId,
-        content: String(event.content || "").trim()
-      };
-    }).filter(function (event) {
-      return event.content && (event.type === "action" || event.characterId);
-      }).slice(0, 50),
+    return {
+      events: normalizedEvents,
       thoughts: thoughts,
       memories: memories
     };
@@ -584,13 +577,14 @@
           "这是线下互动 / 剧情互动模式，不是断网模式。",
           "模式：" + (context.mode === "group" ? "群聊线下模式" : "私聊线下模式"),
           "你要保持角色人设，不能混淆角色身份。",
-          "每次推进生成 3 到 8 条 events，形成一小段完整剧情。",
+          "每次推进至少生成 10 条 events，没有上限；为了性能建议 10 到 20 条，形成一小段完整剧情。",
+          "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":20,\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
           "角色说话不要太长，动作描写像小说旁白但不要冗长。",
           "私聊模式只围绕当前角色和用户互动；群聊模式中多个角色可以自然互动。",
           "只返回 JSON，不要返回 Markdown、解释或代码块。",
           "同一次 JSON 里返回 events、thoughts、memories，不要为了心声或记忆额外调用 API。",
-          "JSON 格式必须是：{\"events\":[{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"角色说的话\"},{\"type\":\"action\",\"characterId\":\"\",\"content\":\"旁白动作\"}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心想法\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"可写入长期记忆的内容\"}]}",
+          "JSON 格式必须是：{\"events\":[{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"角色说的话\",\"money\":{\"type\":\"redPacket\",\"amount\":8.88,\"direction\":\"income\",\"note\":\"收下红包\"}},{\"type\":\"action\",\"characterId\":\"\",\"content\":\"旁白动作\"}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心想法\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"可写入长期记忆的内容\"}]}",
           "",
           "世界书设定：",
           worldBookContext || "暂无匹配世界书。",
@@ -1028,6 +1022,84 @@
     }).slice(0, 50);
   }
 
+  function normalizeOfflineEventList(events, rawContent, options) {
+    var settings = Object.assign({
+      validIds: [],
+      fallbackId: "",
+      mode: "private",
+      min: 10,
+      max: 20
+    }, options || {});
+    var validIds = settings.validIds || [];
+    var normalized = [];
+
+    (Array.isArray(events) ? events : []).forEach(function (event, index) {
+      var source = event && typeof event === "object" ? event : { content: event };
+      var type = source.type === "speech" ? "speech" : "action";
+      var contentParts = splitTextContent(source.content).filter(Boolean);
+
+      if (!contentParts.length && source.content) {
+        contentParts = [String(source.content).trim()];
+      }
+
+      contentParts.forEach(function (content, partIndex) {
+        var characterId = validIds.indexOf(source.characterId) !== -1
+          ? source.characterId
+          : (type === "speech" ? pickOfflineSpeaker(validIds, settings.fallbackId, settings.mode, index + partIndex) : "");
+
+        normalized.push(Object.assign({}, source, {
+          type: type,
+          characterId: characterId,
+          content: content
+        }));
+      });
+    });
+
+    if (normalized.length < settings.min && rawContent) {
+      splitTextContent(rawContent).forEach(function (content, index) {
+        if (normalized.length >= settings.min) {
+          return;
+        }
+        normalized.push({
+          type: index % 3 === 1 && validIds.length ? "speech" : "action",
+          characterId: index % 3 === 1 && validIds.length ? pickOfflineSpeaker(validIds, settings.fallbackId, settings.mode, index) : "",
+          content: content
+        });
+      });
+    }
+
+    while (normalized.length > 0 && normalized.length < settings.min) {
+      normalized.push(createContinuationEvent(normalized, validIds, settings));
+    }
+
+    return normalized.filter(function (event) {
+      return event.content && (event.type === "action" || event.characterId);
+    }).slice(0, settings.max);
+  }
+
+  function pickOfflineSpeaker(validIds, fallbackId, mode, index) {
+    if (!validIds.length) {
+      return "";
+    }
+
+    if (mode === "group") {
+      return validIds[index % validIds.length];
+    }
+
+    return fallbackId || validIds[0];
+  }
+
+  function createContinuationEvent(existing, validIds, settings) {
+    var index = existing.length;
+    var useSpeech = validIds.length && index % 2 === 1;
+
+    return {
+      type: useSpeech ? "speech" : "action",
+      characterId: useSpeech ? pickOfflineSpeaker(validIds, settings.fallbackId, settings.mode, index) : "",
+      content: useSpeech ? "我接着刚才的话慢慢说下去。" : "气氛继续往前推进了一点。"
+    };
+  }
+
   function normalizeReplyList(rawContent, parsedReplies, options) {
     var settings = Object.assign({
       min: 1,
@@ -1050,9 +1122,34 @@
       replies = splitReplyContent(replies[0], settings);
     }
 
+    while (replies.length > 0 && replies.length < settings.min) {
+      replies.push(createContinuationReply(replies, settings));
+    }
+
     return replies.filter(function (reply) {
       return reply && reply.content;
     }).slice(0, settings.max);
+  }
+
+  function createContinuationReply(replies, options) {
+    var fallbackLines = [
+      "我再补一句。",
+      "刚才那点我还想继续说。",
+      "嗯，我接着说下去。",
+      "这件事我还没说完。",
+      "还有一点也挺重要的。",
+      "我想了一下，还是想告诉你。",
+      "你听我慢慢说。",
+      "然后呢，我的感觉是这样的。",
+      "先别急，我继续。",
+      "这句话也算我认真补上的。"
+    ];
+    var index = replies.length % fallbackLines.length;
+
+    return {
+      type: options.defaultType || "text",
+      content: fallbackLines[index]
+    };
   }
 
   function normalizeReplyItem(reply, options) {

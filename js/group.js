@@ -1283,6 +1283,7 @@
       characterName: "",
       createdAt: now
     });
+    message = recordGroupMoneyMessage(message, group, null);
 
     messages.push(message);
     group.memberIds.forEach(function (memberId) {
@@ -1295,6 +1296,20 @@
     window.AppStorage.saveGroupChatHistory(group.id, messages);
     renderGroupChatMessages(group.id);
     renderGroupList();
+  }
+
+  function recordGroupMoneyMessage(message, group, character) {
+    if (!window.AppStorage.recordMoneyMessage || !message || (message.type !== "redPacket" && message.type !== "transfer")) {
+      return message;
+    }
+
+    return window.AppStorage.recordMoneyMessage(message, {
+      sourceType: "group",
+      sourceId: group.id,
+      groupId: group.id,
+      characterId: character ? character.id : "",
+      sourceName: character ? character.name : group.name
+    }) || message;
   }
 
   function getMessageMemoryText(message) {
@@ -1443,6 +1458,7 @@
 
       createdAt = startAt + index;
       message = createGroupCharacterReplyMessage(reply, character, createdAt);
+      message = recordGroupMoneyMessage(message, group, character);
       messages.push(message);
       window.AppStorage.addCharacterMemory(character.id, {
         content: "\u89d2\u8272\u5728\u7fa4\u804a\u91cc\u56de\u590d\u4e86\uff1a" + getMessageMemoryText(message),
@@ -1741,6 +1757,10 @@
 
   function openActiveGroupOffline() {
     closeAllMenus();
+    if (isInlineOfflineActive() && window.OfflineManager) {
+      window.OfflineManager.disableInlineOffline();
+      return;
+    }
     if (activeGroupId && window.OfflineManager) {
       window.OfflineManager.openGroupOffline(activeGroupId);
     }
@@ -1761,7 +1781,7 @@
     var menuButton = getElement("groupOfflineBtn");
 
     if (bar) {
-      bar.classList.toggle("hidden", !active);
+      bar.classList.add("hidden");
     }
 
     if (input) {
@@ -1773,7 +1793,7 @@
     }
 
     if (menuButton) {
-      menuButton.textContent = active ? "线下模式中" : "进入线下模式";
+      menuButton.textContent = active ? "退出线下模式" : "进入线下模式";
     }
   }
 

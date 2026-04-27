@@ -303,6 +303,8 @@
         createdAt: now
       });
 
+      recordOfflineMoneyEvent(event, session.mode, session.targetId, character);
+
       if (event.type === "speech" && character) {
         window.AppStorage.addCharacterMemory(character.id, {
           content: "线下模式中说：" + event.content,
@@ -415,6 +417,10 @@
   }
 
   function disableInlineOffline() {
+    if (inlineOfflineState.targetType && inlineOfflineState.targetId) {
+      appendInlineSystemMessage(inlineOfflineState.targetType, inlineOfflineState.targetId, "已退出线下模式");
+    }
+
     inlineOfflineState = {
       targetType: "",
       targetId: "",
@@ -436,14 +442,13 @@
 
   function appendInlineSceneMessage(mode, targetId, participants) {
     var scene = inlineOfflineState.scene || {};
-    var content = "进入线下模式：" + (scene.name || "未指定场景") + (scene.description ? "。" + scene.description : "");
     var message = {
       id: String(Date.now() + Math.random()),
       role: "system",
-      type: "offlineAction",
+      type: "system",
       characterId: "",
       characterName: "",
-      content: content,
+      content: "已进入线下模式",
       scene: scene,
       createdAt: Date.now()
     };
@@ -468,12 +473,41 @@
     (participants || []).forEach(function (character) {
       if (character) {
         window.AppStorage.addCharacterMemory(character.id, {
-          content: "线下模式场景：" + content,
+          content: "线下模式场景：" + (scene.name || "未指定场景") + (scene.description ? "。" + scene.description : ""),
           source: "offline",
           createdAt: Date.now()
         });
       }
     });
+  }
+
+  function appendInlineSystemMessage(mode, targetId, content) {
+    var message = {
+      id: String(Date.now() + Math.random()),
+      role: "system",
+      type: "system",
+      characterId: "",
+      characterName: "",
+      content: content,
+      createdAt: Date.now()
+    };
+    var messages;
+
+    if (mode === "group") {
+      messages = window.AppStorage.getGroupChatHistory(targetId);
+      messages.push(message);
+      window.AppStorage.saveGroupChatHistory(targetId, messages);
+      if (window.GroupManager && window.GroupManager.renderGroupChatMessages) {
+        window.GroupManager.renderGroupChatMessages(targetId);
+      }
+    } else {
+      messages = window.AppStorage.getChatHistory(targetId);
+      messages.push(message);
+      window.AppStorage.saveChatHistory(targetId, messages);
+      if (window.CharacterManager && window.CharacterManager.renderChatMessages) {
+        window.CharacterManager.renderChatMessages(targetId);
+      }
+    }
   }
 
   function isInlineOfflineActive(targetType, targetId) {
@@ -661,7 +695,40 @@
         createdAt: now
       });
 
+      recordOfflineMoneyEvent(event, mode, chatId, speechCharacter);
       writeInlineEventMemory(mode, chatId, participants, speechCharacter, event.content, now);
+    });
+  }
+
+  function recordOfflineMoneyEvent(event, mode, chatId, character) {
+    var money = event && event.money && typeof event.money === "object" ? event.money : event;
+    var amount = Number(money && money.amount);
+    var direction = money && money.direction === "expense" ? "expense" : (money && money.direction === "income" ? "income" : "");
+    var kind = money && (money.moneyType || money.type);
+    var recordType;
+
+    if (!window.AppStorage.addWalletLedger || !amount || amount <= 0 || !direction) {
+      return;
+    }
+
+    if (kind === "redPacket" || kind === "redpacket") {
+      recordType = direction === "income" ? "redpacket_in" : "redpacket_out";
+    } else if (kind === "transfer") {
+      recordType = direction === "income" ? "transfer_in" : "transfer_out";
+    } else {
+      recordType = kind || "system";
+    }
+
+    window.AppStorage.addWalletLedger({
+      type: recordType,
+      amount: amount,
+      direction: direction,
+      sourceType: "offline",
+      sourceId: chatId,
+      characterId: character ? character.id : (money.characterId || ""),
+      groupId: mode === "group" ? chatId : "",
+      note: money.note || event.content || "线下模式金额事件",
+      createdAt: Date.now()
     });
   }
 

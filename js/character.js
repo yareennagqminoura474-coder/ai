@@ -25,6 +25,14 @@
       .replace(/'/g, "&#039;");
   }
 
+  function formatAmount(value) {
+    var amount = Number(value);
+    if (!Number.isFinite(amount)) {
+      amount = 0;
+    }
+    return amount.toFixed(2);
+  }
+
   function getActivePage() {
     if (window.AppNavigation && window.AppNavigation.getActivePage) {
       return window.AppNavigation.getActivePage();
@@ -1423,6 +1431,11 @@
       return true;
     }
 
+    if (type === "familyCardPay") {
+      openFamilyCardPaySheet(characterId);
+      return true;
+    }
+
     if (type === "location") {
       window.WeChatTools.openLocationSheet(function (payload) {
         appendPrivateToolMessage(characterId, payload);
@@ -1470,6 +1483,7 @@
       role: "user",
       createdAt: now
     });
+    message = recordPrivateMoneyMessage(message, character);
 
     messages.push(message);
     window.AppStorage.addCharacterMemory(characterId, {
@@ -1480,6 +1494,67 @@
     window.AppStorage.saveChatHistory(characterId, messages);
     renderChatMessages(characterId);
     renderCharacterList();
+  }
+
+  function openFamilyCardPaySheet(characterId) {
+    var character = getCharacterById(characterId);
+    var cards = window.AppStorage.getFamilyCardsForCharacter ? window.AppStorage.getFamilyCardsForCharacter(characterId).filter(function (card) {
+      return card.enabled && card.totalLimit > card.usedAmount;
+    }) : [];
+    var card;
+    var amount;
+    var note;
+
+    if (!character) {
+      return;
+    }
+
+    if (!cards.length) {
+      window.alert("请先在钱包的亲属卡里为该角色创建并启用亲属卡。");
+      return;
+    }
+
+    card = cards.find(function (item) {
+      return character.chatSettings && character.chatSettings.familyCardId === item.id;
+    }) || cards[0];
+    amount = window.prompt("使用「" + card.name + "」支付金额", "20.00");
+    if (amount === null) {
+      return;
+    }
+
+    amount = Number(amount);
+    if (!amount || amount <= 0) {
+      window.alert("请输入有效金额。");
+      return;
+    }
+
+    note = window.prompt("支付备注", "亲属卡支付") || "亲属卡支付";
+    appendPrivateToolMessage(characterId, {
+      type: "transfer",
+      content: "亲属卡支付",
+      amount: amount.toFixed(2),
+      note: note,
+      status: "paid",
+      paymentMethod: "familyCard",
+      familyCardId: card.id
+    });
+  }
+
+  function recordPrivateMoneyMessage(message, character) {
+    if (!window.AppStorage.recordMoneyMessage || !message || (message.type !== "redPacket" && message.type !== "transfer")) {
+      return message;
+    }
+
+    if (!character) {
+      return message;
+    }
+
+    return window.AppStorage.recordMoneyMessage(message, {
+      sourceType: "private",
+      sourceId: character.id,
+      characterId: character.id,
+      sourceName: character.name
+    }) || message;
   }
 
   function getMessageMemoryText(message) {
@@ -1632,6 +1707,7 @@
 
       createdAt = startAt + index;
       message = createPrivateCharacterReplyMessage(item, createdAt);
+      message = recordPrivateMoneyMessage(message, getCharacterById(characterId));
       messages.push(message);
       window.AppStorage.addCharacterMemory(characterId, {
         content: "角色曾回复：" + getMessageMemoryText(message),
@@ -1964,6 +2040,11 @@
   function openActiveCharacterOffline() {
     closeAllMenus();
 
+    if (isInlineOfflineActive() && window.OfflineManager) {
+      window.OfflineManager.disableInlineOffline();
+      return;
+    }
+
     if (activeCharacterId && window.OfflineManager) {
       window.OfflineManager.openPrivateOffline(activeCharacterId);
     }
@@ -1984,7 +2065,7 @@
     var menuButton = getElement("chatOfflineBtn");
 
     if (bar) {
-      bar.classList.toggle("hidden", !active);
+      bar.classList.add("hidden");
     }
 
     if (input) {
@@ -1996,7 +2077,7 @@
     }
 
     if (menuButton) {
-      menuButton.textContent = active ? "线下模式中" : "进入线下模式";
+      menuButton.textContent = active ? "退出线下模式" : "进入线下模式";
     }
   }
 
@@ -2013,6 +2094,7 @@
       readReceiptEnabled: false,
       patAction: "",
       chatBackground: "",
+      familyCardId: "",
       userPersonaOverride: {
         name: "",
         avatar: "",
@@ -2039,6 +2121,7 @@
     var form = getElement("privateChatSettingsForm");
     var settings = getPrivateChatSettings(character);
     var persona = settings.userPersonaOverride || {};
+    var familyCards = window.AppStorage.getFamilyCardsForCharacter ? window.AppStorage.getFamilyCardsForCharacter(character.id) : [];
 
     if (!form) {
       return;
@@ -2076,6 +2159,9 @@
       '<label class="switch-row"><input data-private-field="pinned" type="checkbox"' + (settings.pinned ? " checked" : "") + '>置顶聊天</label>',
       '<label class="switch-row"><input data-private-field="readReceiptEnabled" type="checkbox"' + (settings.readReceiptEnabled ? " checked" : "") + '>消息已读状态</label>',
       '<div class="field-group"><label>拍一拍文案</label><input data-private-field="patAction" type="text" value="' + escapeHtml(settings.patAction || "") + '"></div>',
+      '<div class="field-group"><label>绑定亲属卡</label><select data-private-field="familyCardId"><option value="">不绑定</option>' + familyCards.map(function (card) {
+        return '<option value="' + escapeHtml(card.id) + '"' + (settings.familyCardId === card.id ? " selected" : "") + ">" + escapeHtml(card.name) + "（剩余 ¥" + escapeHtml(formatAmount(Math.max(0, card.totalLimit - card.usedAmount))) + "）</option>";
+      }).join("") + '</select><small class="field-help">可在钱包 > 亲属卡新增；聊天输入栏也可以使用亲属卡支付。</small></div>',
       '<button class="outline-button danger" type="button" data-private-action="clear-history">清空聊天记录</button>',
       "</section>",
       '<section class="form-section">',
@@ -2175,6 +2261,7 @@
         readReceiptEnabled: getPrivateChecked("readReceiptEnabled"),
         patAction: getPrivateField("patAction"),
         chatBackground: getPrivateField("chatBackground"),
+        familyCardId: getPrivateField("familyCardId"),
         userPersonaOverride: {
           name: getPrivateField("userName"),
           avatar: getPrivateField("userAvatar"),

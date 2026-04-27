@@ -11,6 +11,9 @@
     thoughts: "myAiApp.thoughts",
     diaries: "myAiApp.diaries",
     userProfile: "myAiApp.userProfile",
+    desktopState: "myAiApp.desktopState",
+    wechatState: "myAiApp.wechatState",
+    wallet: "myAiApp.wallet",
     recentHidden: "myAiApp.recentHidden",
     theme: "myAiApp.theme",
     photos: "myAiApp.photos",
@@ -31,6 +34,24 @@
       console.warn("localStorage 数据解析失败，已使用默认值。", error);
       return fallback;
     }
+  }
+
+  function createId(prefix) {
+    return String(prefix || "id") + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function roundAmount(value) {
+    var amount = Number(value);
+
+    if (!Number.isFinite(amount)) {
+      return 0;
+    }
+
+    return Math.round(amount * 100) / 100;
+  }
+
+  function normalizePositiveAmount(value) {
+    return Math.max(0, roundAmount(value));
   }
 
   function getCharacters() {
@@ -517,18 +538,46 @@
   }
 
   function getUserProfile() {
-    var profile = parseJson(localStorage.getItem(STORAGE_KEYS.userProfile), {});
-    return profile && typeof profile === "object" && !Array.isArray(profile)
-      ? Object.assign({ name: "", avatar: "", persona: "" }, profile)
-      : { name: "", avatar: "", persona: "" };
+    var rawProfile = parseJson(localStorage.getItem(STORAGE_KEYS.userProfile), {});
+    var profile = normalizeUserProfile(rawProfile);
+
+    if (!rawProfile || typeof rawProfile !== "object" || !rawProfile.wxid || !rawProfile.name) {
+      saveUserProfile(profile);
+    }
+
+    return profile;
   }
 
   function saveUserProfile(profile) {
-    localStorage.setItem(STORAGE_KEYS.userProfile, JSON.stringify(Object.assign({
-      name: "",
-      avatar: "",
-      persona: ""
-    }, profile || {})));
+    localStorage.setItem(STORAGE_KEYS.userProfile, JSON.stringify(normalizeUserProfile(profile || {})));
+  }
+
+  function getDesktopState() {
+    return normalizeDesktopState(parseJson(localStorage.getItem(STORAGE_KEYS.desktopState), {}));
+  }
+
+  function saveDesktopState(state) {
+    localStorage.setItem(STORAGE_KEYS.desktopState, JSON.stringify(normalizeDesktopState(state || {})));
+  }
+
+  function updateDesktopState(nextState) {
+    var state = Object.assign({}, getDesktopState(), nextState || {});
+    saveDesktopState(state);
+    return getDesktopState();
+  }
+
+  function getWechatState() {
+    return normalizeWechatState(parseJson(localStorage.getItem(STORAGE_KEYS.wechatState), {}));
+  }
+
+  function saveWechatState(state) {
+    localStorage.setItem(STORAGE_KEYS.wechatState, JSON.stringify(normalizeWechatState(state || {})));
+  }
+
+  function updateWechatState(nextState) {
+    var state = Object.assign({}, getWechatState(), nextState || {});
+    saveWechatState(state);
+    return getWechatState();
   }
 
   function getRecentHidden() {
@@ -626,6 +675,193 @@
     }));
   }
 
+  function getWallet() {
+    return normalizeWallet(parseJson(localStorage.getItem(STORAGE_KEYS.wallet), {}));
+  }
+
+  function saveWallet(wallet) {
+    localStorage.setItem(STORAGE_KEYS.wallet, JSON.stringify(normalizeWallet(wallet || {})));
+  }
+
+  function addWalletLedger(record, options) {
+    var wallet = getWallet();
+    var normalized = normalizeLedgerRecord(record || {}, 0);
+    var settings = options || {};
+
+    if (!normalized.amount && normalized.type !== "system") {
+      return null;
+    }
+
+    if (!settings.skipBalance) {
+      if (normalized.direction === "income") {
+        wallet.balance = roundAmount(wallet.balance + normalized.amount);
+      } else if (normalized.direction === "expense") {
+        wallet.balance = roundAmount(wallet.balance - normalized.amount);
+      }
+    }
+
+    wallet.ledger.unshift(normalized);
+    saveWallet(wallet);
+    return normalized;
+  }
+
+  function rechargeWallet(amount, note) {
+    return addWalletLedger({
+      type: "recharge",
+      amount: normalizePositiveAmount(amount),
+      direction: "income",
+      sourceType: "system",
+      sourceId: "wallet",
+      note: note || "钱包充值",
+      createdAt: Date.now()
+    });
+  }
+
+  function getFamilyCards() {
+    return getWallet().familyCards;
+  }
+
+  function addFamilyCard(card) {
+    var wallet = getWallet();
+    var next = normalizeFamilyCard(Object.assign({
+      id: createId("familycard"),
+      name: "亲属卡",
+      createdAt: Date.now()
+    }, card || {}), wallet.familyCards.length);
+
+    wallet.familyCards.unshift(next);
+    saveWallet(wallet);
+    return next;
+  }
+
+  function updateFamilyCard(cardId, nextCard) {
+    var wallet = getWallet();
+    var index = wallet.familyCards.findIndex(function (card) {
+      return card.id === cardId;
+    });
+
+    if (index === -1) {
+      return null;
+    }
+
+    wallet.familyCards[index] = normalizeFamilyCard(Object.assign({}, wallet.familyCards[index], nextCard || {}, {
+      id: cardId,
+      createdAt: wallet.familyCards[index].createdAt || Date.now()
+    }), index);
+    saveWallet(wallet);
+    return wallet.familyCards[index];
+  }
+
+  function deleteFamilyCard(cardId) {
+    var wallet = getWallet();
+    wallet.familyCards = wallet.familyCards.filter(function (card) {
+      return card.id !== cardId;
+    });
+    saveWallet(wallet);
+  }
+
+  function getFamilyCardsForCharacter(characterId) {
+    return getFamilyCards().filter(function (card) {
+      return card.targetCharacterId === characterId;
+    });
+  }
+
+  function getFamilyCardById(cardId) {
+    return getFamilyCards().find(function (card) {
+      return card.id === cardId;
+    }) || null;
+  }
+
+  function spendFamilyCard(cardId, amount, context) {
+    var wallet = getWallet();
+    var spendAmount = normalizePositiveAmount(amount);
+    var cardIndex = wallet.familyCards.findIndex(function (card) {
+      return card.id === cardId;
+    });
+    var card;
+    var record;
+
+    if (cardIndex === -1 || !spendAmount) {
+      return null;
+    }
+
+    card = wallet.familyCards[cardIndex];
+    if (!card.enabled || card.usedAmount + spendAmount > card.totalLimit) {
+      return null;
+    }
+
+    card.usedAmount = roundAmount(card.usedAmount + spendAmount);
+    wallet.familyCards[cardIndex] = card;
+    record = normalizeLedgerRecord(Object.assign({
+      type: "familycard_pay",
+      amount: spendAmount,
+      direction: "expense",
+      sourceType: "private",
+      sourceId: card.targetCharacterId,
+      characterId: card.targetCharacterId,
+      note: card.name + " 支付",
+      familyCardId: card.id,
+      createdAt: Date.now()
+    }, context || {}), wallet.ledger.length);
+    wallet.ledger.unshift(record);
+    saveWallet(wallet);
+    return record;
+  }
+
+  function recordMoneyMessage(message, context) {
+    var source = message && typeof message === "object" ? message : null;
+    var info = context || {};
+    var record;
+    var type;
+    var direction;
+    var amount;
+    var sourceName = info.sourceName || "";
+
+    if (!source || source.walletLedgerId || (source.type !== "redPacket" && source.type !== "transfer")) {
+      return source;
+    }
+
+    amount = normalizePositiveAmount(source.amount);
+    if (!amount) {
+      return source;
+    }
+
+    if (source.paymentMethod === "familyCard" && source.familyCardId) {
+      record = spendFamilyCard(source.familyCardId, amount, {
+        sourceType: info.sourceType || "private",
+        sourceId: info.sourceId || "",
+        characterId: info.characterId || source.characterId || "",
+        groupId: info.groupId || "",
+        note: source.note || "亲属卡支付给" + (sourceName || "角色")
+      });
+    } else {
+      direction = source.role === "user" ? "expense" : "income";
+      if (source.type === "redPacket") {
+        type = direction === "expense" ? "redpacket_out" : "redpacket_in";
+      } else {
+        type = direction === "expense" ? "transfer_out" : "transfer_in";
+      }
+
+      record = addWalletLedger({
+        type: type,
+        amount: amount,
+        direction: direction,
+        sourceType: info.sourceType || "private",
+        sourceId: info.sourceId || "",
+        characterId: info.characterId || source.characterId || "",
+        groupId: info.groupId || "",
+        note: source.note || source.content || (source.type === "redPacket" ? "红包" : "转账"),
+        createdAt: source.createdAt || Date.now()
+      });
+    }
+
+    if (record) {
+      source.walletLedgerId = record.id;
+    }
+
+    return source;
+  }
+
   function getAllPrefixedItems(prefix) {
     var items = {};
 
@@ -656,6 +892,9 @@
       diaries: getDiaries(),
       userProfile: getUserProfile(),
       userPersonas: getUserProfile(),
+      desktopState: getDesktopState(),
+      wechatState: getWechatState(),
+      wallet: getWallet(),
       themes: getTheme(),
       photos: getPhotos(),
       notes: getNotes(),
@@ -684,6 +923,9 @@
     saveThoughtStore(normalized.thoughts);
     saveDiaries(normalized.diaries);
     saveUserProfile(normalized.userProfile);
+    saveDesktopState(normalized.desktopState);
+    saveWechatState(normalized.wechatState);
+    saveWallet(normalized.wallet);
     saveTheme(normalized.themes);
     savePhotos(normalized.photos);
     saveNotes(normalized.notes);
@@ -724,6 +966,9 @@
       thoughts: normalizeThoughts(data.thoughts || {}),
       diaries: normalizeDiaries(data.diaries || []),
       userProfile: normalizeUserProfile(data.userProfile || data.userPersonas || {}),
+      desktopState: normalizeDesktopState(data.desktopState || data.desktop || {}),
+      wechatState: normalizeWechatState(data.wechatState || data.wechat || {}),
+      wallet: normalizeWallet(data.wallet || {}),
       themes: normalizeTheme(data.themes || data.theme || {}),
       photos: normalizePhotos(data.photos || []),
       notes: normalizeNotes(data.notes || []),
@@ -778,6 +1023,7 @@
       readReceiptEnabled: Boolean(source.readReceiptEnabled),
       patAction: String(source.patAction || ""),
       chatBackground: String(source.chatBackground || ""),
+      familyCardId: String(source.familyCardId || ""),
       userPersonaOverride: {
         name: String(persona.name || ""),
         avatar: String(persona.avatar || ""),
@@ -1009,10 +1255,85 @@
 
   function normalizeUserProfile(profile) {
     var source = profile && typeof profile === "object" && !Array.isArray(profile) ? profile : {};
+    var wxid = String(source.wxid || source.wechatId || "");
+
+    if (!wxid) {
+      wxid = "wxid_" + Math.random().toString(36).slice(2, 8);
+    }
+
     return {
-      name: String(source.name || ""),
+      name: String(source.name || "林澈"),
       avatar: String(source.avatar || ""),
-      persona: String(source.persona || "")
+      persona: String(source.persona || ""),
+      wxid: wxid,
+      momentsAutoReview: Boolean(source.momentsAutoReview)
+    };
+  }
+
+  function normalizeDesktopState(state) {
+    var source = state && typeof state === "object" && !Array.isArray(state) ? state : {};
+    return {
+      currentPage: Math.max(0, Number(source.currentPage) || 0)
+    };
+  }
+
+  function normalizeWechatState(state) {
+    var source = state && typeof state === "object" && !Array.isArray(state) ? state : {};
+    var tab = String(source.tab || "wechat");
+    if (["wechat", "discover", "me", "spirit"].indexOf(tab) === -1) {
+      tab = "wechat";
+    }
+    return {
+      tab: tab
+    };
+  }
+
+  function normalizeWallet(wallet) {
+    var source = wallet && typeof wallet === "object" && !Array.isArray(wallet) ? wallet : {};
+    return {
+      balance: roundAmount(source.balance === undefined ? 250001 : source.balance),
+      ledger: Array.isArray(source.ledger) ? source.ledger.map(normalizeLedgerRecord).filter(function (record) {
+        return record.type;
+      }) : [],
+      familyCards: Array.isArray(source.familyCards) ? source.familyCards.map(normalizeFamilyCard).filter(function (card) {
+        return card.id;
+      }) : []
+    };
+  }
+
+  function normalizeLedgerRecord(record, index) {
+    var source = record && typeof record === "object" ? record : {};
+    var direction = source.direction === "expense" ? "expense" : "income";
+    var type = String(source.type || "system");
+
+    return Object.assign({}, source, {
+      id: String(source.id || createId("ledger") + "_" + (index || 0)),
+      type: type,
+      amount: normalizePositiveAmount(source.amount),
+      direction: direction,
+      sourceType: String(source.sourceType || "system"),
+      sourceId: String(source.sourceId || ""),
+      characterId: String(source.characterId || ""),
+      groupId: String(source.groupId || ""),
+      familyCardId: String(source.familyCardId || ""),
+      note: String(source.note || ""),
+      createdAt: Number(source.createdAt) || Date.now()
+    });
+  }
+
+  function normalizeFamilyCard(card, index) {
+    var source = card && typeof card === "object" ? card : {};
+    var totalLimit = normalizePositiveAmount(source.totalLimit || source.limit || 1000);
+    var usedAmount = Math.min(totalLimit, normalizePositiveAmount(source.usedAmount));
+
+    return {
+      id: String(source.id || createId("familycard") + "_" + (index || 0)),
+      name: String(source.name || "亲属卡"),
+      targetCharacterId: String(source.targetCharacterId || source.characterId || ""),
+      totalLimit: totalLimit,
+      usedAmount: usedAmount,
+      enabled: source.enabled !== false,
+      createdAt: Number(source.createdAt) || Date.now()
     };
   }
 
@@ -1091,6 +1412,9 @@
     localStorage.removeItem(STORAGE_KEYS.thoughts);
     localStorage.removeItem(STORAGE_KEYS.diaries);
     localStorage.removeItem(STORAGE_KEYS.userProfile);
+    localStorage.removeItem(STORAGE_KEYS.desktopState);
+    localStorage.removeItem(STORAGE_KEYS.wechatState);
+    localStorage.removeItem(STORAGE_KEYS.wallet);
     localStorage.removeItem(STORAGE_KEYS.recentHidden);
     localStorage.removeItem(STORAGE_KEYS.theme);
     localStorage.removeItem(STORAGE_KEYS.photos);
@@ -1169,6 +1493,12 @@
     getTodayDiary: getTodayDiary,
     getUserProfile: getUserProfile,
     saveUserProfile: saveUserProfile,
+    getDesktopState: getDesktopState,
+    saveDesktopState: saveDesktopState,
+    updateDesktopState: updateDesktopState,
+    getWechatState: getWechatState,
+    saveWechatState: saveWechatState,
+    updateWechatState: updateWechatState,
     getRecentHidden: getRecentHidden,
     hideRecentChat: hideRecentChat,
     getRecentHiddenAt: getRecentHiddenAt,
@@ -1183,6 +1513,18 @@
     addNote: addNote,
     updateNote: updateNote,
     deleteNote: deleteNote,
+    getWallet: getWallet,
+    saveWallet: saveWallet,
+    addWalletLedger: addWalletLedger,
+    rechargeWallet: rechargeWallet,
+    getFamilyCards: getFamilyCards,
+    addFamilyCard: addFamilyCard,
+    updateFamilyCard: updateFamilyCard,
+    deleteFamilyCard: deleteFamilyCard,
+    getFamilyCardsForCharacter: getFamilyCardsForCharacter,
+    getFamilyCardById: getFamilyCardById,
+    spendFamilyCard: spendFamilyCard,
+    recordMoneyMessage: recordMoneyMessage,
     exportAllData: exportAllData,
     importAllData: importAllData,
     clearAllData: clearAllData
