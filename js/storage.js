@@ -11,6 +11,10 @@
     thoughts: "myAiApp.thoughts",
     diaries: "myAiApp.diaries",
     userProfile: "myAiApp.userProfile",
+    recentHidden: "myAiApp.recentHidden",
+    theme: "myAiApp.theme",
+    photos: "myAiApp.photos",
+    notes: "myAiApp.notes",
     chatPrefix: "myAiApp.chat.",
     groupChatPrefix: "myAiApp.groupChat.",
     offlinePrefix: "myAiApp.offline."
@@ -357,7 +361,7 @@
           return keyword && text.indexOf(String(keyword).toLowerCase()) !== -1;
         });
 
-        if (entry.enabled && (hasKeyword || (!keywords.length && book.scope === "global"))) {
+        if (entry.enabled && keywords.length && hasKeyword) {
           matched.push(Object.assign({}, entry, {
             bookName: book.name,
             bookDescription: book.description,
@@ -365,22 +369,6 @@
           }));
         }
       });
-
-      if (!matched.length && book.scope === "global" && book.description) {
-        matched.push({
-          id: book.id + "-description",
-          title: book.name,
-          keywords: [],
-          content: book.description,
-          enabled: true,
-          priority: 0,
-          bookName: book.name,
-          bookDescription: book.description,
-          bookScope: book.scope,
-          createdAt: book.createdAt,
-          updatedAt: book.updatedAt
-        });
-      }
     });
 
     return matched.sort(function (a, b) {
@@ -451,6 +439,12 @@
     var store = getThoughtStore();
     delete store[characterId];
     saveThoughtStore(store);
+  }
+
+  function deleteCharacterThought(characterId, thoughtId) {
+    saveCharacterThoughts(characterId, getCharacterThoughts(characterId).filter(function (thought) {
+      return thought.id !== thoughtId;
+    }));
   }
 
   function getDiaries() {
@@ -537,6 +531,101 @@
     }, profile || {})));
   }
 
+  function getRecentHidden() {
+    var hidden = parseJson(localStorage.getItem(STORAGE_KEYS.recentHidden), {});
+    return hidden && typeof hidden === "object" && !Array.isArray(hidden) ? hidden : {};
+  }
+
+  function saveRecentHidden(hidden) {
+    localStorage.setItem(STORAGE_KEYS.recentHidden, JSON.stringify(hidden || {}));
+  }
+
+  function hideRecentChat(type, id, lastMessageTime) {
+    var hidden = getRecentHidden();
+    hidden[String(type || "") + ":" + String(id || "")] = Number(lastMessageTime) || Date.now();
+    saveRecentHidden(hidden);
+  }
+
+  function getRecentHiddenAt(type, id) {
+    return Number(getRecentHidden()[String(type || "") + ":" + String(id || "")]) || 0;
+  }
+
+  function getTheme() {
+    var theme = parseJson(localStorage.getItem(STORAGE_KEYS.theme), {});
+    return normalizeTheme(theme || {});
+  }
+
+  function saveTheme(theme) {
+    localStorage.setItem(STORAGE_KEYS.theme, JSON.stringify(normalizeTheme(theme || {})));
+  }
+
+  function getPhotos() {
+    var photos = parseJson(localStorage.getItem(STORAGE_KEYS.photos), []);
+    return normalizePhotos(photos);
+  }
+
+  function savePhotos(photos) {
+    localStorage.setItem(STORAGE_KEYS.photos, JSON.stringify(normalizePhotos(photos)));
+  }
+
+  function addPhoto(photo) {
+    var photos = getPhotos();
+    var next = normalizePhoto(photo || {}, 0);
+    if (!next.src) {
+      return null;
+    }
+    photos.unshift(next);
+    savePhotos(photos.slice(0, 120));
+    return next;
+  }
+
+  function deletePhoto(photoId) {
+    savePhotos(getPhotos().filter(function (photo) {
+      return photo.id !== photoId;
+    }));
+  }
+
+  function getNotes() {
+    var notes = parseJson(localStorage.getItem(STORAGE_KEYS.notes), []);
+    return normalizeNotes(notes);
+  }
+
+  function saveNotes(notes) {
+    localStorage.setItem(STORAGE_KEYS.notes, JSON.stringify(normalizeNotes(notes)));
+  }
+
+  function addNote(note) {
+    var notes = getNotes();
+    var next = normalizeNote(note || {}, 0);
+    notes.unshift(next);
+    saveNotes(notes);
+    return next;
+  }
+
+  function updateNote(noteId, note) {
+    var notes = getNotes();
+    var index = notes.findIndex(function (item) {
+      return item.id === noteId;
+    });
+
+    if (index === -1) {
+      return null;
+    }
+
+    notes[index] = normalizeNote(Object.assign({}, notes[index], note || {}, {
+      id: noteId,
+      updatedAt: Date.now()
+    }), index);
+    saveNotes(notes);
+    return notes[index];
+  }
+
+  function deleteNote(noteId) {
+    saveNotes(getNotes().filter(function (note) {
+      return note.id !== noteId;
+    }));
+  }
+
   function getAllPrefixedItems(prefix) {
     var items = {};
 
@@ -566,7 +655,19 @@
       thoughts: getThoughtStore(),
       diaries: getDiaries(),
       userProfile: getUserProfile(),
-      userPersonas: getUserProfile()
+      userPersonas: getUserProfile(),
+      themes: getTheme(),
+      photos: getPhotos(),
+      notes: getNotes(),
+      recentHidden: getRecentHidden(),
+      privateChatSettings: getCharacters().reduce(function (settings, character) {
+        settings[character.id] = normalizePrivateChatSettings(character.chatSettings || {});
+        return settings;
+      }, {}),
+      groupSettings: getGroups().reduce(function (settings, group) {
+        settings[group.id] = normalizeGroupSettings(group.settings || {});
+        return settings;
+      }, {})
     };
   }
 
@@ -583,6 +684,10 @@
     saveThoughtStore(normalized.thoughts);
     saveDiaries(normalized.diaries);
     saveUserProfile(normalized.userProfile);
+    saveTheme(normalized.themes);
+    savePhotos(normalized.photos);
+    saveNotes(normalized.notes);
+    saveRecentHidden(normalized.recentHidden);
 
     Object.keys(normalized.chatHistory).forEach(function (characterId) {
       saveChatHistory(characterId, normalized.chatHistory[characterId]);
@@ -609,16 +714,20 @@
         apiKey: String(data.settings && data.settings.apiKey || ""),
         modelName: String(data.settings && data.settings.modelName || "")
       },
-      chatHistory: normalizeMessageMap(data.chatHistory || {}),
+      chatHistory: normalizeMessageMap(data.chatHistory || data.privateChatHistories || data.privateChatHistory || {}),
       groups: Array.isArray(data.groups) ? data.groups.map(normalizeGroup) : [],
-      groupChatHistory: normalizeMessageMap(data.groupChatHistory || {}),
-      offlineSessions: normalizeOfflineSessions(data.offlineSessions || {}),
+      groupChatHistory: normalizeMessageMap(data.groupChatHistory || data.groupChatHistories || {}),
+      offlineSessions: normalizeOfflineSessions(data.offlineSessions || data.offline || {}),
       memory: normalizeMemory(data.memory || {}),
       emojiPacks: normalizeEmojiPacks(data.emojiPacks || []),
       worldBooks: normalizeWorldBooks(data.worldBooks || []),
       thoughts: normalizeThoughts(data.thoughts || {}),
       diaries: normalizeDiaries(data.diaries || []),
-      userProfile: normalizeUserProfile(data.userProfile || data.userPersonas || {})
+      userProfile: normalizeUserProfile(data.userProfile || data.userPersonas || {}),
+      themes: normalizeTheme(data.themes || data.theme || {}),
+      photos: normalizePhotos(data.photos || []),
+      notes: normalizeNotes(data.notes || []),
+      recentHidden: normalizeRecentHidden(data.recentHidden || {})
     };
   }
 
@@ -686,6 +795,7 @@
       avatar: String(source.avatar || ""),
       announcement: String(source.announcement || ""),
       background: String(source.background || ""),
+      pinned: Boolean(source.pinned),
       memorySharingEnabled: source.memorySharingEnabled !== false,
       minReplyCount: Math.max(1, Number(source.minReplyCount) || 10),
       maxReplyCount: Math.max(10, Number(source.maxReplyCount) || 50),
@@ -748,6 +858,7 @@
         targetId: String(source.targetId || ""),
         participantIds: Array.isArray(source.participantIds) ? source.participantIds.map(String) : [],
         title: String(source.title || ""),
+        scene: normalizeOfflineScene(source.scene || {}),
         history: Array.isArray(source.history) ? source.history.map(normalizeMessage) : [],
         createdAt: Number(source.createdAt) || Date.now(),
         updatedAt: Number(source.updatedAt) || Date.now()
@@ -905,6 +1016,71 @@
     };
   }
 
+  function normalizeRecentHidden(hidden) {
+    var normalized = {};
+
+    if (!hidden || typeof hidden !== "object" || Array.isArray(hidden)) {
+      return normalized;
+    }
+
+    Object.keys(hidden).forEach(function (key) {
+      normalized[String(key)] = Number(hidden[key]) || Date.now();
+    });
+    return normalized;
+  }
+
+  function normalizeTheme(theme) {
+    var source = theme && typeof theme === "object" && !Array.isArray(theme) ? theme : {};
+    return {
+      active: String(source.active || "default")
+    };
+  }
+
+  function normalizePhotos(photos) {
+    return Array.isArray(photos) ? photos.map(normalizePhoto).filter(function (photo) {
+      return photo.src;
+    }) : [];
+  }
+
+  function normalizePhoto(photo, index) {
+    var source = photo && typeof photo === "object" ? photo : {};
+    var now = Date.now();
+
+    return {
+      id: String(source.id || now + index),
+      name: String(source.name || "图片"),
+      src: String(source.src || ""),
+      createdAt: Number(source.createdAt) || now
+    };
+  }
+
+  function normalizeNotes(notes) {
+    return Array.isArray(notes) ? notes.map(normalizeNote).filter(function (note) {
+      return note.title || note.content;
+    }) : [];
+  }
+
+  function normalizeNote(note, index) {
+    var source = note && typeof note === "object" ? note : {};
+    var now = Date.now();
+
+    return {
+      id: String(source.id || now + index),
+      title: String(source.title || "未命名笔记"),
+      content: String(source.content || ""),
+      createdAt: Number(source.createdAt) || now,
+      updatedAt: Number(source.updatedAt) || now
+    };
+  }
+
+  function normalizeOfflineScene(scene) {
+    var source = scene && typeof scene === "object" ? scene : {};
+    return {
+      name: String(source.name || ""),
+      description: String(source.description || "")
+    };
+  }
+
   function clearAllData() {
     localStorage.removeItem(STORAGE_KEYS.characters);
     localStorage.removeItem(STORAGE_KEYS.settings);
@@ -915,6 +1091,10 @@
     localStorage.removeItem(STORAGE_KEYS.thoughts);
     localStorage.removeItem(STORAGE_KEYS.diaries);
     localStorage.removeItem(STORAGE_KEYS.userProfile);
+    localStorage.removeItem(STORAGE_KEYS.recentHidden);
+    localStorage.removeItem(STORAGE_KEYS.theme);
+    localStorage.removeItem(STORAGE_KEYS.photos);
+    localStorage.removeItem(STORAGE_KEYS.notes);
     removeAllPrefixedItems(STORAGE_KEYS.chatPrefix);
     removeAllPrefixedItems(STORAGE_KEYS.groupChatPrefix);
     removeAllPrefixedItems(STORAGE_KEYS.offlinePrefix);
@@ -979,6 +1159,7 @@
     addCharacterThought: addCharacterThought,
     getRecentThoughts: getRecentThoughts,
     clearCharacterThoughts: clearCharacterThoughts,
+    deleteCharacterThought: deleteCharacterThought,
     getDiaries: getDiaries,
     saveDiaries: saveDiaries,
     addDiary: addDiary,
@@ -988,6 +1169,20 @@
     getTodayDiary: getTodayDiary,
     getUserProfile: getUserProfile,
     saveUserProfile: saveUserProfile,
+    getRecentHidden: getRecentHidden,
+    hideRecentChat: hideRecentChat,
+    getRecentHiddenAt: getRecentHiddenAt,
+    getTheme: getTheme,
+    saveTheme: saveTheme,
+    getPhotos: getPhotos,
+    savePhotos: savePhotos,
+    addPhoto: addPhoto,
+    deletePhoto: deletePhoto,
+    getNotes: getNotes,
+    saveNotes: saveNotes,
+    addNote: addNote,
+    updateNote: updateNote,
+    deleteNote: deleteNote,
     exportAllData: exportAllData,
     importAllData: importAllData,
     clearAllData: clearAllData

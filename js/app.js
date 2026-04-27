@@ -11,6 +11,9 @@
     "createGroupScreen",
     "groupChatScreen",
     "offlineScreen",
+    "themeScreen",
+    "photoScreen",
+    "notebookScreen",
     "settingsScreen",
     "privateChatSettingsScreen",
     "groupSettingsScreen",
@@ -27,6 +30,23 @@
   var diaryCharacterId = "";
   var characterSpaceId = "";
   var thoughtsReturnPage = "homeScreen";
+  var thoughtsState = {
+    title: "心声",
+    characterIds: [],
+    chatId: "",
+    characterFilter: "all",
+    sourceFilter: "all",
+    moodFilter: "all"
+  };
+  var noteSearchKeyword = "";
+  var currentThemeId = "default";
+  var themePresets = [
+    { id: "default", name: "默认浅色", bg: "#f6f7f4", surface: "#ffffff", text: "#1d2521", muted: "#73817a", blue: "#5b9fe6", green: "#68bea3" },
+    { id: "pink", name: "粉色", bg: "#fff5f8", surface: "#ffffff", text: "#2b2025", muted: "#8d6f7b", blue: "#7aa7ea", green: "#69bda3" },
+    { id: "blue", name: "蓝色", bg: "#f3f8ff", surface: "#ffffff", text: "#1e2835", muted: "#6f7f93", blue: "#4d8fe8", green: "#55bfa0" },
+    { id: "green", name: "绿色", bg: "#f2faf5", surface: "#ffffff", text: "#1f2b23", muted: "#6f8376", blue: "#5e9de4", green: "#4fb782" },
+    { id: "dark", name: "深色", bg: "#151916", surface: "#202620", text: "#eef5ef", muted: "#9eaa9f", blue: "#78aef0", green: "#7ac9a4" }
+  ];
   var defaultEmojis = ["😀", "😭", "😍", "🤔", "😡", "👍", "❤️", "🎉"];
   var presetLocations = [
     { name: "家", address: "常去的地方", lat: null, lng: null },
@@ -104,6 +124,18 @@
 
     if (pageId === "offlineScreen") {
       window.OfflineManager.renderOfflineMessages();
+    }
+
+    if (pageId === "themeScreen") {
+      renderThemeScreen();
+    }
+
+    if (pageId === "photoScreen") {
+      renderPhotoScreen();
+    }
+
+    if (pageId === "notebookScreen") {
+      renderNotebookScreen();
     }
 
     if (pageId === "settingsScreen") {
@@ -184,13 +216,20 @@
 
     list.innerHTML = recentItems.map(renderRecentChatItem).join("");
 
-    Array.prototype.forEach.call(list.querySelectorAll(".recent-chat-item"), function (item) {
+    Array.prototype.forEach.call(list.querySelectorAll("[data-recent-open]"), function (item) {
       item.addEventListener("click", function () {
-        if (item.dataset.type === "private") {
-          window.CharacterManager.openChatScreen(item.dataset.id);
+        if (item.dataset.recentType === "private") {
+          window.CharacterManager.openChatScreen(item.dataset.recentId);
         } else {
-          window.GroupManager.openGroupChatScreen(item.dataset.id);
+          window.GroupManager.openGroupChatScreen(item.dataset.recentId);
         }
+      });
+    });
+
+    Array.prototype.forEach.call(list.querySelectorAll("[data-recent-action]"), function (button) {
+      button.addEventListener("click", function (event) {
+        event.stopPropagation();
+        handleRecentAction(button.dataset.recentAction, button.dataset.recentType, button.dataset.recentId, Number(button.dataset.recentTime) || Date.now());
       });
     });
   }
@@ -201,20 +240,24 @@
     var privateItems = characters.map(function (character) {
       var history = window.AppStorage.getChatHistory(character.id);
       var last = getLastRecentMessage(history);
+      var chatSettings = character.chatSettings || {};
 
       return {
         type: "private",
         id: character.id,
-        title: character.name,
+        title: chatSettings.remarkName || character.name,
+        originalTitle: character.name,
         avatar: character.avatar,
         fallback: character.name ? character.name.slice(0, 1) : "AI",
         preview: last ? formatRecentPreview(last) : "还没有聊天记录",
-        time: last ? last.createdAt : character.createdAt || 0
+        time: last ? last.createdAt : 0,
+        pinned: Boolean(chatSettings.pinned)
       };
     });
     var groupItems = groups.map(function (group) {
       var history = window.AppStorage.getGroupChatHistory(group.id);
       var last = getLastRecentMessage(history);
+      var groupSettings = group.settings || {};
 
       return {
         type: "group",
@@ -222,13 +265,64 @@
         title: group.name,
         memberIds: group.memberIds || [],
         preview: last ? formatRecentPreview(last) : "还没有群聊消息",
-        time: last ? last.createdAt : group.createdAt || 0
+        time: last ? last.createdAt : 0,
+        pinned: Boolean(groupSettings.pinned)
       };
     });
 
-    return privateItems.concat(groupItems).sort(function (a, b) {
+    return privateItems.concat(groupItems).filter(function (item) {
+      var hiddenAt = window.AppStorage.getRecentHiddenAt ? window.AppStorage.getRecentHiddenAt(item.type, item.id) : 0;
+      return item.time && (!hiddenAt || item.time > hiddenAt);
+    }).sort(function (a, b) {
+      if (a.pinned !== b.pinned) {
+        return a.pinned ? -1 : 1;
+      }
       return b.time - a.time;
     }).slice(0, 20);
+  }
+
+  function handleRecentAction(action, type, id, time) {
+    if (action === "hide") {
+      if (window.AppStorage.hideRecentChat) {
+        window.AppStorage.hideRecentChat(type, id, time);
+      }
+      renderWechatScreen();
+      return;
+    }
+
+    if (action === "pin") {
+      setRecentPinned(type, id, true);
+      return;
+    }
+
+    if (action === "unpin") {
+      setRecentPinned(type, id, false);
+    }
+  }
+
+  function setRecentPinned(type, id, pinned) {
+    var character;
+    var group;
+
+    if (type === "private") {
+      character = getCharacterById(id);
+      if (character) {
+        window.AppStorage.updateCharacter(id, {
+          chatSettings: Object.assign({}, character.chatSettings || {}, { pinned: Boolean(pinned) })
+        });
+      }
+    } else {
+      group = (window.AppStorage.getGroups ? window.AppStorage.getGroups() : []).find(function (item) {
+        return item.id === id;
+      });
+      if (group) {
+        window.AppStorage.updateGroup(id, {
+          settings: Object.assign({}, group.settings || {}, { pinned: Boolean(pinned) })
+        });
+      }
+    }
+
+    renderWechatScreen();
   }
 
   function getLastRecentMessage(history) {
@@ -299,13 +393,20 @@
 
   function renderRecentChatItem(item) {
     return [
-      '<button class="recent-chat-item" type="button" data-type="' + escapeHtml(item.type) + '" data-id="' + escapeHtml(item.id) + '">',
+      '<article class="recent-chat-item' + (item.pinned ? " pinned" : "") + '">',
+      '  <button class="recent-open" type="button" data-recent-open data-recent-type="' + escapeHtml(item.type) + '" data-recent-id="' + escapeHtml(item.id) + '">',
       item.type === "group" ? renderRecentGroupAvatar(item.memberIds) : renderRecentSingleAvatar(item),
-      '  <span class="recent-chat-main">',
-      "    <strong>" + escapeHtml(item.title) + "</strong>",
-      "    <em>" + escapeHtml(item.preview) + "</em>",
-      "  </span>",
-      "</button>"
+      '    <span class="recent-chat-main">',
+      '      <strong>' + (item.pinned ? '<i>置顶</i>' : "") + escapeHtml(item.title) + "</strong>",
+      item.originalTitle && item.originalTitle !== item.title ? '      <small>原名：' + escapeHtml(item.originalTitle) + "</small>" : "",
+      "      <em>" + escapeHtml(item.preview) + "</em>",
+      "    </span>",
+      "  </button>",
+      '  <div class="recent-actions">',
+      '    <button type="button" data-recent-action="' + (item.pinned ? "unpin" : "pin") + '" data-recent-type="' + escapeHtml(item.type) + '" data-recent-id="' + escapeHtml(item.id) + '" data-recent-time="' + escapeHtml(item.time) + '">' + (item.pinned ? "取消置顶" : "置顶") + "</button>",
+      '    <button type="button" data-recent-action="hide" data-recent-type="' + escapeHtml(item.type) + '" data-recent-id="' + escapeHtml(item.id) + '" data-recent-time="' + escapeHtml(item.time) + '">移除</button>',
+      "  </div>",
+      "</article>"
     ].join("");
   }
 
@@ -362,6 +463,18 @@
       setActivePage("settingsScreen");
     });
 
+    getElement("openTheme").addEventListener("click", function () {
+      setActivePage("themeScreen");
+    });
+
+    getElement("openPhoto").addEventListener("click", function () {
+      setActivePage("photoScreen");
+    });
+
+    getElement("openNotebook").addEventListener("click", function () {
+      setActivePage("notebookScreen");
+    });
+
     Array.prototype.forEach.call(document.querySelectorAll(".desktop-coming"), function (button) {
       button.addEventListener("click", function () {
         window.alert("功能开发中");
@@ -413,6 +526,9 @@
     getElement("worldBookBackBtn").addEventListener("click", goHome);
     getElement("diaryBackBtn").addEventListener("click", goHome);
     getElement("characterSpaceBackBtn").addEventListener("click", goHome);
+    getElement("themeBackBtn").addEventListener("click", goHome);
+    getElement("photoBackBtn").addEventListener("click", goHome);
+    getElement("notebookBackBtn").addEventListener("click", goHome);
     getElement("thoughtsBackBtn").addEventListener("click", function () {
       setActivePage(thoughtsReturnPage || "homeScreen");
     });
@@ -561,6 +677,7 @@
     getElement("chatEditCharacterBtn").addEventListener("click", window.CharacterManager.editActiveCharacter);
     getElement("chatSettingsBtn").addEventListener("click", window.CharacterManager.openActivePrivateSettings);
     getElement("chatThoughtsBtn").addEventListener("click", window.CharacterManager.openActiveCharacterThoughts);
+    getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
     getElement("chatOfflineBtn").addEventListener("click", window.CharacterManager.openActiveCharacterOffline);
     getElement("privateOfflineExitBtn").addEventListener("click", function () {
@@ -586,6 +703,7 @@
 
     getElement("groupSettingsBtn").addEventListener("click", window.GroupManager.openActiveGroupSettings);
     getElement("groupThoughtsBtn").addEventListener("click", window.GroupManager.openActiveGroupThoughts);
+    getElement("groupSearchBtn").addEventListener("click", window.GroupManager.openActiveGroupSearch);
     getElement("groupBatchMessageSelectBtn").addEventListener("click", window.GroupManager.openGroupMessageSelectionMode);
     getElement("groupOfflineBtn").addEventListener("click", window.GroupManager.openActiveGroupOffline);
     getElement("groupOfflineExitBtn").addEventListener("click", function () {
@@ -597,6 +715,12 @@
     getElement("fetchModelsBtn").addEventListener("click", fetchModelsFromSettings);
     getElement("exportDataBtn").addEventListener("click", exportAllData);
     getElement("newWorldBookBtn").addEventListener("click", createWorldBook);
+    getElement("importPhotoBtn").addEventListener("click", function () {
+      getElement("photoImportInput").click();
+    });
+    getElement("photoImportInput").addEventListener("change", importPhotoFiles);
+    getElement("newNoteBtn").addEventListener("click", createNote);
+    getElement("worldBookImportInput").addEventListener("change", importWorldBookFromFile);
     getElement("importDataBtn").addEventListener("click", function () {
       getElement("importDataInput").click();
     });
@@ -741,6 +865,170 @@
 
     emojiSendCallback = null;
     imageSendCallback = null;
+  }
+
+  function openChatSearchSheet(options) {
+    var source = options || {};
+    var messages = (source.messages || []).filter(function (message) {
+      return message && message.type !== "loading" && message.content;
+    });
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <span></span>',
+      "  <h3>" + escapeHtml(source.title || "搜索聊天记录") + "</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<div class="wechat-sheet-form chat-search-panel">',
+      '  <label class="wechat-sheet-field">',
+      "    <span>关键词</span>",
+      '    <input id="chatSearchInput" type="search" placeholder="输入消息内容、发送者或日期" maxlength="40">',
+      "  </label>",
+      '  <div id="chatSearchResults" class="chat-search-results"></div>',
+      "</div>"
+    ].join(""), function (sheet) {
+      var input = sheet.querySelector("#chatSearchInput");
+      var results = sheet.querySelector("#chatSearchResults");
+
+      bindSheetCloseButtons(sheet);
+
+      function getSender(message) {
+        if (typeof source.sender === "function") {
+          return source.sender(message);
+        }
+        if (message.role === "user") {
+          return "我";
+        }
+        if (message.role === "system") {
+          return "系统";
+        }
+        return message.characterName || "角色";
+      }
+
+      function renderResults() {
+        var keyword = input.value.trim().toLowerCase();
+        var matches = messages.filter(function (message) {
+          var haystack = [
+            message.content || "",
+            formatTypedPreview(message),
+            getSender(message),
+            formatDateTime(message.createdAt)
+          ].join(" ").toLowerCase();
+          return keyword && haystack.indexOf(keyword) !== -1;
+        }).slice(0, 80);
+
+        if (!keyword) {
+          results.innerHTML = '<div class="soft-empty">输入关键词后显示聊天记录结果</div>';
+          return;
+        }
+
+        if (!matches.length) {
+          results.innerHTML = '<div class="soft-empty">没有找到匹配消息</div>';
+          return;
+        }
+
+        results.innerHTML = matches.map(function (message) {
+          return [
+            '<button type="button" class="chat-search-result" data-search-message-id="' + escapeHtml(message.id || "") + '">',
+            '  <strong>' + escapeHtml(getSender(message)) + "</strong>",
+            '  <span>' + escapeHtml(formatTypedPreview(message)) + "</span>",
+            '  <em>' + escapeHtml(formatDateTime(message.createdAt)) + "</em>",
+            "</button>"
+          ].join("");
+        }).join("");
+
+        Array.prototype.forEach.call(results.querySelectorAll("[data-search-message-id]"), function (button) {
+          button.addEventListener("click", function () {
+            var messageId = button.dataset.searchMessageId;
+            closeWeChatSheet();
+            if (typeof source.onJump === "function") {
+              source.onJump(messageId);
+            }
+          });
+        });
+      }
+
+      input.addEventListener("input", renderResults);
+      renderResults();
+      window.setTimeout(function () {
+        input.focus();
+      }, 50);
+    });
+  }
+
+  function openOfflineSceneSheet(onSelect) {
+    var scenes = [
+      { name: "家", description: "熟悉、放松、适合日常互动的室内场景" },
+      { name: "学校", description: "走廊、教室和课间氛围都可以自然出现" },
+      { name: "图书馆", description: "安静、书架和低声交谈的空间" },
+      { name: "咖啡店", description: "有饮品香气、靠窗座位和轻松谈话" },
+      { name: "雨天街道", description: "雨声、伞、街灯和临时避雨的情绪" },
+      { name: "商场", description: "人流、橱窗、店铺和一起闲逛的节奏" }
+    ];
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <span></span>',
+      "  <h3>选择线下场景</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<div class="wechat-sheet-form offline-scene-panel">',
+      '  <div class="scene-preset-grid">',
+      scenes.map(function (scene, index) {
+        return [
+          '<button type="button" class="scene-preset" data-scene-index="' + index + '">',
+          "  <strong>" + escapeHtml(scene.name) + "</strong>",
+          "  <span>" + escapeHtml(scene.description) + "</span>",
+          "</button>"
+        ].join("");
+      }).join(""),
+      "  </div>",
+      '  <label class="wechat-sheet-field">',
+      "    <span>自定义场景名称</span>",
+      '    <input id="customSceneName" type="text" placeholder="例如：天台、练习室" maxlength="30">',
+      "  </label>",
+      '  <label class="wechat-sheet-field">',
+      "    <span>自定义场景描述</span>",
+      '    <textarea id="customSceneDescription" placeholder="写下地点氛围、正在发生的事或你想要的剧情基调" maxlength="220"></textarea>',
+      "  </label>",
+      '  <p id="sceneToolError" class="sheet-error" role="alert"></p>',
+      '  <div class="wechat-sheet-actions">',
+      '    <button type="button" class="outline-button" data-close-sheet>取消</button>',
+      '    <button id="useCustomSceneBtn" type="button" class="full-button">使用自定义场景</button>',
+      "  </div>",
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+
+      function choose(scene) {
+        closeWeChatSheet();
+        if (typeof onSelect === "function") {
+          onSelect(scene);
+        }
+      }
+
+      Array.prototype.forEach.call(sheet.querySelectorAll("[data-scene-index]"), function (button) {
+        button.addEventListener("click", function () {
+          choose(scenes[Number(button.dataset.sceneIndex)]);
+        });
+      });
+
+      sheet.querySelector("#useCustomSceneBtn").addEventListener("click", function () {
+        var name = sheet.querySelector("#customSceneName").value.trim();
+        var description = sheet.querySelector("#customSceneDescription").value.trim();
+        var error = sheet.querySelector("#sceneToolError");
+
+        if (!name) {
+          error.textContent = "请输入自定义场景名称。";
+          return;
+        }
+
+        choose({
+          name: name,
+          description: description || "用户自定义的线下互动场景"
+        });
+      });
+    });
   }
 
   function openRedPacketSheet(onSend) {
@@ -1353,6 +1641,9 @@
       "  </div>",
       '  <div class="settings-action-row">',
       '    <button class="outline-button" type="button" data-world-action="add-entry">新建条目</button>',
+      '    <button class="outline-button" type="button" data-world-action="duplicate-book">复制世界书</button>',
+      '    <button class="outline-button" type="button" data-world-action="export-book">导出 JSON</button>',
+      '    <button class="outline-button" type="button" data-world-action="import-book">导入 JSON</button>',
       '    <button class="outline-button" type="button" data-world-action="save-book">保存世界书</button>',
       '    <button class="outline-button danger" type="button" data-world-action="delete-book">删除</button>',
       "  </div>",
@@ -1384,7 +1675,12 @@
       '    <label>内容</label>',
       '    <textarea data-entry-field="content">' + escapeHtml(entry.content) + "</textarea>",
       "  </div>",
-      '  <button class="outline-button danger" type="button" data-world-action="delete-entry">删除条目</button>',
+      '  <div class="settings-action-row compact-action-row">',
+      '    <button class="outline-button" type="button" data-world-action="entry-up">上移</button>',
+      '    <button class="outline-button" type="button" data-world-action="entry-down">下移</button>',
+      '    <button class="outline-button" type="button" data-world-action="duplicate-entry">复制</button>',
+      '    <button class="outline-button danger" type="button" data-world-action="delete-entry">删除</button>',
+      "  </div>",
       "</section>"
     ].join("");
   }
@@ -1427,6 +1723,38 @@
         return;
       }
 
+      if (button.dataset.worldAction === "duplicate-book") {
+        duplicateWorldBook(card, book);
+        return;
+      }
+
+      if (button.dataset.worldAction === "export-book") {
+        exportWorldBook(collectWorldBookFromCard(card, book));
+        return;
+      }
+
+      if (button.dataset.worldAction === "import-book") {
+        getElement("worldBookImportInput").click();
+        return;
+      }
+
+      if (button.dataset.worldAction === "duplicate-entry") {
+        window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
+          duplicateEntryId: button.closest(".world-entry-card").dataset.entryId
+        }));
+        renderWorldBookScreen();
+        return;
+      }
+
+      if (button.dataset.worldAction === "entry-up" || button.dataset.worldAction === "entry-down") {
+        window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
+          moveEntryId: button.closest(".world-entry-card").dataset.entryId,
+          moveDirection: button.dataset.worldAction === "entry-up" ? -1 : 1
+        }));
+        renderWorldBookScreen();
+        return;
+      }
+
       if (button.dataset.worldAction === "delete-entry") {
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
           deleteEntryId: button.closest(".world-entry-card").dataset.entryId
@@ -1453,20 +1781,34 @@
     };
 
     Array.prototype.forEach.call(card.querySelectorAll(".world-entry-card"), function (entryCard) {
+      var existing;
+      var entry;
+
       if (options && options.deleteEntryId === entryCard.dataset.entryId) {
         return;
       }
 
-      next.entries.push({
+      existing = (book.entries || []).find(function (item) { return item.id === entryCard.dataset.entryId; });
+      entry = {
         id: entryCard.dataset.entryId,
         title: getScopedFieldValue(entryCard, "[data-entry-field='title']") || "未命名条目",
         keywords: getScopedFieldValue(entryCard, "[data-entry-field='keywords']").split(/[,，\s]+/).map(function (keyword) { return keyword.trim(); }).filter(Boolean),
         content: getScopedFieldValue(entryCard, "[data-entry-field='content']"),
         enabled: Boolean(entryCard.querySelector("[data-entry-field='enabled']").checked),
         priority: Number(getScopedFieldValue(entryCard, "[data-entry-field='priority']")) || 0,
-        createdAt: (book.entries || []).find(function (entry) { return entry.id === entryCard.dataset.entryId; }) && (book.entries || []).find(function (entry) { return entry.id === entryCard.dataset.entryId; }).createdAt || Date.now(),
+        createdAt: existing && existing.createdAt || Date.now(),
         updatedAt: Date.now()
-      });
+      };
+      next.entries.push(entry);
+
+      if (options && options.duplicateEntryId === entryCard.dataset.entryId) {
+        next.entries.push(Object.assign({}, entry, {
+          id: String(Date.now() + Math.random()),
+          title: entry.title + " 副本",
+          createdAt: Date.now(),
+          updatedAt: Date.now()
+        }));
+      }
     });
 
     if (options && options.addEntry) {
@@ -1482,7 +1824,386 @@
       });
     }
 
+    if (options && options.moveEntryId) {
+      moveWorldBookEntry(next.entries, options.moveEntryId, options.moveDirection);
+    }
+
     return next;
+  }
+
+  function moveWorldBookEntry(entries, entryId, direction) {
+    var index = entries.findIndex(function (entry) {
+      return entry.id === entryId;
+    });
+    var target = index + direction;
+    var item;
+
+    if (index === -1 || target < 0 || target >= entries.length) {
+      return;
+    }
+
+    item = entries[index];
+    entries[index] = entries[target];
+    entries[target] = item;
+  }
+
+  function duplicateWorldBook(card, book) {
+    var copy = collectWorldBookFromCard(card, book);
+    copy.id = String(Date.now());
+    copy.name = copy.name + " 副本";
+    copy.createdAt = Date.now();
+    copy.updatedAt = Date.now();
+    copy.entries = (copy.entries || []).map(function (entry, index) {
+      return Object.assign({}, entry, {
+        id: String(Date.now() + index + Math.random()),
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      });
+    });
+    window.AppStorage.addWorldBook(copy);
+    renderWorldBookScreen();
+  }
+
+  function exportWorldBook(book) {
+    var json = JSON.stringify(book, null, 2);
+    var blob = new Blob([json], { type: "application/json;charset=utf-8" });
+    var url = URL.createObjectURL(blob);
+    var link = document.createElement("a");
+
+    link.href = url;
+    link.download = "world-book-" + (book.name || "book") + "-" + Date.now() + ".json";
+    document.body.appendChild(link);
+    link.click();
+    link.remove();
+
+    window.setTimeout(function () {
+      URL.revokeObjectURL(url);
+    }, 0);
+  }
+
+  function importWorldBookFromFile(event) {
+    var input = event.target;
+    var file = input.files && input.files[0];
+    var reader;
+
+    if (!file) {
+      return;
+    }
+
+    reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(String(reader.result || ""));
+        window.AppStorage.addWorldBook(data);
+        renderWorldBookScreen();
+      } catch (error) {
+        window.alert("世界书导入失败，请检查 JSON 文件。");
+      } finally {
+        input.value = "";
+      }
+    };
+    reader.readAsText(file);
+  }
+
+  function applySavedTheme() {
+    var saved = window.AppStorage.getTheme ? window.AppStorage.getTheme() : { active: "default" };
+    applyTheme(saved.active || "default", false);
+  }
+
+  function getThemePreset(themeId) {
+    return themePresets.find(function (theme) {
+      return theme.id === themeId;
+    }) || themePresets[0];
+  }
+
+  function applyTheme(themeId, persist) {
+    var theme = getThemePreset(themeId);
+    var root = document.documentElement;
+
+    currentThemeId = theme.id;
+    root.style.setProperty("--bg", theme.bg);
+    root.style.setProperty("--surface", theme.surface);
+    root.style.setProperty("--surface-soft", theme.id === "dark" ? "#2a312b" : "#edf5f1");
+    root.style.setProperty("--text", theme.text);
+    root.style.setProperty("--muted", theme.muted);
+    root.style.setProperty("--blue", theme.blue);
+    root.style.setProperty("--green", theme.green);
+    root.style.setProperty("--blue-dark", theme.id === "dark" ? "#a8cbff" : "#2f78bd");
+    root.style.setProperty("--green-dark", theme.id === "dark" ? "#a7e0c2" : "#327f67");
+    root.dataset.theme = theme.id;
+
+    if (persist !== false && window.AppStorage.saveTheme) {
+      window.AppStorage.saveTheme({ active: theme.id });
+    }
+  }
+
+  function renderThemeScreen() {
+    var content = getElement("themeContent");
+
+    if (!content) {
+      return;
+    }
+
+    content.innerHTML = [
+      '<section class="theme-grid">',
+      themePresets.map(function (theme) {
+        return [
+          '<button type="button" class="theme-card' + (currentThemeId === theme.id ? " active" : "") + '" data-theme-id="' + escapeHtml(theme.id) + '">',
+          '  <span class="theme-swatch" style="--swatch-bg:' + escapeHtml(theme.bg) + ';--swatch-surface:' + escapeHtml(theme.surface) + ';--swatch-blue:' + escapeHtml(theme.blue) + ';--swatch-green:' + escapeHtml(theme.green) + '"></span>',
+          "  <strong>" + escapeHtml(theme.name) + "</strong>",
+          "  <em>" + (currentThemeId === theme.id ? "已应用" : "点击预览") + "</em>",
+          "</button>"
+        ].join("");
+      }).join(""),
+      "</section>"
+    ].join("");
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-theme-id]"), function (button) {
+      button.addEventListener("click", function () {
+        applyTheme(button.dataset.themeId, true);
+        renderThemeScreen();
+      });
+    });
+  }
+
+  function renderPhotoScreen() {
+    var content = getElement("photoContent");
+    var photos = window.AppStorage.getPhotos ? window.AppStorage.getPhotos() : [];
+
+    if (!content) {
+      return;
+    }
+
+    if (!photos.length) {
+      content.innerHTML = '<div class="soft-empty">还没有图片，点击右上角导入</div>';
+      return;
+    }
+
+    content.innerHTML = [
+      '<div class="photo-grid">',
+      photos.map(function (photo) {
+        return [
+          '<article class="photo-card" data-photo-id="' + escapeHtml(photo.id) + '">',
+          '  <button type="button" data-photo-action="preview"><img src="' + escapeHtml(photo.src) + '" alt="' + escapeHtml(photo.name) + '"></button>',
+          '  <div><strong>' + escapeHtml(photo.name) + '</strong><button type="button" data-photo-action="delete">删除</button></div>',
+          "</article>"
+        ].join("");
+      }).join(""),
+      "</div>"
+    ].join("");
+
+    content.onclick = function (event) {
+      var button = event.target.closest("[data-photo-action]");
+      var card = button ? button.closest(".photo-card") : null;
+      var photo = card ? photos.find(function (item) { return item.id === card.dataset.photoId; }) : null;
+
+      if (!button || !photo) {
+        return;
+      }
+
+      if (button.dataset.photoAction === "preview") {
+        showWeChatSheet([
+          '<div class="wechat-sheet-header">',
+          '  <span></span>',
+          "  <h3>" + escapeHtml(photo.name) + "</h3>",
+          '  <button type="button" data-close-sheet>关闭</button>',
+          "</div>",
+          '<div class="photo-preview-panel"><img src="' + escapeHtml(photo.src) + '" alt="' + escapeHtml(photo.name) + '"></div>'
+        ].join(""), bindSheetCloseButtons);
+      }
+
+      if (button.dataset.photoAction === "delete" && window.confirm("确定删除这张图片吗？")) {
+        window.AppStorage.deletePhoto(photo.id);
+        renderPhotoScreen();
+      }
+    };
+  }
+
+  function importPhotoFiles(event) {
+    var input = event.target;
+    var files = Array.prototype.slice.call(input.files || []);
+
+    if (!files.length || !window.AppStorage.addPhoto) {
+      return;
+    }
+
+    Promise.all(files.map(function (file) {
+      return readFileAsDataUrl(file).then(function (dataUrl) {
+        window.AppStorage.addPhoto({
+          id: String(Date.now() + Math.random()),
+          name: file.name || "图片",
+          src: dataUrl,
+          createdAt: Date.now()
+        });
+      });
+    })).then(function () {
+      input.value = "";
+      renderPhotoScreen();
+    }).catch(function () {
+      input.value = "";
+      window.alert("图片导入失败。");
+    });
+  }
+
+  function readFileAsDataUrl(file) {
+    return new Promise(function (resolve, reject) {
+      var reader = new FileReader();
+      reader.onload = function () {
+        resolve(String(reader.result || ""));
+      };
+      reader.onerror = reject;
+      reader.readAsDataURL(file);
+    });
+  }
+
+  function createNote() {
+    window.AppStorage.addNote({
+      id: String(Date.now()),
+      title: "新笔记",
+      content: "",
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+    setActivePage("notebookScreen");
+  }
+
+  function renderNotebookScreen() {
+    var content = getElement("notebookContent");
+    var notes = window.AppStorage.getNotes ? window.AppStorage.getNotes() : [];
+    var keyword = noteSearchKeyword.toLowerCase();
+    var visibleNotes = notes.filter(function (note) {
+      return !keyword || [note.title, note.content].join("\n").toLowerCase().indexOf(keyword) !== -1;
+    });
+
+    if (!content) {
+      return;
+    }
+
+    content.innerHTML = [
+      '<section class="form-section notebook-search-section">',
+      '  <div class="field-group"><label>搜索笔记</label><input data-note-search type="search" value="' + escapeHtml(noteSearchKeyword) + '" placeholder="输入标题或正文"></div>',
+      "</section>",
+      visibleNotes.length ? [
+        '<div class="note-list">',
+        visibleNotes.map(renderNoteCard).join(""),
+        "</div>"
+      ].join("") : '<div class="soft-empty">还没有匹配的笔记</div>'
+    ].join("");
+
+    bindNotebookActions(content);
+  }
+
+  function renderNoteCard(note) {
+    return [
+      '<article class="note-card" data-note-id="' + escapeHtml(note.id) + '">',
+      '  <input data-note-field="title" type="text" value="' + escapeHtml(note.title) + '" placeholder="标题">',
+      '  <textarea data-note-field="content" placeholder="写点什么">' + escapeHtml(note.content) + "</textarea>",
+      '  <small>' + escapeHtml(formatDateTime(note.updatedAt || note.createdAt)) + "</small>",
+      '  <div class="settings-action-row">',
+      '    <button class="outline-button" type="button" data-note-action="save">保存</button>',
+      '    <button class="outline-button" type="button" data-note-action="worldbook">写入世界书</button>',
+      '    <button class="outline-button" type="button" data-note-action="memory">写入记忆</button>',
+      '    <button class="outline-button danger" type="button" data-note-action="delete">删除</button>',
+      "  </div>",
+      "</article>"
+    ].join("");
+  }
+
+  function bindNotebookActions(content) {
+    var search = content.querySelector("[data-note-search]");
+
+    if (search) {
+      search.addEventListener("input", function () {
+        noteSearchKeyword = search.value.trim();
+        renderNotebookScreen();
+      });
+    }
+
+    content.onclick = function (event) {
+      var button = event.target.closest("[data-note-action]");
+      var card = button ? button.closest(".note-card") : null;
+      var noteId = card ? card.dataset.noteId : "";
+      var note;
+
+      if (!button || !noteId) {
+        return;
+      }
+
+      note = collectNoteFromCard(card);
+
+      if (button.dataset.noteAction === "save") {
+        window.AppStorage.updateNote(noteId, note);
+        renderNotebookScreen();
+        return;
+      }
+
+      if (button.dataset.noteAction === "delete" && window.confirm("确定删除这条笔记吗？")) {
+        window.AppStorage.deleteNote(noteId);
+        renderNotebookScreen();
+        return;
+      }
+
+      if (button.dataset.noteAction === "worldbook") {
+        writeNoteToWorldBook(note);
+        return;
+      }
+
+      if (button.dataset.noteAction === "memory") {
+        writeNoteToMemory(note);
+      }
+    };
+  }
+
+  function collectNoteFromCard(card) {
+    return {
+      title: getScopedFieldValue(card, "[data-note-field='title']") || "未命名笔记",
+      content: getScopedFieldValue(card, "[data-note-field='content']"),
+      updatedAt: Date.now()
+    };
+  }
+
+  function writeNoteToWorldBook(note) {
+    if (!note.content) {
+      window.alert("笔记正文为空，暂时不能写入世界书。");
+      return;
+    }
+
+    window.AppStorage.addWorldBook({
+      name: "笔记：" + note.title,
+      description: "从记事本写入的资料",
+      enabled: true,
+      scope: "global",
+      targetIds: [],
+      entries: [{
+        id: String(Date.now()),
+        title: note.title,
+        keywords: note.title.split(/[,，\s]+/).filter(Boolean),
+        content: note.content,
+        enabled: true,
+        priority: 5,
+        createdAt: Date.now(),
+        updatedAt: Date.now()
+      }]
+    });
+    window.alert("已写入世界书。");
+  }
+
+  function writeNoteToMemory(note) {
+    var characters = window.AppStorage.getCharacters();
+
+    if (!note.content || !characters.length) {
+      window.alert("没有可写入的正文或角色。");
+      return;
+    }
+
+    characters.forEach(function (character) {
+      window.AppStorage.addCharacterMemory(character.id, {
+        content: "用户笔记：" + note.title + " - " + note.content,
+        source: "private",
+        createdAt: Date.now()
+      });
+    });
+    window.alert("已写入所有角色记忆。");
   }
 
   function getScopedFieldValue(scope, selector) {
@@ -1576,7 +2297,9 @@
           '    <label><span>小结</span><input data-diary-edit="summary" type="text" value="' + escapeHtml(diary.summary) + '"></label>',
           "  </div>",
           '  <div class="settings-action-row">',
+          '    <button class="outline-button" type="button" data-diary-action="detail">详情</button>',
           '    <button class="outline-button" type="button" data-diary-action="save-diary" data-diary-type="' + type + '">保存</button>',
+          '    <button class="outline-button" type="button" data-diary-action="memory">写入记忆</button>',
           '    <button class="outline-button danger" type="button" data-diary-action="delete-diary">删除</button>',
           "  </div>",
           "</article>"
@@ -1633,11 +2356,75 @@
         return;
       }
 
+      if (button.dataset.diaryAction === "detail" && diaryId) {
+        openDiaryDetail(diaryId);
+        return;
+      }
+
+      if (button.dataset.diaryAction === "memory" && diaryId) {
+        writeDiaryToMemory(diaryId);
+        return;
+      }
+
       if (button.dataset.diaryAction === "delete-diary" && diaryId && window.confirm("确定删除这篇日记吗？")) {
         window.AppStorage.deleteDiary(diaryId);
         renderDiaryScreen();
       }
     };
+  }
+
+  function openDiaryDetail(diaryId) {
+    var diary = window.AppStorage.getDiaries().find(function (item) {
+      return item.id === diaryId;
+    });
+
+    if (!diary) {
+      return;
+    }
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <span></span>',
+      "  <h3>日记详情</h3>",
+      '  <button type="button" data-close-sheet>关闭</button>',
+      "</div>",
+      '<article class="diary-detail-book">',
+      '  <div class="diary-date">' + escapeHtml(diary.date) + " · " + escapeHtml(diary.weather || "未记录") + "</div>",
+      "  <h3>" + escapeHtml(diary.title || "无题") + "</h3>",
+      '  <p class="diary-detail-content">' + escapeHtml(diary.content || "暂无正文") + "</p>",
+      '  <div class="thought-meta"><span>今日心情：' + escapeHtml(diary.mood || "未记录") + "</span></div>",
+      '  <p class="thought-summary">' + escapeHtml(diary.summary || "还没有一句话小结") + "</p>",
+      "</article>"
+    ].join(""), bindSheetCloseButtons);
+  }
+
+  function writeDiaryToMemory(diaryId) {
+    var diary = window.AppStorage.getDiaries().find(function (item) {
+      return item.id === diaryId;
+    });
+    var characters = window.AppStorage.getCharacters();
+
+    if (!diary) {
+      return;
+    }
+
+    if (diary.type === "character" && diary.characterId) {
+      window.AppStorage.addCharacterMemory(diary.characterId, {
+        content: "日记记忆：" + diary.date + "《" + (diary.title || "无题") + "》" + (diary.summary || diary.content),
+        source: "private",
+        createdAt: Date.now()
+      });
+    } else {
+      characters.forEach(function (character) {
+        window.AppStorage.addCharacterMemory(character.id, {
+          content: "我的日记：" + diary.date + "《" + (diary.title || "无题") + "》" + (diary.summary || diary.content),
+          source: "private",
+          createdAt: Date.now()
+        });
+      });
+    }
+
+    window.alert("已写入记忆。");
   }
 
   async function generateTodayDiary(button) {
@@ -1811,11 +2598,11 @@
       '<p class="space-copy">' + escapeHtml(character.personality || "暂无性格设定") + "</p>",
       '<p class="space-copy">' + escapeHtml(character.background || "暂无背景故事") + "</p>",
       '<p class="space-copy">' + escapeHtml(character.speakingStyle || "暂无说话风格") + "</p>",
-      '<button class="outline-button" type="button" data-space-action="open-chat">和 TA 私聊</button></section>',
-      '<section class="form-section"><div class="section-title-row"><h3>角色记忆</h3><span>' + memories.length + " 条</span></div>" + renderSimpleList(memories.map(function (memory) { return memory.content; }), "暂无记忆") + "</section>",
-      '<section class="form-section"><div class="section-title-row"><h3>角色心声</h3><span>' + thoughts.length + " 条</span></div>" + renderSimpleList(thoughts.slice(0, 5).map(function (thought) { return thought.visibleSummary || thought.content; }), "暂无心声") + '<button class="outline-button" type="button" data-space-action="open-thoughts">查看全部心声</button></section>',
+      '<div class="settings-action-row"><button class="outline-button" type="button" data-space-action="open-chat">和 TA 私聊</button><button class="outline-button" type="button" data-space-action="edit-character">编辑角色</button></div></section>',
+      '<section class="form-section"><div class="section-title-row"><h3>角色记忆</h3><span>' + memories.length + " 条</span></div>" + renderSimpleList(memories.map(function (memory) { return memory.content; }), "暂无记忆") + '<button class="outline-button danger" type="button" data-space-action="clear-memory">清空记忆</button></section>',
+      '<section class="form-section"><div class="section-title-row"><h3>角色心声</h3><span>' + thoughts.length + " 条</span></div>" + renderSimpleList(thoughts.slice(0, 5).map(function (thought) { return thought.visibleSummary || thought.content; }), "暂无心声") + '<div class="settings-action-row"><button class="outline-button" type="button" data-space-action="open-thoughts">查看全部心声</button><button class="outline-button danger" type="button" data-space-action="clear-thoughts">清空心声</button></div></section>',
       '<section class="form-section"><div class="section-title-row"><h3>角色日记</h3><span>' + diaries.length + " 篇</span></div>" + renderSimpleList(diaries.slice(0, 5).map(function (diary) { return diary.date + " · " + diary.title; }), "暂无日记") + "</section>",
-      '<section class="form-section"><div class="section-title-row"><h3>参与群聊</h3><span>' + groups.length + " 个</span></div>" + renderSimpleList(groups.map(function (group) { return group.name; }), "还没有参与群聊") + "</section>"
+      '<section class="form-section"><div class="section-title-row"><h3>参与群聊</h3><span>' + groups.length + " 个</span></div>" + (groups.length ? '<div class="simple-list">' + groups.map(function (group) { return '<button type="button" data-space-group-id="' + escapeHtml(group.id) + '">' + escapeHtml(group.name) + "</button>"; }).join("") + "</div>" : '<div class="soft-empty">还没有参与群聊</div>') + "</section>"
     ].join("");
   }
 
@@ -1839,6 +2626,13 @@
 
     content.onclick = function (event) {
       var button = event.target.closest("[data-space-action]");
+      var groupButton = event.target.closest("[data-space-group-id]");
+
+      if (groupButton) {
+        window.GroupManager.openGroupChatScreen(groupButton.dataset.spaceGroupId);
+        return;
+      }
+
       if (!button || !characterSpaceId) {
         return;
       }
@@ -1848,8 +2642,25 @@
         return;
       }
 
+      if (button.dataset.spaceAction === "edit-character") {
+        window.CharacterManager.openEditCharacterScreen(characterSpaceId);
+        return;
+      }
+
       if (button.dataset.spaceAction === "open-thoughts") {
         openThoughtsForCharacter(characterSpaceId, "characterSpaceScreen");
+        return;
+      }
+
+      if (button.dataset.spaceAction === "clear-memory" && window.confirm("确定清空该角色记忆吗？")) {
+        window.AppStorage.clearCharacterMemory(characterSpaceId);
+        renderCharacterSpaceScreen();
+        return;
+      }
+
+      if (button.dataset.spaceAction === "clear-thoughts" && window.confirm("确定清空该角色心声吗？")) {
+        window.AppStorage.clearCharacterThoughts(characterSpaceId);
+        renderCharacterSpaceScreen();
       }
     };
   }
@@ -1874,22 +2685,35 @@
     var titleNode = getElement("thoughtsTitle");
     var content = getElement("thoughtsContent");
     var items = [];
+    var sourceMap = { private: "私聊", group: "群聊", offline: "线下" };
+    var availableMoods;
+    var visibleItems;
+
+    if (arguments.length) {
+      thoughtsState.title = title || "心声";
+      thoughtsState.characterIds = (characterIds || []).slice();
+      thoughtsState.chatId = chatId || "";
+      thoughtsState.characterFilter = "all";
+      thoughtsState.sourceFilter = "all";
+      thoughtsState.moodFilter = "all";
+    }
 
     if (titleNode) {
-      titleNode.textContent = title || "心声";
+      titleNode.textContent = thoughtsState.title || "心声";
     }
 
     if (!content) {
       return;
     }
 
-    (characterIds || []).forEach(function (characterId) {
+    (thoughtsState.characterIds || []).forEach(function (characterId) {
       var character = getCharacterById(characterId);
       window.AppStorage.getCharacterThoughts(characterId).forEach(function (thought) {
-        if (chatId && thought.chatId !== chatId) {
+        if (thoughtsState.chatId && thought.chatId !== thoughtsState.chatId) {
           return;
         }
         items.push(Object.assign({}, thought, {
+          characterId: characterId,
           characterName: character ? character.name : "角色"
         }));
       });
@@ -1899,19 +2723,114 @@
       return (b.createdAt || 0) - (a.createdAt || 0);
     });
 
-    content.innerHTML = items.length ? items.map(renderThoughtCard).join("") : '<div class="soft-empty">还没有心声</div>';
+    availableMoods = Array.from(new Set(items.map(function (thought) {
+      return thought.mood || "未记录";
+    }))).sort();
+    visibleItems = items.filter(function (thought) {
+      return (thoughtsState.characterFilter === "all" || thought.characterId === thoughtsState.characterFilter)
+        && (thoughtsState.sourceFilter === "all" || thought.source === thoughtsState.sourceFilter)
+        && (thoughtsState.moodFilter === "all" || (thought.mood || "未记录") === thoughtsState.moodFilter);
+    });
+
+    content.innerHTML = [
+      '<section class="thought-filter-bar">',
+      '  <label><span>角色</span><select data-thought-filter="character"><option value="all">全部角色</option>' + (thoughtsState.characterIds || []).map(function (characterId) {
+        var character = getCharacterById(characterId);
+        return '<option value="' + escapeHtml(characterId) + '"' + (thoughtsState.characterFilter === characterId ? " selected" : "") + ">" + escapeHtml(character ? character.name : "角色") + "</option>";
+      }).join("") + "</select></label>",
+      '  <label><span>来源</span><select data-thought-filter="source"><option value="all">全部来源</option>' + Object.keys(sourceMap).map(function (source) {
+        return '<option value="' + source + '"' + (thoughtsState.sourceFilter === source ? " selected" : "") + ">" + sourceMap[source] + "</option>";
+      }).join("") + "</select></label>",
+      '  <label><span>情绪</span><select data-thought-filter="mood"><option value="all">全部情绪</option>' + availableMoods.map(function (mood) {
+        return '<option value="' + escapeHtml(mood) + '"' + (thoughtsState.moodFilter === mood ? " selected" : "") + ">" + escapeHtml(mood) + "</option>";
+      }).join("") + "</select></label>",
+      '  <button class="outline-button danger" type="button" data-thought-action="clear-character">清空当前角色心声</button>',
+      "</section>",
+      visibleItems.length ? visibleItems.map(renderThoughtCard).join("") : '<div class="soft-empty">还没有心声</div>'
+    ].join("");
+    bindThoughtActions(content);
   }
 
   function renderThoughtCard(thought) {
     var sourceMap = { private: "私聊", group: "群聊", offline: "线下" };
     return [
-      '<article class="thought-card">',
+      '<article class="thought-card" data-thought-id="' + escapeHtml(thought.id) + '" data-character-id="' + escapeHtml(thought.characterId) + '">',
       '  <div class="thought-card-top"><strong>' + escapeHtml(thought.characterName) + "</strong><span>" + escapeHtml(formatDateTime(thought.createdAt)) + "</span></div>",
       '  <div class="thought-meta"><span>' + escapeHtml(sourceMap[thought.source] || thought.source || "私聊") + "</span><span>" + escapeHtml(thought.mood || "未记录") + "</span></div>",
       thought.visibleSummary ? '  <p class="thought-summary">' + escapeHtml(thought.visibleSummary) + "</p>" : "",
       '  <p class="thought-content">' + escapeHtml(thought.content) + "</p>",
+      '  <div class="settings-action-row">',
+      '    <button class="outline-button" type="button" data-thought-action="memory">写入记忆</button>',
+      '    <button class="outline-button danger" type="button" data-thought-action="delete">删除</button>',
+      "  </div>",
       "</article>"
     ].join("");
+  }
+
+  function bindThoughtActions(content) {
+    content.onchange = function (event) {
+      var field = event.target.closest("[data-thought-filter]");
+      if (!field) {
+        return;
+      }
+
+      if (field.dataset.thoughtFilter === "character") {
+        thoughtsState.characterFilter = field.value;
+      }
+      if (field.dataset.thoughtFilter === "source") {
+        thoughtsState.sourceFilter = field.value;
+      }
+      if (field.dataset.thoughtFilter === "mood") {
+        thoughtsState.moodFilter = field.value;
+      }
+      renderThoughtsScreen();
+    };
+
+    content.onclick = function (event) {
+      var button = event.target.closest("[data-thought-action]");
+      var card = button ? button.closest(".thought-card") : null;
+      var characterId = card ? card.dataset.characterId : "";
+      var thoughtId = card ? card.dataset.thoughtId : "";
+      var thought;
+
+      if (!button) {
+        return;
+      }
+
+      if (button.dataset.thoughtAction === "clear-character") {
+        characterId = thoughtsState.characterFilter !== "all"
+          ? thoughtsState.characterFilter
+          : (thoughtsState.characterIds[0] || "");
+        if (characterId && window.confirm("确定清空这个角色的心声吗？")) {
+          window.AppStorage.clearCharacterThoughts(characterId);
+          renderThoughtsScreen();
+        }
+        return;
+      }
+
+      if (!characterId || !thoughtId) {
+        return;
+      }
+
+      thought = window.AppStorage.getCharacterThoughts(characterId).find(function (item) {
+        return item.id === thoughtId;
+      });
+
+      if (button.dataset.thoughtAction === "delete" && window.confirm("确定删除这条心声吗？")) {
+        window.AppStorage.deleteCharacterThought(characterId, thoughtId);
+        renderThoughtsScreen();
+        return;
+      }
+
+      if (button.dataset.thoughtAction === "memory" && thought) {
+        window.AppStorage.addCharacterMemory(characterId, {
+          content: "心声写入记忆：" + (thought.visibleSummary || thought.content),
+          source: thought.source || "private",
+          createdAt: Date.now()
+        });
+        window.alert("已写入记忆。");
+      }
+    };
   }
 
   function loadSettingsIntoForm() {
@@ -2061,7 +2980,13 @@
         window.CharacterManager.resetState();
         window.CharacterManager.renderCharacterList();
         window.GroupManager.renderGroupList();
+        renderWechatScreen();
+        renderThemeScreen();
+        renderPhotoScreen();
+        renderNotebookScreen();
+        renderCharacterSpaceScreen();
         refreshHomeSummary();
+        applySavedTheme();
         loadSettingsIntoForm();
         showSettingsTip("数据导入成功");
       } catch (error) {
@@ -2123,6 +3048,7 @@
   }
 
   function initApp() {
+    applySavedTheme();
     bindHomeActions();
     bindNavigationActions();
     bindForms();
@@ -2156,6 +3082,9 @@
     openImagePicker: openImagePicker,
     openVoiceSheet: openVoiceSheet,
     showMessageDetail: showMessageDetail,
+    openChatSearchSheet: openChatSearchSheet,
+    openOfflineSceneSheet: openOfflineSceneSheet,
+    showSheet: showWeChatSheet,
     close: closeWeChatSheet
   };
   window.AppNavigation = {
@@ -2169,7 +3098,8 @@
     openDiaryScreen: openDiaryScreen,
     renderWorldBookScreen: renderWorldBookScreen,
     renderDiaryScreen: renderDiaryScreen,
-    renderCharacterSpaceScreen: renderCharacterSpaceScreen
+    renderCharacterSpaceScreen: renderCharacterSpaceScreen,
+    renderWechatScreen: renderWechatScreen
   };
 
   document.addEventListener("DOMContentLoaded", initApp);

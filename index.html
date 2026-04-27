@@ -38,11 +38,11 @@
               <span class="desktop-icon-symbol desktop-wechat" aria-hidden="true">微</span>
               <span>微信</span>
             </button>
-            <button class="desktop-app-icon desktop-coming" type="button">
+            <button id="openPhoto" class="desktop-app-icon" type="button">
               <span class="desktop-icon-symbol desktop-photo" aria-hidden="true">相</span>
               <span>相册</span>
             </button>
-            <button class="desktop-app-icon desktop-coming" type="button">
+            <button id="openNotebook" class="desktop-app-icon" type="button">
               <span class="desktop-icon-symbol desktop-note" aria-hidden="true">记</span>
               <span>记事本</span>
             </button>
@@ -66,7 +66,7 @@
               <span class="desktop-icon-symbol desktop-backup" aria-hidden="true">备</span>
               <span>备份</span>
             </button>
-            <button class="desktop-app-icon desktop-coming" type="button">
+            <button id="openTheme" class="desktop-app-icon" type="button">
               <span class="desktop-icon-symbol desktop-theme" aria-hidden="true">题</span>
               <span>主题</span>
             </button>
@@ -250,6 +250,7 @@
           <button id="chatEditCharacterBtn" type="button">编辑角色</button>
           <button id="chatSettingsBtn" type="button">聊天设置</button>
           <button id="chatThoughtsBtn" type="button">查看心声</button>
+          <button id="chatSearchBtn" type="button">搜索聊天记录</button>
           <button id="chatBatchSelectBtn" type="button">多选消息</button>
           <button id="chatOfflineBtn" type="button">进入线下模式</button>
           <button id="clearChatHistoryBtn" type="button">清空聊天记录</button>
@@ -331,6 +332,7 @@
         <div id="groupChatActionMenu" class="action-menu chat-action-menu hidden" aria-label="群聊操作菜单">
           <button id="groupSettingsBtn" type="button">群聊设置</button>
           <button id="groupThoughtsBtn" type="button">查看成员心声</button>
+          <button id="groupSearchBtn" type="button">搜索聊天记录</button>
           <button id="groupBatchMessageSelectBtn" type="button">多选消息</button>
           <button id="groupOfflineBtn" type="button">进入线下模式</button>
         </div>
@@ -377,6 +379,33 @@
           <button id="offlineSendBtn" class="send-button" type="submit">发送</button>
           <button id="offlineAdvanceBtn" class="reply-button" type="button">推进</button>
         </form>
+      </section>
+
+      <section id="themeScreen" class="screen" aria-label="主题">
+        <header class="nav-bar">
+          <button id="themeBackBtn" class="nav-button" type="button" aria-label="返回首页">‹</button>
+          <h2>主题</h2>
+          <span class="nav-spacer" aria-hidden="true"></span>
+        </header>
+        <div id="themeContent" class="screen-content theme-content"></div>
+      </section>
+
+      <section id="photoScreen" class="screen" aria-label="相册">
+        <header class="nav-bar">
+          <button id="photoBackBtn" class="nav-button" type="button" aria-label="返回首页">‹</button>
+          <h2>相册</h2>
+          <button id="importPhotoBtn" class="nav-text-button" type="button">导入</button>
+        </header>
+        <div id="photoContent" class="screen-content photo-content"></div>
+      </section>
+
+      <section id="notebookScreen" class="screen" aria-label="记事本">
+        <header class="nav-bar">
+          <button id="notebookBackBtn" class="nav-button" type="button" aria-label="返回首页">‹</button>
+          <h2>记事本</h2>
+          <button id="newNoteBtn" class="nav-text-button" type="button">新建</button>
+        </header>
+        <div id="notebookContent" class="screen-content notebook-app-content"></div>
       </section>
 
       <section id="settingsScreen" class="screen" aria-label="设置">
@@ -499,6 +528,8 @@
     </div>
     <input id="emojiImportInput" class="visually-hidden" type="file" accept="image/*">
     <input id="messageImageInput" class="visually-hidden" type="file" accept="image/*">
+    <input id="photoImportInput" class="visually-hidden" type="file" accept="image/*" multiple>
+    <input id="worldBookImportInput" class="visually-hidden" type="file" accept="application/json,.json">
   </div>
 
   <script src="js/storage.js"></script>

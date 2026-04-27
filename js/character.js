@@ -585,9 +585,10 @@
   function updateChatHeader(character) {
     var title = getElement("chatTitle");
     var avatar = getElement("chatHeaderAvatar");
+    var settings = getPrivateChatSettings(character);
 
     if (title) {
-      title.textContent = character.name;
+      title.textContent = settings.remarkName || character.name;
     }
 
     if (!avatar) {
@@ -661,6 +662,7 @@
     var messagesWrap = getElement("chatMessages");
     var messages = window.AppStorage.getChatHistory(characterId);
     var character = getCharacterById(characterId);
+    var settings = getPrivateChatSettings(character);
     var messageIds = messages.map(function (message) {
       return message.id;
     });
@@ -674,13 +676,12 @@
       return messageIds.indexOf(messageId) !== -1;
     });
     messagesWrap.classList.toggle("selection-mode", isPrivateMessageSelectionMode);
+    applyChatBackground(messagesWrap, settings.chatBackground);
 
     if (messages.length === 0) {
       messagesWrap.innerHTML = '<div class="chat-empty">开始输入消息，聊天内容会显示在这里</div>' + (isPrivateMessageSelectionMode ? renderPrivateMessageBatchActionBar(selectableCount) : "");
     } else {
-      messagesWrap.innerHTML = messages.map(function (message) {
-        return renderPrivateMessage(message, character);
-      }).join("") + (isPrivateMessageSelectionMode ? renderPrivateMessageBatchActionBar(selectableCount) : "");
+      messagesWrap.innerHTML = renderPrivateMessagesWithDates(messages, character) + (isPrivateMessageSelectionMode ? renderPrivateMessageBatchActionBar(selectableCount) : "");
       bindPrivateMessageActions(messagesWrap, messages);
       bindPrivateMessageDetails(messagesWrap, messages);
     }
@@ -694,6 +695,71 @@
         messagesWrap.scrollTop = messagesWrap.scrollHeight;
       });
     }
+  }
+
+  function applyChatBackground(wrap, background) {
+    if (!wrap) {
+      return;
+    }
+
+    if (background) {
+      wrap.classList.add("custom-chat-background");
+      wrap.style.backgroundImage = 'linear-gradient(rgba(246,247,244,0.76), rgba(246,247,244,0.76)), url("' + String(background).replace(/"/g, "%22") + '")';
+    } else {
+      wrap.classList.remove("custom-chat-background");
+      wrap.style.backgroundImage = "";
+    }
+  }
+
+  function renderPrivateMessagesWithDates(messages, character) {
+    var lastDateKey = "";
+
+    return messages.map(function (message) {
+      var html = "";
+      var dateKey;
+
+      if (message.type !== "loading") {
+        dateKey = getDateKey(message.createdAt);
+        if (dateKey && dateKey !== lastDateKey) {
+          html += renderDateSeparator(message.createdAt);
+          lastDateKey = dateKey;
+        }
+      }
+
+      return html + renderPrivateMessage(message, character);
+    }).join("");
+  }
+
+  function getDateKey(timestamp) {
+    var date = new Date(timestamp || Date.now());
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0")
+    ].join("-");
+  }
+
+  function renderDateSeparator(timestamp) {
+    return '<div class="chat-date-separator">' + escapeHtml(getDateLabel(timestamp)) + "</div>";
+  }
+
+  function getDateLabel(timestamp) {
+    var target = new Date(timestamp || Date.now());
+    var today = new Date();
+    var yesterday = new Date();
+    var targetKey = getDateKey(target);
+
+    yesterday.setDate(today.getDate() - 1);
+
+    if (targetKey === getDateKey(today)) {
+      return "今天";
+    }
+
+    if (targetKey === getDateKey(yesterday)) {
+      return "昨天";
+    }
+
+    return targetKey;
   }
 
   function renderPrivateMessage(message, character) {
@@ -2003,7 +2069,7 @@
       '<label class="switch-row"><input data-private-field="hideUserAvatar" type="checkbox"' + (settings.hideUserAvatar ? " checked" : "") + '>隐藏我的头像</label>',
       '<label class="switch-row"><input data-private-field="hideCharacterAvatar" type="checkbox"' + (settings.hideCharacterAvatar ? " checked" : "") + '>隐藏对方头像</label>',
       '<div class="field-group"><label>气泡圆角</label><input data-private-field="bubbleRadius" type="number" min="2" max="24" value="' + escapeHtml(settings.bubbleRadius || 8) + '"></div>',
-      '<div class="field-group"><label>聊天背景图</label><input data-private-field="chatBackground" type="text" value="' + escapeHtml(settings.chatBackground || "") + '"></div>',
+      '<div class="field-group"><label>聊天背景图</label><input data-private-field="chatBackground" type="text" value="' + escapeHtml(settings.chatBackground || "") + '" placeholder="可粘贴图片 data URL 或地址"><input data-private-file="chatBackground" type="file" accept="image/*"><small class="field-help">上传后会转为 base64 保存在本地。</small></div>',
       "</section>",
       '<section class="form-section">',
       '<div class="section-title-row"><h3>消息行为</h3><span>聊天</span></div>',
@@ -2021,6 +2087,7 @@
     ].join("");
 
     form.onclick = handlePrivateSettingsAction;
+    form.onchange = handlePrivateSettingsChange;
   }
 
   function renderTimestampStyleOptions(value) {
@@ -2053,6 +2120,31 @@
     if (button.dataset.privateAction === "view-thoughts") {
       openActiveCharacterThoughts();
     }
+  }
+
+  function handlePrivateSettingsChange(event) {
+    var input = event.target.closest("[data-private-file='chatBackground']");
+    var file = input && input.files && input.files[0];
+
+    if (!file) {
+      return;
+    }
+
+    readFileAsDataUrl(file, function (dataUrl) {
+      var field = getElement("privateChatSettingsForm").querySelector("[data-private-field='chatBackground']");
+      if (field) {
+        field.value = dataUrl;
+      }
+      input.value = "";
+    });
+  }
+
+  function readFileAsDataUrl(file, callback) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      callback(String(reader.result || ""));
+    };
+    reader.readAsDataURL(file);
   }
 
   function savePrivateChatSettings() {
@@ -2114,6 +2206,59 @@
 
     if (activeCharacterId && window.AppExtras && window.AppExtras.openThoughtsForCharacter) {
       window.AppExtras.openThoughtsForCharacter(activeCharacterId, "chatScreen");
+    }
+  }
+
+  function openActiveChatSearch() {
+    var character = activeCharacterId ? getCharacterById(activeCharacterId) : null;
+    var settings = getPrivateChatSettings(character);
+
+    closeAllMenus();
+
+    if (!character || !window.WeChatTools || !window.WeChatTools.openChatSearchSheet) {
+      return;
+    }
+
+    window.WeChatTools.openChatSearchSheet({
+      title: "搜索聊天记录",
+      messages: window.AppStorage.getChatHistory(character.id),
+      sender: function (message) {
+        if (message.role === "user") {
+          return "我";
+        }
+        if (message.role === "system") {
+          return "系统";
+        }
+        return settings.remarkName || character.name || "角色";
+      },
+      onJump: function (messageId) {
+        scrollToPrivateMessage(messageId);
+      }
+    });
+  }
+
+  function scrollToPrivateMessage(messageId) {
+    var wrap = getElement("chatMessages");
+    var target = null;
+
+    if (!wrap) {
+      return;
+    }
+
+    Array.prototype.some.call(wrap.querySelectorAll("[data-message-id]"), function (node) {
+      if (node.dataset.messageId === messageId) {
+        target = node;
+        return true;
+      }
+      return false;
+    });
+
+    if (target) {
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.classList.add("message-search-hit");
+      window.setTimeout(function () {
+        target.classList.remove("message-search-hit");
+      }, 1600);
     }
   }
 
@@ -2183,6 +2328,7 @@
     openActivePrivateSettings: openActivePrivateSettings,
     savePrivateChatSettings: savePrivateChatSettings,
     openActiveCharacterThoughts: openActiveCharacterThoughts,
+    openActiveChatSearch: openActiveChatSearch,
     deleteCharacterWithConfirm: deleteCharacterWithConfirm,
     resetState: resetState
   };

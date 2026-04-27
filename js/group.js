@@ -8,6 +8,7 @@
   var selectedGroupIds = [];
   var isGroupMessageSelectionMode = false;
   var selectedGroupMessageIds = [];
+  var collapsedAnnouncements = {};
 
   function getElement(id) {
     return document.getElementById(id);
@@ -422,6 +423,7 @@
   function renderGroupChatMessages(groupId) {
     var wrap = getElement("groupChatMessages");
     var group = getGroupById(groupId);
+    var settings = getGroupSettings(group);
     var messages = window.AppStorage.getGroupChatHistory(groupId);
     var messageIds = messages.map(function (message) {
       return message.id;
@@ -436,11 +438,12 @@
       return messageIds.indexOf(messageId) !== -1;
     });
     wrap.classList.toggle("selection-mode", isGroupMessageSelectionMode);
+    applyGroupChatBackground(wrap, settings.background);
 
     if (!messages.length) {
-      wrap.innerHTML = '<div class="chat-empty">发送一句话，再点回复让群成员互动</div>' + (isGroupMessageSelectionMode ? renderGroupMessageBatchActionBar(selectableCount) : "");
+      wrap.innerHTML = renderGroupAnnouncement(group, settings) + '<div class="chat-empty">发送一句话，再点回复让群成员互动</div>' + (isGroupMessageSelectionMode ? renderGroupMessageBatchActionBar(selectableCount) : "");
     } else {
-      wrap.innerHTML = messages.map(function (message) {
+      wrap.innerHTML = renderGroupAnnouncement(group, settings) + renderGroupMessagesWithDates(messages, function (message) {
         var messageId = escapeHtml(message.id || "");
         var selectCheck = renderGroupMessageSelectCheck(message);
 
@@ -480,10 +483,12 @@
         }
 
         return renderCharacterGroupMessage(message);
-      }).join("") + (isGroupMessageSelectionMode ? renderGroupMessageBatchActionBar(selectableCount) : "");
+      }) + (isGroupMessageSelectionMode ? renderGroupMessageBatchActionBar(selectableCount) : "");
       bindGroupMessageActions(wrap, messages);
       bindGroupMessageDetails(wrap, messages);
     }
+
+    bindGroupAnnouncementActions(wrap);
 
     if (isGroupMessageSelectionMode) {
       bindGroupMessageBatchActions(wrap, messages);
@@ -494,6 +499,100 @@
         wrap.scrollTop = wrap.scrollHeight;
       });
     }
+  }
+
+  function applyGroupChatBackground(wrap, background) {
+    if (!wrap) {
+      return;
+    }
+
+    if (background) {
+      wrap.classList.add("custom-chat-background");
+      wrap.style.backgroundImage = 'linear-gradient(rgba(246,247,244,0.76), rgba(246,247,244,0.76)), url("' + String(background).replace(/"/g, "%22") + '")';
+    } else {
+      wrap.classList.remove("custom-chat-background");
+      wrap.style.backgroundImage = "";
+    }
+  }
+
+  function renderGroupAnnouncement(group, settings) {
+    var collapsed = collapsedAnnouncements[group.id];
+
+    if (!settings.announcement) {
+      return "";
+    }
+
+    return [
+      '<section class="group-announcement' + (collapsed ? " collapsed" : "") + '">',
+      '  <button type="button" data-group-announcement-toggle>',
+      "    <strong>群公告</strong>",
+      "    <span>" + (collapsed ? "展开" : "折叠") + "</span>",
+      "  </button>",
+      collapsed ? "" : '  <p>' + escapeHtml(settings.announcement) + "</p>",
+      "</section>"
+    ].join("");
+  }
+
+  function bindGroupAnnouncementActions(wrap) {
+    Array.prototype.forEach.call(wrap.querySelectorAll("[data-group-announcement-toggle]"), function (button) {
+      button.addEventListener("click", function (event) {
+        event.preventDefault();
+        event.stopPropagation();
+        collapsedAnnouncements[activeGroupId] = !collapsedAnnouncements[activeGroupId];
+        renderGroupChatMessages(activeGroupId);
+      });
+    });
+  }
+
+  function renderGroupMessagesWithDates(messages, renderer) {
+    var lastDateKey = "";
+
+    return messages.map(function (message) {
+      var html = "";
+      var dateKey;
+
+      if (message.type !== "loading") {
+        dateKey = getDateKey(message.createdAt);
+        if (dateKey && dateKey !== lastDateKey) {
+          html += renderDateSeparator(message.createdAt);
+          lastDateKey = dateKey;
+        }
+      }
+
+      return html + renderer(message);
+    }).join("");
+  }
+
+  function getDateKey(timestamp) {
+    var date = new Date(timestamp || Date.now());
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0")
+    ].join("-");
+  }
+
+  function renderDateSeparator(timestamp) {
+    return '<div class="chat-date-separator">' + escapeHtml(getDateLabel(timestamp)) + "</div>";
+  }
+
+  function getDateLabel(timestamp) {
+    var target = new Date(timestamp || Date.now());
+    var today = new Date();
+    var yesterday = new Date();
+    var targetKey = getDateKey(target);
+
+    yesterday.setDate(today.getDate() - 1);
+
+    if (targetKey === getDateKey(today)) {
+      return "今天";
+    }
+
+    if (targetKey === getDateKey(yesterday)) {
+      return "昨天";
+    }
+
+    return targetKey;
   }
 
   function renderCharacterGroupMessage(message) {
@@ -1683,6 +1782,7 @@
       avatar: "",
       announcement: "",
       background: "",
+      pinned: false,
       memorySharingEnabled: true,
       minReplyCount: 10,
       maxReplyCount: 50,
@@ -1726,7 +1826,8 @@
       '<div class="field-group"><label>群聊名称</label><input data-group-settings-field="name" type="text" value="' + escapeHtml(group.name || "") + '"></div>',
       '<div class="field-group"><label>群头像</label><input data-group-settings-field="avatar" type="text" value="' + escapeHtml(settings.avatar || "") + '"></div>',
       '<div class="field-group"><label>群公告</label><textarea data-group-settings-field="announcement">' + escapeHtml(settings.announcement || "") + '</textarea></div>',
-      '<div class="field-group"><label>群聊背景图</label><input data-group-settings-field="background" type="text" value="' + escapeHtml(settings.background || "") + '"></div>',
+      '<div class="field-group"><label>群聊背景图</label><input data-group-settings-field="background" type="text" value="' + escapeHtml(settings.background || "") + '" placeholder="可粘贴图片 data URL 或地址"><input data-group-settings-file="background" type="file" accept="image/*"><small class="field-help">上传后会转为 base64 保存在本地。</small></div>',
+      '<label class="switch-row"><input data-group-settings-field="pinned" type="checkbox"' + (settings.pinned ? " checked" : "") + '>置顶群聊</label>',
       "</section>",
       '<section class="form-section">',
       '<div class="section-title-row"><h3>群成员管理</h3><span>至少 2 个</span></div>',
@@ -1768,6 +1869,19 @@
 
     form.onchange = function (event) {
       var option = event.target.closest(".member-option");
+      var backgroundInput = event.target.closest("[data-group-settings-file='background']");
+      var file = backgroundInput && backgroundInput.files && backgroundInput.files[0];
+
+      if (file) {
+        readFileAsDataUrl(file, function (dataUrl) {
+          var field = form.querySelector("[data-group-settings-field='background']");
+          if (field) {
+            field.value = dataUrl;
+          }
+          backgroundInput.value = "";
+        });
+      }
+
       if (option) {
         option.classList.toggle("active", event.target.checked);
         option.querySelector(".member-check").textContent = event.target.checked ? "✓" : "";
@@ -1826,6 +1940,7 @@
         avatar: getGroupSettingField("avatar"),
         announcement: getGroupSettingField("announcement"),
         background: getGroupSettingField("background"),
+        pinned: getGroupSettingChecked("pinned"),
         memorySharingEnabled: getGroupSettingChecked("memorySharingEnabled"),
         minReplyCount: Math.max(1, Math.min(50, Number(getGroupSettingField("minReplyCount")) || 10)),
         maxReplyCount: Math.max(10, Math.min(50, Number(getGroupSettingField("maxReplyCount")) || 50)),
@@ -1857,11 +1972,71 @@
     return Boolean(field && field.checked);
   }
 
+  function readFileAsDataUrl(file, callback) {
+    var reader = new FileReader();
+    reader.onload = function () {
+      callback(String(reader.result || ""));
+    };
+    reader.readAsDataURL(file);
+  }
+
   function openActiveGroupThoughts() {
     closeAllMenus();
 
     if (activeGroupId && window.AppExtras && window.AppExtras.openThoughtsForGroup) {
       window.AppExtras.openThoughtsForGroup(activeGroupId, "groupChatScreen");
+    }
+  }
+
+  function openActiveGroupSearch() {
+    var group = activeGroupId ? getGroupById(activeGroupId) : null;
+
+    closeAllMenus();
+
+    if (!group || !window.WeChatTools || !window.WeChatTools.openChatSearchSheet) {
+      return;
+    }
+
+    window.WeChatTools.openChatSearchSheet({
+      title: "搜索群聊记录",
+      messages: window.AppStorage.getGroupChatHistory(group.id),
+      sender: function (message) {
+        if (message.role === "user") {
+          return "我";
+        }
+        if (message.role === "system") {
+          return "系统";
+        }
+        return message.characterName || "角色";
+      },
+      onJump: function (messageId) {
+        scrollToGroupMessage(messageId);
+      }
+    });
+  }
+
+  function scrollToGroupMessage(messageId) {
+    var wrap = getElement("groupChatMessages");
+    var target = null;
+
+    if (!wrap) {
+      return;
+    }
+
+    Array.prototype.some.call(wrap.querySelectorAll("[data-message-id]"), function (node) {
+      if (node.dataset.messageId === messageId) {
+        target = node;
+        return true;
+      }
+      return false;
+    });
+
+    if (target) {
+      target.scrollIntoView({ block: "center", behavior: "smooth" });
+      target.classList.add("message-search-hit");
+      window.setTimeout(function () {
+        target.classList.remove("message-search-hit");
+      }, 1600);
     }
   }
 
@@ -1889,6 +2064,7 @@
     openActiveGroupSettings: openActiveGroupSettings,
     saveGroupSettings: saveGroupSettings,
     openActiveGroupThoughts: openActiveGroupThoughts,
+    openActiveGroupSearch: openActiveGroupSearch,
     getActiveGroupId: getActiveGroupId
   };
 })(window, document);

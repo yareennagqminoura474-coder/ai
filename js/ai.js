@@ -65,18 +65,25 @@
   }
 
   function buildWorldBookContext(contextText, scope, targetId) {
+    var entries;
+
     if (!window.AppStorage || !window.AppStorage.getMatchedWorldBookEntries) {
       return "";
     }
 
-    return window.AppStorage.getMatchedWorldBookEntries(contextText, scope, targetId)
+    entries = window.AppStorage.getMatchedWorldBookEntries(contextText, scope, targetId);
+    if (!entries.length) {
+      return "";
+    }
+
+    return ["本次命中 " + entries.length + " 条世界书。"].concat(entries
       .map(function (entry, index) {
         return [
           (index + 1) + ". " + (entry.bookName || "World Book") + " / " + (entry.title || "Entry"),
           "关键词：" + (entry.keywords || []).join("、"),
           "内容：" + entry.content
         ].join("\n");
-      }).join("\n\n");
+      })).join("\n\n");
   }
 
   async function sendPrivateChatRequest(character, chatHistory) {
@@ -408,7 +415,12 @@
     var participants = Array.isArray(context.participants) ? context.participants : [];
     var memories = context.memories || {};
     var historyText = formatInlineOfflineHistory(context.history);
-    var contextText = [context.userInput || "", historyText].join("\n");
+    var scene = context.scene || {};
+    var sceneText = [
+      scene.name ? "场景：" + scene.name : "",
+      scene.description ? "场景描述：" + scene.description : ""
+    ].filter(Boolean).join("\n");
+    var contextText = [context.userInput || "", sceneText, historyText].join("\n");
     var worldBookContext = context.worldBookContext || buildWorldBookContext(
       contextText,
       mode === "group" ? "group" : "private",
@@ -433,6 +445,7 @@
         content: [
           "这是内嵌在线聊天流里的线下模式，不要切换场景页面。",
           "模式：" + (mode === "group" ? "群聊线下模式" : "私聊线下模式"),
+          sceneText || "场景：未指定，请沿用当前聊天氛围。",
           "你要把用户输入理解为一句话、一个动作或一个场景推进点。",
           "本轮只调用一次 API，必须同一次返回 events、thoughts、memories。",
           "events 一次至少 6 条，最多 20 条。action 是旁白/动作描写，speech 是角色说话。",
@@ -454,6 +467,9 @@
         content: [
           "用户本次输入：",
           valueOrFallback(context.userInput),
+          "",
+          "当前场景：",
+          sceneText || "未指定",
           "",
           "当前聊天流最近内容：",
           historyText || "暂无历史"

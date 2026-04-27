@@ -6,7 +6,11 @@
   var isAdvancing = false;
   var inlineOfflineState = {
     targetType: "",
-    targetId: ""
+    targetId: "",
+    scene: {
+      name: "",
+      description: ""
+    }
   };
 
   function getElement(id) {
@@ -56,11 +60,27 @@
   }
 
   function openPrivateOffline(characterId) {
-    enablePrivateInlineOffline(characterId);
+    chooseInlineScene(function (scene) {
+      enablePrivateInlineOffline(characterId, scene);
+    });
   }
 
   function openGroupOffline(groupId) {
-    enableGroupInlineOffline(groupId);
+    chooseInlineScene(function (scene) {
+      enableGroupInlineOffline(groupId, scene);
+    });
+  }
+
+  function chooseInlineScene(callback) {
+    if (window.WeChatTools && window.WeChatTools.openOfflineSceneSheet) {
+      window.WeChatTools.openOfflineSceneSheet(callback);
+      return;
+    }
+
+    callback({
+      name: "家",
+      description: "熟悉、放松、适合日常互动的室内场景"
+    });
   }
 
   function ensureSession(base) {
@@ -365,36 +385,95 @@
     });
   }
 
-  function enablePrivateInlineOffline(characterId) {
+  function enablePrivateInlineOffline(characterId, scene) {
     if (!getCharacterById(characterId)) {
       return;
     }
 
     inlineOfflineState = {
       targetType: "private",
-      targetId: characterId
+      targetId: characterId,
+      scene: normalizeScene(scene)
     };
+    appendInlineSceneMessage("private", characterId, [getCharacterById(characterId)]);
     updateInlineOfflineUi();
   }
 
-  function enableGroupInlineOffline(groupId) {
-    if (!getGroupById(groupId)) {
+  function enableGroupInlineOffline(groupId, scene) {
+    var group = getGroupById(groupId);
+    if (!group) {
       return;
     }
 
     inlineOfflineState = {
       targetType: "group",
-      targetId: groupId
+      targetId: groupId,
+      scene: normalizeScene(scene)
     };
+    appendInlineSceneMessage("group", groupId, getParticipants({ participantIds: group.memberIds || [] }));
     updateInlineOfflineUi();
   }
 
   function disableInlineOffline() {
     inlineOfflineState = {
       targetType: "",
-      targetId: ""
+      targetId: "",
+      scene: {
+        name: "",
+        description: ""
+      }
     };
     updateInlineOfflineUi();
+  }
+
+  function normalizeScene(scene) {
+    var source = scene && typeof scene === "object" ? scene : {};
+    return {
+      name: String(source.name || "家"),
+      description: String(source.description || "熟悉、放松、适合日常互动的室内场景")
+    };
+  }
+
+  function appendInlineSceneMessage(mode, targetId, participants) {
+    var scene = inlineOfflineState.scene || {};
+    var content = "进入线下模式：" + (scene.name || "未指定场景") + (scene.description ? "。" + scene.description : "");
+    var message = {
+      id: String(Date.now() + Math.random()),
+      role: "system",
+      type: "offlineAction",
+      characterId: "",
+      characterName: "",
+      content: content,
+      scene: scene,
+      createdAt: Date.now()
+    };
+    var messages;
+
+    if (mode === "group") {
+      messages = window.AppStorage.getGroupChatHistory(targetId);
+      messages.push(message);
+      window.AppStorage.saveGroupChatHistory(targetId, messages);
+      if (window.GroupManager && window.GroupManager.renderGroupChatMessages) {
+        window.GroupManager.renderGroupChatMessages(targetId);
+      }
+    } else {
+      messages = window.AppStorage.getChatHistory(targetId);
+      messages.push(message);
+      window.AppStorage.saveChatHistory(targetId, messages);
+      if (window.CharacterManager && window.CharacterManager.renderChatMessages) {
+        window.CharacterManager.renderChatMessages(targetId);
+      }
+    }
+
+    (participants || []).forEach(function (character) {
+      if (character) {
+        window.AppStorage.addCharacterMemory(character.id, {
+          content: "线下模式场景：" + content,
+          source: "offline",
+          createdAt: Date.now()
+        });
+      }
+    });
   }
 
   function isInlineOfflineActive(targetType, targetId) {
@@ -455,6 +534,7 @@
         participants: [character],
         history: historyForRequest,
         userInput: getLatestInlineUserInput(historyForRequest),
+        scene: inlineOfflineState.scene,
         memories: window.AppStorage.getMemoriesForCharacters([character.id])
       });
       messages = removeLoadingEvents(window.AppStorage.getChatHistory(character.id));
@@ -508,6 +588,7 @@
         participants: participants,
         history: historyForRequest,
         userInput: getLatestInlineUserInput(historyForRequest),
+        scene: inlineOfflineState.scene,
         memories: window.AppStorage.getMemoriesForCharacters(group.memberIds || [])
       });
       messages = removeLoadingEvents(window.AppStorage.getGroupChatHistory(group.id));
