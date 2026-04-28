@@ -921,6 +921,10 @@
       bubbleClass += " message-error";
     }
 
+    if (message.type === "loading") {
+      bubbleClass += " typing-bubble";
+    }
+
     return [
       '<div class="message-row ' + roleClass + ' message-action-target" data-message-id="' + messageId + '">',
       selectCheck,
@@ -1256,6 +1260,9 @@
       window.AppStorage.saveChatHistory(character.id, messages);
       renderChatMessages(character.id);
       renderCharacterList();
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast("已存入钱包。");
+      }
     }
   }
 
@@ -1782,6 +1789,7 @@
     var aiResult;
     var replies;
     var reply;
+    var generationContext;
 
     if (!requestCharacterId || !character || isSending) {
       return;
@@ -1817,8 +1825,11 @@
     renderChatMessages(requestCharacterId);
 
     try {
+      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
+        ? window.AppExtras.buildChatGenerationContext("private", requestCharacterId)
+        : {};
       if (window.AIService.sendPrivateChatRequest) {
-        aiResult = normalizePrivateAiResult(await window.AIService.sendPrivateChatRequest(character, before));
+        aiResult = normalizePrivateAiResult(await window.AIService.sendPrivateChatRequest(character, before, generationContext));
         replies = aiResult.replies;
       } else {
         reply = await window.AIService.sendChatRequest(character, before);
@@ -1828,6 +1839,9 @@
 
       persistPrivateAiExtras(requestCharacterId, aiResult, "private");
       await streamPrivateReplies(before.slice(), requestCharacterId, replies, after);
+      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
+        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
+      }
       messages = null;
     } catch (error) {
       messages = before.concat([{
@@ -1925,14 +1939,17 @@
 
   function normalizePrivateAiResult(result) {
     if (Array.isArray(result)) {
-      return { replies: result, thoughts: [], memories: [] };
+      return { replies: result, actions: [], thoughts: [], memories: [], memorySummary: null, bodyState: null };
     }
 
     result = result && typeof result === "object" ? result : {};
     return {
       replies: Array.isArray(result.replies) ? result.replies : [],
+      actions: Array.isArray(result.actions) ? result.actions : [],
       thoughts: Array.isArray(result.thoughts) ? result.thoughts : [],
-      memories: Array.isArray(result.memories) ? result.memories : []
+      memories: Array.isArray(result.memories) ? result.memories : [],
+      memorySummary: result.memorySummary || null,
+      bodyState: result.bodyState || null
     };
   }
 
@@ -2052,6 +2069,7 @@
     var replies;
     var reply;
     var errorContent;
+    var generationContext;
 
     if (!requestCharacterId || !character) {
       return;
@@ -2101,7 +2119,7 @@
       id: String(now),
       role: "character",
       type: "loading",
-      content: "正在输入...",
+      content: "正在输入中",
       createdAt: now
     };
 
@@ -2110,8 +2128,11 @@
     renderChatMessages(requestCharacterId);
 
     try {
+      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
+        ? window.AppExtras.buildChatGenerationContext("private", requestCharacterId)
+        : {};
       if (window.AIService.sendPrivateChatRequest) {
-        aiResult = normalizePrivateAiResult(await window.AIService.sendPrivateChatRequest(character, historyForRequest));
+        aiResult = normalizePrivateAiResult(await window.AIService.sendPrivateChatRequest(character, historyForRequest, generationContext));
         replies = aiResult.replies;
       } else {
         reply = await window.AIService.sendChatRequest(character, historyForRequest);
@@ -2126,6 +2147,9 @@
       }
       persistPrivateAiExtras(requestCharacterId, aiResult, "private");
       await streamPrivateReplies(messages, requestCharacterId, replies, []);
+      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
+        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
+      }
       messages = null;
     } catch (error) {
       errorContent = error && error.message === window.AIService.MISSING_SETTINGS_MESSAGE
@@ -2332,6 +2356,26 @@
     window.setActivePage("privateChatSettingsScreen");
   }
 
+  function openActiveChatMemory() {
+    var character = activeCharacterId ? getCharacterById(activeCharacterId) : null;
+
+    closeAllMenus();
+
+    if (character && window.AppExtras && window.AppExtras.openChatMemoryPanel) {
+      window.AppExtras.openChatMemoryPanel("private", character.id, (character.chatSettings && character.chatSettings.remarkName || character.name || "私聊") + " · 记忆");
+    }
+  }
+
+  function openActiveBodyState() {
+    var character = activeCharacterId ? getCharacterById(activeCharacterId) : null;
+
+    closeAllMenus();
+
+    if (character && window.AppExtras && window.AppExtras.openBodyStatePanel) {
+      window.AppExtras.openBodyStatePanel("private", character.id, "身体状态");
+    }
+  }
+
   function renderUserPersonaOptions(selectedId) {
     var personas = window.AppStorage.getUserPersonas ? window.AppStorage.getUserPersonas() : [];
 
@@ -2409,7 +2453,10 @@
       '<section class="form-section">',
       '<div class="section-title-row"><h3>记忆设置</h3><span>长期记忆</span></div>',
       '<label class="switch-row"><input data-private-field="memoryEnabled" type="checkbox"' + (settings.memoryEnabled !== false ? " checked" : "") + '>开启长期记忆</label>',
+      '<button class="outline-button" type="button" data-private-action="view-memory">查看本私聊记忆</button>',
       '<button class="outline-button" type="button" data-private-action="view-thoughts">查看该角色心声</button>',
+      '<button class="outline-button" type="button" data-private-action="view-body-state">查看身体状态</button>',
+      '<button class="outline-button danger" type="button" data-private-action="clear-chat-memory">清空本私聊记忆</button>',
       '<button class="outline-button danger" type="button" data-private-action="clear-memory">清空该角色记忆</button>',
       "</section>"
     ].join("");
@@ -2458,6 +2505,22 @@
     if (button.dataset.privateAction === "clear-memory" && window.confirm("确定清空该角色记忆吗？")) {
       window.AppStorage.clearCharacterMemory(activeCharacterId);
       window.alert("已清空记忆");
+      return;
+    }
+
+    if (button.dataset.privateAction === "clear-chat-memory" && window.confirm("确定清空本私聊记忆吗？")) {
+      window.AppStorage.clearChatMemories("private", activeCharacterId);
+      window.alert("已清空本私聊记忆");
+      return;
+    }
+
+    if (button.dataset.privateAction === "view-memory") {
+      openActiveChatMemory();
+      return;
+    }
+
+    if (button.dataset.privateAction === "view-body-state") {
+      openActiveBodyState();
       return;
     }
 
@@ -2700,6 +2763,8 @@
     openActiveCharacterOffline: openActiveCharacterOffline,
     updateInlineOfflineUi: updateInlineOfflineUi,
     openActivePrivateSettings: openActivePrivateSettings,
+    openActiveChatMemory: openActiveChatMemory,
+    openActiveBodyState: openActiveBodyState,
     savePrivateChatSettings: savePrivateChatSettings,
     openActiveCharacterThoughts: openActiveCharacterThoughts,
     openActiveCharacterThoughtsDrawer: openActiveCharacterThoughtsDrawer,

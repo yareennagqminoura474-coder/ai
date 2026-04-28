@@ -91,11 +91,15 @@
   function buildNaturalStyleRules(mode) {
     return [
       "G. 输出风格要求",
+      "参考 koko 的思路：把世界书、人设、关系、用户人设和统一时序记忆流当成角色正在经历的现实，不要像工具在汇总资料。",
       "回复要像真人在手机里当下发消息：自然、口语、有情绪波动，有停顿和短句，不要写成说明文、读后感或安慰模板。",
       "禁止明显 AI/客服/助手口吻，尤其不要把这些话当成高频开头或模板：好的、当然可以、作为一个……、根据你提供的信息、我可以帮你、如果你需要、请告诉我更多、我理解你的感受、这取决于、我们可以一起、是否需要我。",
       "不要总结用户，不要解释设定，不要把世界书或记忆原文复述出来；要把它们融进角色的反应、语气、选择、回避和下意识细节。",
       "每条消息不必完整、正确、礼貌或圆满。真人聊天可以短句、停顿、反问、嘴硬、撒娇、生气、突然沉默，也可以只回一个很有态度的小句子。",
       "角色说话要受性格、关系远近、当下情绪、过往记忆和世界书共同牵引；熟人不要装客服，暧昧不要像通知，争执不要像心理咨询。",
+      "允许角色拥有自己的好恶、偏见、口头禅、占有欲、顾虑和临时情绪，但不要油腻、不要模板化霸总腔。",
+      "如果角色设定是陪伴管教型，可以自然表现关心、约束、监督、训诫、奖励和惩罚；重点是关系感和照护感，不要写成系统功能说明，也不要低俗露骨。",
+      "聊天气泡里的 content 不要故意插入硬换行；除非真的要分段，否则让前端自然换行。段落之间可以保留空行。",
       mode === "group" ? "群聊里每个角色的语气、用词、节奏必须明显区分，不能像同一个人在轮流换名字。" : "私聊里要有关系感和临场感，熟悉就不要装陌生，冷淡/傲娇/黏人/强势等设定要能从语气里看出来。",
       mode === "group" ? "群聊可以插话、打断、偏题、拱火、帮腔或冷场，但每个人都要符合自己的人设和彼此关系。" : "私聊要接住最近一句的情绪和潜台词，不要总是解释原因，也不要每句都把话说满。",
       "线下模式里 action 和 speech 要自然交替：动作有画面但别长篇，发言像当面脱口而出。",
@@ -108,6 +112,7 @@
       "心声生成要求",
       "thoughts 必须和本轮消息同步返回，不要单独调用 API。",
       "心声是角色没直接说出口的想法，不是对聊天内容的摘要；可以矛盾、隐忍、嘴硬、动摇或有占有欲，但要符合人设。",
+      "心声要像角色当下心里一闪而过的话：有偏心、有顾虑、有关系里的暗流，不要写成程序说明、功能记录或第三方旁白。",
       "每条心声包含 characterId（私聊可省略）、content、mood、visibleSummary。visibleSummary 是用户能看到的一句短摘要，不要剧透太直白。",
       mode === "group" ? "群聊心声只为本群相关成员生成，不要写群外角色。" : "私聊心声只为当前角色生成。"
     ].join("\n");
@@ -197,31 +202,143 @@
 
   function normalizeAiMessageText(text) {
     var value = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
-    var lines;
-    var shouldJoin;
+    var paragraphs;
 
     if (!value) {
       return "";
     }
 
-    value = value.replace(/\n{3,}/g, "\n\n");
-    lines = value.split("\n").map(function (line) {
-      return line.trim();
-    });
+    value = value
+      .replace(/[ \t]+\n/g, "\n")
+      .replace(/\n[ \t]+/g, "\n")
+      .replace(/\n{3,}/g, "\n\n");
 
-    shouldJoin = lines.length >= 2 && lines.every(function (line) {
-      return !line || /^[\u4e00-\u9fa5A-Za-z0-9，。！？!?、~～…,.]{1,2}$/.test(line);
-    });
+    paragraphs = value.split(/\n{2,}/).map(function (paragraph) {
+      var lines = paragraph.split("\n").map(function (line) {
+        return line.trim();
+      }).filter(Boolean);
 
-    if (shouldJoin) {
-      return lines.join("").replace(/\s+/g, "").trim();
-    }
+      if (lines.length <= 1) {
+        return lines[0] || "";
+      }
 
-    return lines.join("\n").replace(/[ \t]{2,}/g, " ").trim();
+      if (lines.some(function (line) {
+        return /^([\-*•]|\d+[.)、])\s+/.test(line);
+      })) {
+        return lines.join("\n");
+      }
+
+      return lines.reduce(function (textSoFar, line) {
+        if (!textSoFar) {
+          return line;
+        }
+        if (/[\u4e00-\u9fff]$/.test(textSoFar) || /^[\u4e00-\u9fff，。！？、；：）】》”’…]/.test(line)) {
+          return textSoFar + line;
+        }
+        return textSoFar + " " + line;
+      }, "");
+    }).filter(Boolean);
+
+    return paragraphs.join("\n\n").replace(/[ \t]{2,}/g, " ").trim();
   }
 
-  async function sendPrivateChatRequest(character, chatHistory) {
-    var messages = buildPrivateReplyMessages(character, chatHistory);
+  function getChatMemoriesForPrompt(targetType, targetId, fallback) {
+    if (Array.isArray(fallback)) {
+      return fallback;
+    }
+
+    if (!window.AppStorage || !window.AppStorage.getChatMemories) {
+      return [];
+    }
+
+    return window.AppStorage.getChatMemories(targetType, targetId).slice(0, 30);
+  }
+
+  function formatChatMemoryList(memories) {
+    return (Array.isArray(memories) ? memories : []).slice(0, 30).map(function (memory, index) {
+      return [
+        (index + 1) + ". " + (memory.title || "记忆"),
+        "类型：" + (memory.type === "auto" ? "自动总结" : "手动添加"),
+        "正文：" + memory.content
+      ].join("；");
+    }).join("\n");
+  }
+
+  function shouldUseBodyState(options) {
+    return Boolean(options && options.bodyStateEnabled);
+  }
+
+  function buildBodyStatePrompt(options) {
+    if (!shouldUseBodyState(options)) {
+      return "";
+    }
+
+    return [
+      "I. 用户身体状态连续记录",
+      "当前身体状态 JSON：",
+      JSON.stringify(options.bodyState || {}),
+      "本轮必须在同一次 JSON 里返回 bodyState。若没有变化，也返回承接当前状态后的完整状态。",
+      "bodyState 要和剧情一致，记录身体感受、舒适度、恢复建议和各部位状态；可以写体温、破皮/发热风险，但不要做医学诊断，不要渲染低俗露骨细节。",
+      "若角色是陪伴管教型，可让身体状态成为后续关心、监督、休息安排和边界提醒的依据。"
+    ].join("\n");
+  }
+
+  function buildMemorySummaryPrompt(options) {
+    if (!options || !options.memorySummaryDue) {
+      return "";
+    }
+
+    return [
+      "H. 自动记忆总结",
+      "当前聊天已达到自动总结轮次：" + (options.memorySummaryRounds || 10) + " 轮。",
+      "请在本轮同一次 JSON 中返回 memorySummary，概括这段聊天里对关系、承诺、边界、习惯或重要事件有长期价值的内容。",
+      "不要流水账，不要把普通寒暄写进去。标题短一点，正文保留情绪和事实。"
+    ].join("\n");
+  }
+
+  function buildAuxiliaryReturnRule(options, primaryField) {
+    var fields = [];
+    var firstField = primaryField || "messages";
+
+    if (options && options.memorySummaryDue) {
+      fields.push("memorySummary");
+    }
+
+    if (shouldUseBodyState(options)) {
+      fields.push("bodyState");
+    }
+
+    if (!fields.length) {
+      return "本轮同一次 API 返回 " + firstField + "、thoughts、memories；不要额外调用。";
+    }
+
+    return "本轮同一次 API 返回 " + firstField + "、thoughts、memories、" + fields.join("、") + "；不要为了心声、记忆总结或身体状态额外调用 API。";
+  }
+
+  function buildBodyStateSchemaText() {
+    return "\"bodyState\":{\"overallCondition\":\"正常/疲惫/紧张/放松/酸痛/虚弱\",\"currentNote\":\"当前说明\",\"energy\":80,\"moodInfluence\":\"对情绪的影响\",\"sorenessLevel\":0,\"painLevel\":0,\"rednessLevel\":0,\"bruiseRisk\":\"低/中/高\",\"sittingComfort\":\"正常\",\"walkingComfort\":\"正常\",\"handUseComfort\":\"正常\",\"touchSensitivity\":\"正常\",\"bodyTemperature\":\"正常/偏热/发热风险\",\"feverRisk\":\"低/中/高\",\"skinBreakage\":\"无/轻微/需要处理\",\"restNeeded\":false,\"recoverySuggestion\":\"恢复建议\",\"parts\":{\"手心\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀部\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"大腿\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀腿连接处\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"腰背\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"肩颈\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"膝腿\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"其他受影响区域\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"}}}";
+  }
+
+  function appendOptionalSchema(schemaText, options) {
+    var extras = [];
+
+    if (options && options.memorySummaryDue) {
+      extras.push("\"memorySummary\":{\"title\":\"记忆标题\",\"content\":\"总结正文\",\"sourceTime\":\"本轮时间或最近时间\"}");
+    }
+
+    if (shouldUseBodyState(options)) {
+      extras.push(buildBodyStateSchemaText());
+    }
+
+    if (!extras.length) {
+      return schemaText;
+    }
+
+    return schemaText.replace(/}$/, "," + extras.join(",") + "}");
+  }
+
+  async function sendPrivateChatRequest(character, chatHistory, options) {
+    var messages = buildPrivateReplyMessages(character, chatHistory, options || {});
     var rawContent = await sendConfiguredChatMessages(messages);
     var parsed = parseJsonFromText(rawContent);
     var replies = getOutputMessages(parsed);
@@ -234,11 +351,13 @@
     });
   }
 
-  function buildPrivateReplyMessages(character, chatHistory) {
+  function buildPrivateReplyMessages(character, chatHistory, options) {
     var profile = character || {};
     var chatSettings = profile.chatSettings || {};
+    var requestOptions = options || {};
     var userContext = buildUserContext(chatSettings);
     var memories = chatSettings.memoryEnabled === false ? [] : getMemoryForCharacter(profile.id);
+    var chatMemories = getChatMemoriesForPrompt("private", profile.id, requestOptions.chatMemories);
     var history = (Array.isArray(chatHistory) ? chatHistory : [])
       .filter(function (message) {
         return message && message.content && message.type !== "loading" && message.type !== "error";
@@ -257,6 +376,8 @@
       profile.speakingStyle,
       profile.relationship,
       formatMemoryList(memories),
+      formatChatMemoryList(chatMemories),
+      requestOptions.bodyState ? JSON.stringify(requestOptions.bodyState) : "",
       history
     ].join("\n");
     var worldBookContext = buildWorldBookContext(contextText, "private", profile && profile.id);
@@ -273,16 +394,22 @@
           "F. 最近聊天上下文",
           history || "暂无历史消息",
           "",
+          "H. 当前私聊记忆",
+          formatChatMemoryList(chatMemories) || "暂无",
+          "",
+          buildMemorySummaryPrompt(requestOptions),
+          buildBodyStatePrompt(requestOptions),
+          "",
           buildThoughtGenerationRules("private"),
           "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
           "",
-          "本轮私聊只调用一次 API，必须同一次返回 messages、thoughts、memories。",
+          buildAuxiliaryReturnRule(requestOptions),
           "messages 是显示给用户的手机聊天气泡，至少 10 条，安全上限 50 条；每条要短，多条之间自然衔接，不要写成一大段或只返回一条。",
           "你可以使用的消息类型：text 普通文字，voice 语音消息，emoji 表情，image 虚拟图片描述卡片，location 虚拟位置，redPacket 模拟红包，transfer 模拟转账。",
           "普通聊天以 text 为主，只有剧情/语境合适时才使用特殊消息。红包和转账只是模拟 UI，不涉及真实支付，金额不要夸张。",
           "发表情时优先使用默认 emoji 或用户已导入的图片表情；如果没有可用图片表情，就用文本 emoji。",
           "发图片时只返回图片描述卡片，不生成真实图片。",
-          buildJsonOnlyRule("{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"text\",\"content\":\"第二条\"}],\"thoughts\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}"),
+          buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"text\",\"content\":\"第二条\"}],\"actions\":[],\"thoughts\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
           "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount()
         ].join("\n")
       },
@@ -298,8 +425,10 @@
     ];
   }
 
-  function buildGroupSystemPrompt(group, characters, sharedMemories) {
+  function buildGroupSystemPrompt(group, characters, sharedMemories, options) {
     var userContext = buildUserContext(group && group.settings || {});
+    var requestOptions = options || {};
+    var chatMemories = getChatMemoriesForPrompt("group", group && group.id, requestOptions.chatMemories);
     var memberLines = (characters || []).map(function (character) {
       var memories = sharedMemories && sharedMemories[character.id] ? sharedMemories[character.id] : [];
 
@@ -331,8 +460,13 @@
       "群名称：" + valueOrFallback(group && group.name),
       "群公告：" + valueOrFallback(group && group.settings && group.settings.announcement),
       "当前群聊关系氛围：" + valueOrFallback(group && group.settings && group.settings.atmosphere),
+      "当前群聊记忆：",
+      formatChatMemoryList(chatMemories) || "暂无",
       "成员列表与基本设定：",
       memberLines.join("\n"),
+      "",
+      buildMemorySummaryPrompt(requestOptions),
+      buildBodyStatePrompt(requestOptions),
       "",
       "群聊生成规则",
       "一次性生成至少 10 条连续群聊消息，只调用一次 API。",
@@ -344,14 +478,15 @@
       "可用消息类型：text、voice、emoji、image、location、redPacket、transfer。普通聊天以 text 为主，特殊消息只在语境合适时使用。",
       "红包和转账只是模拟 UI，不涉及真实支付；发图片只返回图片描述卡片，不生成真实图片。",
       buildThoughtGenerationRules("group"),
-      buildJsonOnlyRule("{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"}],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}"),
+      buildAuxiliaryReturnRule(requestOptions),
+      buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"}],\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
       "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount(),
       "如果后续旧规则提到 3 到 8 条，请忽略；本轮群聊回复以至少 10 条为准。"
     ].join("\n");
   }
 
-  async function sendGroupChatRequest(group, characters, groupHistory, sharedMemories) {
-    var messages = buildGroupMessages(group, characters, groupHistory, sharedMemories);
+  async function sendGroupChatRequest(group, characters, groupHistory, sharedMemories, options) {
+    var messages = buildGroupMessages(group, characters, groupHistory, sharedMemories, options || {});
     var rawContent = await sendConfiguredChatMessages(messages);
     var parsed = parseJsonFromText(rawContent);
     var validIds = (characters || []).map(function (character) {
@@ -493,7 +628,8 @@
     });
   }
 
-  function buildGroupMessages(group, characters, groupHistory, sharedMemories) {
+  function buildGroupMessages(group, characters, groupHistory, sharedMemories, options) {
+    var requestOptions = options || {};
     var worldBookContext;
     var groupSettingsText;
     var contextText;
@@ -524,7 +660,9 @@
           character.background,
           character.speakingStyle,
           character.relationship,
-          formatMemoryList(sharedMemories && sharedMemories[character.id] || [])
+          formatMemoryList(sharedMemories && sharedMemories[character.id] || []),
+          formatChatMemoryList(getChatMemoriesForPrompt("group", group && group.id, requestOptions.chatMemories)),
+          requestOptions.bodyState ? JSON.stringify(requestOptions.bodyState) : ""
         ].join("\n");
       }).join("\n"),
       history
@@ -544,12 +682,12 @@
     return [
       {
         role: "system",
-        content: buildGroupSystemPrompt(group, characters, sharedMemories)
+        content: buildGroupSystemPrompt(group, characters, sharedMemories, requestOptions)
       },
       {
         role: "user",
         content: [
-          "请同一次 JSON 返回 messages、thoughts、memories。messages 显示在群聊里，thoughts 存入角色心声，memories 存入长期记忆，不要额外调用 API。",
+          buildAuxiliaryReturnRule(requestOptions) + " messages 显示在群聊里，thoughts 存入角色心声，memories 存入长期记忆。",
           groupSettingsText,
           worldBookContext || "暂无匹配世界书。",
           "F. 最近群聊上下文：",
@@ -570,7 +708,7 @@
     var fallbackId = validIds[0] || "";
     var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
     var normalizedEvents;
-    var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(parsed && parsed.thoughts), validIds);
+    var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(getThoughtPayload(parsed)), validIds);
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
     if (!events.length && rawContent) {
@@ -588,7 +726,9 @@
     return {
       events: normalizedEvents,
       thoughts: thoughts,
-      memories: memories
+      memories: memories,
+      memorySummary: normalizeMemorySummaryResult(parsed && parsed.memorySummary),
+      bodyState: normalizeBodyStateResult(parsed && parsed.bodyState)
     };
   }
 
@@ -596,6 +736,7 @@
     var mode = context.mode === "group" ? "group" : "private";
     var participants = Array.isArray(context.participants) ? context.participants : [];
     var memories = context.memories || {};
+    var chatMemories = getChatMemoriesForPrompt(mode, context.targetId || "", context.chatMemories);
     var historyText = formatInlineOfflineHistory(context.history);
     var scene = context.scene || {};
     var userContext = buildUserContext(context.userSettings || {});
@@ -641,14 +782,19 @@
           participantLines.join("\n"),
           "",
           "你要把用户输入理解为一句话、一个动作或一个场景推进点。",
-          "本轮只调用一次 API，必须同一次返回 events、thoughts、memories。",
+        "本轮只调用一次 API，必须同一次返回 events、thoughts、memories。",
+          buildAuxiliaryReturnRule(context, "events"),
+          "当前聊天记忆：",
+          formatChatMemoryList(chatMemories) || "暂无",
+          buildMemorySummaryPrompt(context),
+          buildBodyStatePrompt(context),
           "events 一次至少 10 条，安全上限 50 条。action 是旁白/动作描写，speech 是角色说话。",
           "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":20,\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           "动作描写要短而有画面感；角色发言要像真实当面对话，不要写成长作文。",
           buildThoughtGenerationRules(mode === "group" ? "group" : "private"),
           "memories 是长期记忆，不要为了心声或记忆额外调用 API。",
-          buildJsonOnlyRule("{\"events\":[{\"type\":\"action\",\"content\":\"动作描写\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"说的话\",\"money\":{\"type\":\"transfer\",\"amount\":20,\"direction\":\"income\",\"note\":\"补偿\"}}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}"),
+          buildJsonOnlyRule(appendOptionalSchema("{\"events\":[{\"type\":\"action\",\"content\":\"动作描写\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"说的话\",\"money\":{\"type\":\"transfer\",\"amount\":20,\"direction\":\"income\",\"note\":\"补偿\"}}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}", context)),
           "",
           "D. 世界书相关内容",
           worldBookContext || "暂无匹配世界书。",
@@ -710,7 +856,7 @@
     var fallbackId = validIds[0] || "";
     var events = parsed && Array.isArray(parsed.events) ? parsed.events : [];
     var normalizedEvents;
-    var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(parsed && parsed.thoughts), validIds);
+    var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(getThoughtPayload(parsed)), validIds);
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
     if (!events.length && rawContent) {
@@ -728,13 +874,16 @@
     return {
       events: normalizedEvents,
       thoughts: thoughts,
-      memories: memories
+      memories: memories,
+      memorySummary: normalizeMemorySummaryResult(parsed && parsed.memorySummary),
+      bodyState: normalizeBodyStateResult(parsed && parsed.bodyState)
     };
   }
 
   function buildOfflineMessages(context) {
     var participants = Array.isArray(context.participants) ? context.participants : [];
     var sharedMemories = context.sharedMemories || {};
+    var chatMemories = getChatMemoriesForPrompt("offline", context.targetId || "", context.chatMemories);
     var participantLines = participants.map(function (character) {
       return [
         "角色ID：" + character.id,
@@ -787,9 +936,13 @@
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
           "角色说话不要太长，动作描写像小说旁白但不要冗长。",
           "私聊模式只围绕当前角色和用户互动；群聊模式中多个角色可以自然互动。",
+          "当前线下记忆：",
+          formatChatMemoryList(chatMemories) || "暂无",
+          buildMemorySummaryPrompt(context),
+          buildBodyStatePrompt(context),
           buildThoughtGenerationRules(context.mode === "group" ? "group" : "private"),
-          "同一次 JSON 里返回 events、thoughts、memories，不要为了心声或记忆额外调用 API。",
-          buildJsonOnlyRule("{\"events\":[{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"角色说的话\",\"money\":{\"type\":\"redPacket\",\"amount\":8.88,\"direction\":\"income\",\"note\":\"收下红包\"}},{\"type\":\"action\",\"characterId\":\"\",\"content\":\"旁白动作\"}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}"),
+          buildAuxiliaryReturnRule(context, "events"),
+          buildJsonOnlyRule(appendOptionalSchema("{\"events\":[{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"角色说的话\",\"money\":{\"type\":\"redPacket\",\"amount\":8.88,\"direction\":\"income\",\"note\":\"收下红包\"}},{\"type\":\"action\",\"characterId\":\"\",\"content\":\"旁白动作\"}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}", context)),
           "",
           "D. 世界书相关内容",
           worldBookContext || "暂无匹配世界书。",
@@ -1323,8 +1476,11 @@
 
     return {
       replies: normalizeReplyList(rawContent, settings.replies, settings),
-      thoughts: normalizeThoughtList(parsed && parsed.thoughts),
-      memories: normalizeMemoryList(parsed && parsed.memories)
+      actions: normalizeActionList(parsed && parsed.actions),
+      thoughts: normalizeThoughtList(getThoughtPayload(parsed)),
+      memories: normalizeMemoryList(parsed && parsed.memories),
+      memorySummary: normalizeMemorySummaryResult(parsed && parsed.memorySummary),
+      bodyState: normalizeBodyStateResult(parsed && parsed.bodyState)
     };
   }
 
@@ -1352,13 +1508,31 @@
     return [];
   }
 
-  function normalizeThoughtList(thoughts) {
-    if (!Array.isArray(thoughts)) {
+  function getThoughtPayload(parsed) {
+    if (!parsed || typeof parsed !== "object") {
       return [];
     }
 
-    return thoughts.map(function (thought) {
-      var source = thought && typeof thought === "object" ? thought : {};
+    return parsed.thoughts || parsed.whisper || parsed.whispers || parsed.innerVoice || parsed.innerVoices || [];
+  }
+
+  function normalizeThoughtList(thoughts) {
+    var list;
+
+    if (typeof thoughts === "string") {
+      list = [{ content: thoughts }];
+    } else if (thoughts && typeof thoughts === "object" && !Array.isArray(thoughts)) {
+      list = [thoughts];
+    } else {
+      list = Array.isArray(thoughts) ? thoughts : [];
+    }
+
+    if (!list.length) {
+      return [];
+    }
+
+    return list.map(function (thought) {
+      var source = thought && typeof thought === "object" ? thought : { content: thought };
       return {
         characterId: source.characterId ? String(source.characterId) : "",
         content: String(source.content || "").trim(),
@@ -1384,6 +1558,112 @@
     }).filter(function (memory) {
       return memory.content;
     }).slice(0, 50);
+  }
+
+  function normalizeMemorySummaryResult(summary) {
+    var source = summary && typeof summary === "object" ? summary : null;
+    var content;
+
+    if (!source) {
+      return null;
+    }
+
+    content = String(source.content || source.body || source.summary || "").trim();
+    if (!content) {
+      return null;
+    }
+
+    return {
+      title: String(source.title || "自动记忆总结").trim() || "自动记忆总结",
+      content: content,
+      sourceTime: source.sourceTime ? String(source.sourceTime) : ""
+    };
+  }
+
+  function normalizeActionList(actions) {
+    if (!Array.isArray(actions)) {
+      return [];
+    }
+
+    return actions.map(function (action) {
+      var source = action && typeof action === "object" ? action : { content: action };
+      return {
+        type: String(source.type || "narration"),
+        content: normalizeAiMessageText(source.content || source.text || "")
+      };
+    }).filter(function (action) {
+      return action.content;
+    }).slice(0, 20);
+  }
+
+  function normalizeBodyStateResult(bodyState) {
+    var source = bodyState && typeof bodyState === "object" ? bodyState : null;
+    var parts;
+    var normalizedParts = {};
+
+    if (!source) {
+      return null;
+    }
+
+    parts = source.parts && typeof source.parts === "object" && !Array.isArray(source.parts) ? source.parts : {};
+    ["手心", "臀部", "大腿", "臀腿连接处", "腰背", "肩颈", "膝腿", "其他受影响区域"].forEach(function (partName) {
+      normalizedParts[partName] = normalizeBodyPartResult(parts[partName] || {});
+    });
+    Object.keys(parts).forEach(function (partName) {
+      normalizedParts[partName] = normalizeBodyPartResult(parts[partName]);
+    });
+
+    return {
+      overallCondition: String(source.overallCondition || "正常"),
+      currentNote: String(source.currentNote || source.note || "当前无明显异常"),
+      energy: clampPercent(source.energy, 80),
+      moodInfluence: String(source.moodInfluence || "影响轻微"),
+      sorenessLevel: clampPercent(source.sorenessLevel, 0),
+      painLevel: clampPercent(source.painLevel, 0),
+      rednessLevel: clampPercent(source.rednessLevel, 0),
+      bruiseRisk: String(source.bruiseRisk || "低"),
+      sittingComfort: String(source.sittingComfort || "正常"),
+      walkingComfort: String(source.walkingComfort || "正常"),
+      handUseComfort: String(source.handUseComfort || "正常"),
+      touchSensitivity: String(source.touchSensitivity || "正常"),
+      bodyTemperature: String(source.bodyTemperature || "正常"),
+      feverRisk: String(source.feverRisk || "低"),
+      skinBreakage: String(source.skinBreakage || "无"),
+      restNeeded: normalizeBooleanValue(source.restNeeded),
+      recoverySuggestion: String(source.recoverySuggestion || "保持休息、补水，若出现持续疼痛或发热请及时停止剧情并处理。"),
+      parts: normalizedParts,
+      updatedAt: Date.now()
+    };
+  }
+
+  function normalizeBodyPartResult(part) {
+    var source = part && typeof part === "object" ? part : {};
+
+    return {
+      status: String(source.status || "正常"),
+      soreness: clampPercent(source.soreness, 0),
+      pain: clampPercent(source.pain, 0),
+      redness: clampPercent(source.redness, 0),
+      notes: String(source.notes || "")
+    };
+  }
+
+  function clampPercent(value, fallback) {
+    var number = Number(value);
+    if (!Number.isFinite(number)) {
+      number = fallback;
+    }
+    return Math.max(0, Math.min(100, Math.round(number)));
+  }
+
+  function normalizeBooleanValue(value) {
+    if (value === true || value === "true" || value === "是" || value === "需要") {
+      return true;
+    }
+    if (value === false || value === "false" || value === "否" || value === "不需要") {
+      return false;
+    }
+    return Boolean(value);
   }
 
   function normalizeOfflineEventList(events, rawContent, options) {

@@ -34,6 +34,7 @@
   var shopTab = "food";
   var shopMallCategory = "all";
   var shopGenerating = false;
+  var walletBillFilter = "all";
   var diaryCharacterId = "";
   var characterSpaceId = "";
   var thoughtsReturnPage = "homeScreen";
@@ -68,7 +69,7 @@
     { id: "settings", name: "设置", icon: "设", className: "desktop-setting", action: "settings" },
     { id: "shop", name: "购物", icon: "购", className: "desktop-shop", action: "shop" }
   ];
-  var desktopPageSize = 10;
+  var desktopPageSize = 12;
   var themePresets = [
     { id: "default", name: "默认浅色", bg: "#f6f7f4", surface: "#ffffff", text: "#1d2521", muted: "#73817a", blue: "#5b9fe6", green: "#68bea3" },
     { id: "pink", name: "粉色", bg: "#fff5f8", surface: "#ffffff", text: "#2b2025", muted: "#8d6f7b", blue: "#7aa7ea", green: "#69bda3" },
@@ -101,6 +102,40 @@
     if (element) {
       element.addEventListener("click", handler);
     }
+  }
+
+  function showToast(message, isError) {
+    var toast = getElement("appToast");
+    var host = document.querySelector(".phone") || document.body;
+
+    if (!toast) {
+      toast = document.createElement("div");
+      toast.id = "appToast";
+      toast.className = "app-toast hidden";
+      toast.setAttribute("role", "status");
+      toast.setAttribute("aria-live", "polite");
+      host.appendChild(toast);
+    }
+
+    toast.textContent = String(message || "");
+    toast.classList.toggle("error", Boolean(isError));
+    toast.classList.remove("hidden");
+    window.clearTimeout(showToast.timer);
+    showToast.timer = window.setTimeout(function () {
+      toast.classList.add("hidden");
+      toast.classList.remove("error");
+    }, 2200);
+  }
+
+  function renderSoftEmpty(icon, title, description, actionLabel, actionAttrs) {
+    return [
+      '<div class="soft-empty soft-empty-card">',
+      '  <span class="soft-empty-icon" aria-hidden="true">' + escapeHtml(icon || "·") + "</span>",
+      '  <strong>' + escapeHtml(title || "暂无内容") + "</strong>",
+      description ? '  <em>' + escapeHtml(description) + "</em>" : "",
+      actionLabel ? '  <button type="button" class="soft-empty-action" ' + (actionAttrs || "") + ">" + escapeHtml(actionLabel) + "</button>" : "",
+      "</div>"
+    ].join("");
   }
 
   function escapeHtml(value) {
@@ -486,7 +521,7 @@
     content.innerHTML = [
       '<section class="wechat-list-panel chat-list-only" aria-label="聊天列表">',
       '  <div id="wechatRecentList" class="recent-chat-list">',
-      recentItems.length ? recentItems.map(renderRecentChatItem).join("") : '<div class="soft-empty">暂无聊天，先发一句话，让角色出现在这里。</div>',
+      recentItems.length ? recentItems.map(renderRecentChatItem).join("") : renderSoftEmpty("微", "还没有会话", "创建角色或群聊后，会直接出现在微信列表里。", "创建角色", 'data-wechat-entry="new-character"'),
       "  </div>",
       "</section>"
     ].join("");
@@ -657,7 +692,7 @@
   }
 
   function renderEmptyMoments() {
-    return '<div class="soft-empty moments-empty">还没有朋友圈，先发一条文字动态吧。</div>';
+    return renderSoftEmpty("友", "还没有朋友圈", "先发一条文字动态，角色也会慢慢参与进来。", "发朋友圈", 'data-moment-action="open-publish"');
   }
 
   function renderMomentItem(moment) {
@@ -2099,6 +2134,9 @@
     }
 
     getElement("chatSettingsBtn").addEventListener("click", window.CharacterManager.openActivePrivateSettings);
+    getElement("chatMemoryBtn").addEventListener("click", window.CharacterManager.openActiveChatMemory);
+    getElement("chatBodyStateBtn").addEventListener("click", window.CharacterManager.openActiveBodyState);
+    getElement("chatThoughtsBtn").addEventListener("click", window.CharacterManager.openActiveCharacterThoughtsDrawer);
     getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
     getElement("chatOfflineBtn").addEventListener("click", window.CharacterManager.openActiveCharacterOffline);
@@ -2130,6 +2168,9 @@
     }
 
     getElement("groupSettingsBtn").addEventListener("click", window.GroupManager.openActiveGroupSettings);
+    getElement("groupMemoryBtn").addEventListener("click", window.GroupManager.openActiveGroupMemory);
+    getElement("groupBodyStateBtn").addEventListener("click", window.GroupManager.openActiveGroupBodyState);
+    getElement("groupThoughtsBtn").addEventListener("click", window.GroupManager.openActiveGroupThoughtsDrawer);
     getElement("groupSearchBtn").addEventListener("click", window.GroupManager.openActiveGroupSearch);
     getElement("groupBatchMessageSelectBtn").addEventListener("click", window.GroupManager.openGroupMessageSelectionMode);
     getElement("groupOfflineBtn").addEventListener("click", window.GroupManager.openActiveGroupOffline);
@@ -2156,6 +2197,24 @@
       refreshShopProducts(true);
     });
     getElement("exportDataBtn").addEventListener("click", exportAllData);
+    getElement("clearPrivateChatMemoriesBtn").addEventListener("click", function () {
+      if (window.confirm("确定清空全部私聊记忆吗？")) {
+        window.AppStorage.clearAllChatMemoriesByType("private");
+        showSettingsTip("已清空全部私聊记忆");
+      }
+    });
+    getElement("clearGroupChatMemoriesBtn").addEventListener("click", function () {
+      if (window.confirm("确定清空全部群聊记忆吗？")) {
+        window.AppStorage.clearAllChatMemoriesByType("group");
+        showSettingsTip("已清空全部群聊记忆");
+      }
+    });
+    getElement("clearAllBodyStatesBtn").addEventListener("click", function () {
+      if (window.confirm("确定清空全部身体状态吗？")) {
+        window.AppStorage.clearAllBodyStates();
+        showSettingsTip("已清空身体状态");
+      }
+    });
     getElement("newWorldBookBtn").addEventListener("click", createWorldBook);
     getElement("importPhotoBtn").addEventListener("click", function () {
       getElement("photoImportInput").click();
@@ -4496,7 +4555,7 @@
       '  <section class="thought-draft-card"><h4>没说出口的话</h4><p>' + escapeHtml(data.deletedDraft) + "</p></section>",
       '  <section class="thought-real-card"><h4>内心真实想法</h4><p>' + escapeHtml(data.realThought) + "</p></section>",
       "</div>",
-      '<div class="thought-modal-footer"><button class="thought-record-button" type="button" data-thought-record>心声记录</button></div>'
+      '<div class="thought-modal-footer"><button class="thought-record-button" type="button" data-thought-record>心声记录</button><button class="thought-delete-button" type="button" data-thought-delete data-character-id="' + escapeHtml(thought.characterId || "") + '" data-thought-id="' + escapeHtml(thought.id || "") + '">删除</button></div>'
     ].join("");
   }
 
@@ -4575,7 +4634,7 @@
     };
 
     return [
-      '<article class="thought-drawer-card">',
+      '<article class="thought-drawer-card" data-character-id="' + escapeHtml(thought.characterId || "") + '" data-thought-id="' + escapeHtml(thought.id || "") + '">',
       '  <div class="thought-drawer-card-head">',
       renderSmallAvatar(character, "thought-drawer-avatar"),
       '    <span><strong>' + escapeHtml(thought.characterName || "角色") + "</strong><em>" + escapeHtml(formatDateTime(thought.createdAt)) + "</em></span>",
@@ -4583,6 +4642,7 @@
       '  <div class="thought-drawer-meta"><span>' + escapeHtml(thought.mood || "未记录") + "</span><span>" + escapeHtml(sourceMap[thought.source] || thought.source || "私聊") + "</span></div>",
       thought.visibleSummary ? '  <p class="thought-drawer-summary">' + escapeHtml(thought.visibleSummary) + "</p>" : "",
       '  <p class="thought-drawer-content">' + escapeHtml(thought.content || "") + "</p>",
+      '  <button class="thought-card-delete" type="button" data-thought-delete>删除</button>',
       "</article>"
     ].join("");
   }
@@ -4597,9 +4657,22 @@
     mask.addEventListener("click", function (event) {
       var filter = event.target.closest("[data-drawer-character]");
       var recordButton = event.target.closest("[data-thought-record]");
+      var deleteButton = event.target.closest("[data-thought-delete]");
+      var thoughtCard = deleteButton ? deleteButton.closest("[data-thought-id]") : null;
 
       if (event.target === mask || event.target.closest("[data-thought-drawer-close]")) {
         closeThoughtsDrawer();
+        return;
+      }
+
+      if (deleteButton) {
+        var deleteCharacterId = deleteButton.dataset.characterId || (thoughtCard && thoughtCard.dataset.characterId) || "";
+        var deleteThoughtId = deleteButton.dataset.thoughtId || (thoughtCard && thoughtCard.dataset.thoughtId) || "";
+        if (deleteCharacterId && deleteThoughtId && window.confirm("确定删除这条心声吗？")) {
+          window.AppStorage.deleteCharacterThought(deleteCharacterId, deleteThoughtId);
+          renderThoughtsDrawer();
+          updateThoughtHeartButtons();
+        }
         return;
       }
 
@@ -4636,21 +4709,23 @@
     var badge = button ? button.querySelector(".thought-badge") : null;
     var glyph = button ? button.querySelector(".heart-glyph") : null;
     var unreadCount = Number(count) || 0;
+    var settings = window.AppStorage && window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
+    var showBadge = settings.showThoughtUnreadBadge !== false;
 
     if (!button) {
       return;
     }
 
     button.classList.toggle("active", Boolean(active));
-    button.classList.toggle("has-unread", unreadCount > 0);
+    button.classList.toggle("has-unread", showBadge && unreadCount > 0);
 
     if (glyph) {
       glyph.textContent = active ? "♥" : "♡";
     }
 
     if (badge) {
-      badge.textContent = unreadCount > 99 ? "99+" : String(unreadCount);
-      badge.classList.toggle("hidden", unreadCount <= 0);
+      badge.textContent = showBadge ? (unreadCount > 99 ? "99+" : String(unreadCount)) : "";
+      badge.classList.toggle("hidden", !showBadge || unreadCount <= 0);
     }
   }
 
@@ -4741,10 +4816,16 @@
 
   function renderShopScreen() {
     var content = getElement("shopContent");
+    var refreshButton = getElement("refreshShopProductsBtn");
     var shop = window.AppStorage.getShop ? window.AppStorage.getShop() : { foodShops: [], mallProducts: [], cart: [], orders: [] };
 
     if (!content) {
       return;
+    }
+
+    if (refreshButton) {
+      refreshButton.disabled = shopGenerating;
+      refreshButton.textContent = shopGenerating ? "生成中" : "刷新商品";
     }
 
     content.innerHTML = [
@@ -4754,7 +4835,7 @@
       renderShopTabButton("cart", "购物车" + (shop.cart.length ? " · " + shop.cart.length : "")),
       renderShopTabButton("orders", "订单"),
       "</section>",
-      shopGenerating ? '<div class="shop-loading">正在生成商品...</div>' : "",
+      shopGenerating ? '<div class="shop-loading">正在生成商品，请稍等一下。</div>' : "",
       '<section class="shop-panel">',
       renderShopActivePanel(shop),
       "</section>"
@@ -4824,6 +4905,7 @@
       next = window.AppStorage.getDefaultShopProducts();
       next.cart = force ? [] : current.cart;
       next.orders = current.orders;
+      showToast("商品生成失败，已先使用默认商品。", true);
     } finally {
       window.AppStorage.saveShop(next);
       shopGenerating = false;
@@ -4843,7 +4925,7 @@
 
   function renderShopFood(shop) {
     if (!shopHasProducts(shop)) {
-      return '<div class="soft-empty">商品准备中...</div>';
+      return renderSoftEmpty("购", "商品准备中", "首次进入会自动生成一次商品，失败时会使用默认商品。");
     }
 
     return (shop.foodShops || []).map(function (foodShop) {
@@ -4867,7 +4949,7 @@
     });
 
     if (!shopHasProducts(shop)) {
-      return '<div class="soft-empty">商品准备中...</div>';
+      return renderSoftEmpty("购", "商品准备中", "首次进入会自动生成一次商品，失败时会使用默认商品。");
     }
 
     return [
@@ -4919,7 +5001,7 @@
     }) : [];
 
     if (!shop.cart.length) {
-      return '<div class="soft-empty">购物车是空的。</div>';
+      return renderSoftEmpty("车", "购物车是空的", "去外卖或网购里挑一点喜欢的东西吧。", "去逛外卖", 'data-shop-tab="food"');
     }
 
     return [
@@ -4953,7 +5035,7 @@
 
   function renderShopOrders(shop) {
     if (!shop.orders.length) {
-      return '<div class="soft-empty">还没有订单。</div>';
+      return renderSoftEmpty("单", "还没有订单", "结算成功后，订单会按时间保存在这里。", "去购物车", 'data-shop-tab="cart"');
     }
 
     return '<div class="order-list">' + shop.orders.map(function (order) {
@@ -5052,6 +5134,7 @@
 
     window.AppStorage.saveShop(shop);
     renderShopScreen();
+    showToast("已加入购物车");
   }
 
   function updateCartQuantity(cartId, delta) {
@@ -5090,13 +5173,13 @@
     var order;
 
     if (!shop.cart.length || !total) {
-      window.alert("购物车是空的。");
+      showToast("购物车是空的。", true);
       return;
     }
 
     if (payMethod === "familyCard") {
       if (!familyCardId) {
-        window.alert("没有可用亲属卡。");
+        showToast("没有可用亲属卡。", true);
         return;
       }
       ledger = window.AppStorage.spendFamilyCard(familyCardId, total, {
@@ -5105,7 +5188,7 @@
         note: "亲属卡购物消费"
       });
       if (!ledger) {
-        window.alert("亲属卡额度不足。");
+        showToast("亲属卡额度不足。", true);
         return;
       }
     } else {
@@ -5121,7 +5204,7 @@
         preventOverdraft: true
       });
       if (!ledger) {
-        window.alert("余额不足，请充值或使用亲属卡");
+        showToast("余额不足，请充值或使用亲属卡。", true);
         return;
       }
     }
@@ -5140,6 +5223,7 @@
     shopTab = "orders";
     renderShopScreen();
     renderWalletScreen();
+    showToast("支付成功，订单已生成。");
   }
 
   function renderWalletScreen() {
@@ -5224,6 +5308,9 @@
   function renderWalletBillScreen() {
     var content = getElement("walletBillContent");
     var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { ledger: [] };
+    var records = (wallet.ledger || []).filter(function (record) {
+      return walletBillFilter === "all" || record.direction === walletBillFilter;
+    });
 
     if (!content) {
       return;
@@ -5231,10 +5318,53 @@
 
     content.innerHTML = [
       '<section class="bill-summary"><strong>' + wallet.ledger.length + "</strong><span>条账单记录</span><em>余额 ¥" + escapeHtml(formatMoney(wallet.balance)) + "</em></section>",
+      '<section class="bill-filter-row" aria-label="账单筛选">',
+      renderBillFilterButton("all", "全部"),
+      renderBillFilterButton("income", "收入"),
+      renderBillFilterButton("expense", "支出"),
+      '  <button type="button" class="bill-clear-button" data-bill-action="clear">清空账单</button>',
+      "</section>",
       '<section class="bill-list">',
-      wallet.ledger.length ? wallet.ledger.map(renderLedgerRecord).join("") : '<div class="soft-empty">暂无账单。红包、转账、充值和亲属卡消费会出现在这里。</div>',
+      records.length ? records.map(renderLedgerRecord).join("") : renderSoftEmpty("账", wallet.ledger.length ? "没有符合筛选的账单" : "暂无账单", "红包、转账、充值和购物消费会出现在这里。"),
       "</section>"
     ].join("");
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-bill-filter]"), function (button) {
+      button.addEventListener("click", function () {
+        walletBillFilter = button.dataset.billFilter;
+        renderWalletBillScreen();
+      });
+    });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-bill-action='clear']"), function (button) {
+      button.addEventListener("click", clearWalletLedger);
+    });
+  }
+
+  function renderBillFilterButton(value, label) {
+    return '<button type="button" data-bill-filter="' + escapeHtml(value) + '" class="' + (walletBillFilter === value ? "active" : "") + '">' + escapeHtml(label) + "</button>";
+  }
+
+  function clearWalletLedger() {
+    var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : null;
+
+    if (!wallet || !wallet.ledger.length) {
+      showToast("现在没有账单可清空。");
+      return;
+    }
+
+    if (!window.confirm("确定清空所有账单吗？余额和亲属卡额度不会被重置。")) {
+      return;
+    }
+
+    if (!window.confirm("再次确认：清空后无法恢复账单记录。")) {
+      return;
+    }
+
+    wallet.ledger = [];
+    window.AppStorage.saveWallet(wallet);
+    renderWalletBillScreen();
+    showToast("账单已清空。");
   }
 
   function renderLedgerRecord(record) {
@@ -5428,6 +5558,10 @@
     getElement("apiKey").value = settings.apiKey;
     getElement("modelName").value = settings.modelName;
     getElement("apiTemperature").value = settings.temperature;
+    getElement("autoMemorySummaryEnabled").checked = settings.autoMemorySummaryEnabled !== false;
+    getElement("autoMemorySummaryRounds").value = String(settings.autoMemorySummaryRounds || 10);
+    getElement("bodyStateEnabled").checked = settings.bodyStateEnabled !== false;
+    getElement("showThoughtUnreadBadge").checked = settings.showThoughtUnreadBadge !== false;
 
     if (savedTip) {
       savedTip.textContent = "";
@@ -5478,7 +5612,11 @@
       apiUrl: getElement("apiUrl").value.trim(),
       apiKey: getElement("apiKey").value.trim(),
       modelName: getElement("modelName").value.trim(),
-      temperature: normalizeTemperatureInput(getElement("apiTemperature").value)
+      temperature: normalizeTemperatureInput(getElement("apiTemperature").value),
+      autoMemorySummaryEnabled: getElement("autoMemorySummaryEnabled").checked,
+      autoMemorySummaryRounds: Math.max(5, Math.min(50, Number(getElement("autoMemorySummaryRounds").value) || 10)),
+      bodyStateEnabled: getElement("bodyStateEnabled").checked,
+      showThoughtUnreadBadge: getElement("showThoughtUnreadBadge").checked
     };
   }
 
@@ -5499,6 +5637,10 @@
 
     settings = {
       activeApiProfileId: profileId,
+      autoMemorySummaryEnabled: current.autoMemorySummaryEnabled !== false,
+      autoMemorySummaryRounds: current.autoMemorySummaryRounds || 10,
+      bodyStateEnabled: current.bodyStateEnabled !== false,
+      showThoughtUnreadBadge: current.showThoughtUnreadBadge !== false,
       apiProfiles: current.apiProfiles.map(function (item) {
         if (item.id !== current.activeApiProfileId) {
           return item;
@@ -5567,7 +5709,11 @@
     });
     window.AppStorage.saveSettings({
       activeApiProfileId: profiles[0].id,
-      apiProfiles: profiles
+      apiProfiles: profiles,
+      autoMemorySummaryEnabled: current.autoMemorySummaryEnabled !== false,
+      autoMemorySummaryRounds: current.autoMemorySummaryRounds || 10,
+      bodyStateEnabled: current.bodyStateEnabled !== false,
+      showThoughtUnreadBadge: current.showThoughtUnreadBadge !== false
     });
     loadSettingsIntoForm();
     showSettingsTip("已删除 API 预设");
@@ -5803,6 +5949,276 @@
     }, 2200);
   }
 
+  function buildChatGenerationContext(targetType, targetId) {
+    var settings = window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
+    var autoEnabled = settings.autoMemorySummaryEnabled !== false;
+    var interval = Math.max(5, Math.min(50, Number(settings.autoMemorySummaryRounds) || 10));
+    var currentRound = window.AppStorage.getChatRoundCounter ? window.AppStorage.getChatRoundCounter(targetType, targetId) : 0;
+    var nextRound = autoEnabled ? currentRound + 1 : currentRound;
+    var bodyEnabled = settings.bodyStateEnabled !== false;
+
+    return {
+      targetType: targetType,
+      targetId: targetId,
+      chatMemories: window.AppStorage.getChatMemories ? window.AppStorage.getChatMemories(targetType, targetId) : [],
+      bodyStateEnabled: bodyEnabled,
+      bodyState: bodyEnabled && window.AppStorage.getBodyState ? window.AppStorage.getBodyState(targetType, targetId) : null,
+      autoMemorySummaryEnabled: autoEnabled,
+      memorySummaryDue: autoEnabled && nextRound >= interval,
+      memorySummaryRounds: interval,
+      currentRound: nextRound
+    };
+  }
+
+  function finalizeChatGenerationContext(context, result) {
+    var summary = result && result.memorySummary;
+    var savedSummary = false;
+
+    if (!context || !context.targetId) {
+      return;
+    }
+
+    if (context.autoMemorySummaryEnabled && window.AppStorage.setChatRoundCounter) {
+      if (context.memorySummaryDue && summary && summary.content && window.AppStorage.addChatMemory) {
+        window.AppStorage.addChatMemory(context.targetType, context.targetId, {
+          title: summary.title || "自动记忆总结",
+          content: summary.content,
+          sourceTime: Date.now(),
+          type: "auto",
+          source: context.targetType === "group" ? "group" : (context.targetType === "offline" ? "offline" : "private"),
+          createdAt: Date.now()
+        });
+        savedSummary = true;
+      }
+
+      window.AppStorage.setChatRoundCounter(
+        context.targetType,
+        context.targetId,
+        context.memorySummaryDue ? (savedSummary ? 0 : Math.max(0, context.memorySummaryRounds - 1)) : context.currentRound
+      );
+    }
+
+    if (context.bodyStateEnabled && result && result.bodyState && window.AppStorage.saveBodyState) {
+      window.AppStorage.saveBodyState(context.targetType, context.targetId, result.bodyState);
+    }
+  }
+
+  function openChatMemoryPanel(targetType, targetId, title) {
+    renderChatMemoryPanel(targetType, targetId, title || "聊天记忆");
+  }
+
+  function renderChatMemoryPanel(targetType, targetId, title) {
+    var memories = window.AppStorage.getChatMemories ? window.AppStorage.getChatMemories(targetType, targetId) : [];
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <button type="button" data-memory-action="add">新增</button>',
+      "  <h3>" + escapeHtml(title || "聊天记忆") + "</h3>",
+      '  <button type="button" data-close-sheet>关闭</button>',
+      "</div>",
+      '<div class="wechat-sheet-form memory-panel">',
+      memories.length ? memories.map(renderMemoryPanelCard).join("") : '<div class="soft-empty">还没有记忆，可以手动新增，也可以等待自动总结生成。</div>',
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      sheet.addEventListener("click", function (event) {
+        var button = event.target.closest("[data-memory-action]");
+        var card = button ? button.closest("[data-memory-id]") : null;
+        var memoryId = card ? card.dataset.memoryId : "";
+
+        if (!button) {
+          return;
+        }
+
+        if (button.dataset.memoryAction === "add") {
+          renderChatMemoryEditor(targetType, targetId, title, null);
+        }
+
+        if (button.dataset.memoryAction === "edit") {
+          renderChatMemoryEditor(targetType, targetId, title, memories.find(function (memory) {
+            return memory.id === memoryId;
+          }));
+        }
+
+        if (button.dataset.memoryAction === "delete" && window.confirm("确定删除这条记忆吗？")) {
+          window.AppStorage.deleteChatMemory(targetType, targetId, memoryId);
+          renderChatMemoryPanel(targetType, targetId, title);
+        }
+      });
+    });
+  }
+
+  function renderMemoryPanelCard(memory) {
+    return [
+      '<article class="memory-panel-card" data-memory-id="' + escapeHtml(memory.id) + '">',
+      '  <div class="memory-panel-top"><strong>' + escapeHtml(memory.title || "记忆") + '</strong><span>' + escapeHtml(memory.type === "auto" ? "自动总结" : "手动添加") + "</span></div>",
+      '  <p>' + escapeHtml(memory.content || "") + "</p>",
+      '  <small>来源时间：' + escapeHtml(formatDateTime(memory.sourceTime)) + " · 创建：" + escapeHtml(formatDateTime(memory.createdAt)) + "</small>",
+      '  <div class="settings-action-row compact-action-row">',
+      '    <button class="outline-button" type="button" data-memory-action="edit">编辑</button>',
+      '    <button class="outline-button danger" type="button" data-memory-action="delete">删除</button>',
+      "  </div>",
+      "</article>"
+    ].join("");
+  }
+
+  function renderChatMemoryEditor(targetType, targetId, title, memory) {
+    var source = memory || {};
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <button type="button" data-memory-edit-cancel>返回</button>',
+      "  <h3>" + escapeHtml(memory ? "编辑记忆" : "新增记忆") + "</h3>",
+      '  <button type="button" data-memory-edit-save>保存</button>',
+      "</div>",
+      '<div class="wechat-sheet-form memory-editor">',
+      '  <label class="wechat-sheet-field"><span>标题</span><input id="memoryTitleInput" type="text" maxlength="40" value="' + escapeHtml(source.title || "") + '"></label>',
+      '  <label class="wechat-sheet-field"><span>正文</span><textarea id="memoryContentInput" maxlength="1200">' + escapeHtml(source.content || "") + "</textarea></label>",
+      '  <label class="wechat-sheet-field"><span>来源时间</span><input id="memorySourceTimeInput" type="datetime-local" value="' + escapeHtml(formatDateTimeInput(source.sourceTime || Date.now())) + '"></label>',
+      '  <label class="wechat-sheet-field"><span>类型</span><select id="memoryTypeInput"><option value="manual"' + (source.type !== "auto" ? " selected" : "") + '>手动添加</option><option value="auto"' + (source.type === "auto" ? " selected" : "") + ">自动总结</option></select></label>",
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      sheet.querySelector("[data-memory-edit-cancel]").addEventListener("click", function () {
+        renderChatMemoryPanel(targetType, targetId, title);
+      });
+      sheet.querySelector("[data-memory-edit-save]").addEventListener("click", function () {
+        var payload = {
+          title: sheet.querySelector("#memoryTitleInput").value.trim() || "聊天记忆",
+          content: sheet.querySelector("#memoryContentInput").value.trim(),
+          sourceTime: new Date(sheet.querySelector("#memorySourceTimeInput").value || Date.now()).getTime(),
+          type: sheet.querySelector("#memoryTypeInput").value,
+          source: targetType === "group" ? "group" : (targetType === "offline" ? "offline" : "private")
+        };
+
+        if (!payload.content) {
+          showToast("记忆正文不能为空", true);
+          return;
+        }
+
+        if (memory && memory.id) {
+          window.AppStorage.updateChatMemory(targetType, targetId, memory.id, payload);
+        } else {
+          window.AppStorage.addChatMemory(targetType, targetId, payload);
+        }
+
+        renderChatMemoryPanel(targetType, targetId, title);
+      });
+    });
+  }
+
+  function formatDateTimeInput(timestamp) {
+    var date = new Date(timestamp || Date.now());
+    return [
+      date.getFullYear(),
+      String(date.getMonth() + 1).padStart(2, "0"),
+      String(date.getDate()).padStart(2, "0")
+    ].join("-") + "T" + [
+      String(date.getHours()).padStart(2, "0"),
+      String(date.getMinutes()).padStart(2, "0")
+    ].join(":");
+  }
+
+  function openBodyStatePanel(targetType, targetId, title) {
+    var settings = window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
+    var enabled = settings.bodyStateEnabled !== false;
+    var state = window.AppStorage.getBodyState ? window.AppStorage.getBodyState(targetType, targetId) : {};
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <span></span>',
+      "  <h3>" + escapeHtml(title || "身体状态") + "</h3>",
+      '  <button type="button" data-close-sheet>关闭</button>',
+      "</div>",
+      '<div class="wechat-sheet-form body-state-panel">',
+      enabled ? renderBodyStatePanelContent(state) : '<div class="soft-empty">身体状态系统已关闭，可在设置里开启。</div>',
+      enabled ? '<div class="settings-action-row compact-action-row"><button class="outline-button" type="button" data-body-action="export">导出文本</button><button class="outline-button danger" type="button" data-body-action="reset">重置状态</button></div>' : "",
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      sheet.addEventListener("click", function (event) {
+        var button = event.target.closest("[data-body-action]");
+        var text;
+
+        if (!button) {
+          return;
+        }
+
+        if (button.dataset.bodyAction === "reset" && window.confirm("确定重置当前身体状态吗？")) {
+          window.AppStorage.clearBodyState(targetType, targetId);
+          openBodyStatePanel(targetType, targetId, title);
+        }
+
+        if (button.dataset.bodyAction === "export") {
+          text = formatBodyStateText(state);
+          if (navigator.clipboard && navigator.clipboard.writeText) {
+            navigator.clipboard.writeText(text).then(function () {
+              showToast("身体状态文本已复制");
+            }).catch(function () {
+              window.prompt("复制身体状态文本", text);
+            });
+          } else {
+            window.prompt("复制身体状态文本", text);
+          }
+        }
+      });
+    });
+  }
+
+  function renderBodyStatePanelContent(state) {
+    var parts = state.parts || {};
+
+    return [
+      '<section class="body-state-summary">',
+      '  <strong>' + escapeHtml(state.overallCondition || "正常") + "</strong>",
+      '  <p>' + escapeHtml(state.currentNote || "当前无明显异常") + "</p>",
+      '  <div class="body-state-grid">',
+      renderBodyMetric("精力", state.energy + "/100"),
+      renderBodyMetric("酸痛", state.sorenessLevel + "/100"),
+      renderBodyMetric("疼痛", state.painLevel + "/100"),
+      renderBodyMetric("泛红", state.rednessLevel + "/100"),
+      renderBodyMetric("体温", state.bodyTemperature || "正常"),
+      renderBodyMetric("需休息", state.restNeeded ? "是" : "否"),
+      "  </div>",
+      '  <small>最近更新：' + escapeHtml(formatDateTime(state.updatedAt)) + "</small>",
+      "</section>",
+      '<section class="body-part-list">',
+      Object.keys(parts).map(function (partName) {
+        var part = parts[partName] || {};
+        return [
+          '<article class="body-part-card">',
+          '  <div><strong>' + escapeHtml(partName) + '</strong><span>' + escapeHtml(part.status || "正常") + "</span></div>",
+          '  <p>酸痛 ' + escapeHtml(part.soreness || 0) + " · 疼痛 " + escapeHtml(part.pain || 0) + " · 泛红 " + escapeHtml(part.redness || 0) + "</p>",
+          part.notes ? '  <em>' + escapeHtml(part.notes) + "</em>" : "",
+          "</article>"
+        ].join("");
+      }).join(""),
+      "</section>",
+      '<section class="body-recovery-card"><strong>恢复建议</strong><p>' + escapeHtml(state.recoverySuggestion || "当前无明显异常。") + "</p></section>"
+    ].join("");
+  }
+
+  function renderBodyMetric(label, value) {
+    return '<span><em>' + escapeHtml(label) + '</em><b>' + escapeHtml(value) + "</b></span>";
+  }
+
+  function formatBodyStateText(state) {
+    var parts = state.parts || {};
+    return [
+      "身体状态：" + (state.overallCondition || "正常"),
+      "说明：" + (state.currentNote || "当前无明显异常"),
+      "精力：" + (state.energy || 0) + "/100",
+      "酸痛/疼痛/泛红：" + (state.sorenessLevel || 0) + "/" + (state.painLevel || 0) + "/" + (state.rednessLevel || 0),
+      "体温：" + (state.bodyTemperature || "正常") + "，发热风险：" + (state.feverRisk || "低"),
+      "恢复建议：" + (state.recoverySuggestion || "无"),
+      "部位：",
+      Object.keys(parts).map(function (partName) {
+        var part = parts[partName] || {};
+        return "- " + partName + "：" + (part.status || "正常") + "，酸痛 " + (part.soreness || 0) + "，疼痛 " + (part.pain || 0) + "，泛红 " + (part.redness || 0) + (part.notes ? "，" + part.notes : "");
+      }).join("\n")
+    ].join("\n");
+  }
+
   function appendMessagesWithStreamEffect(options) {
     var settings = options || {};
     var messages = Array.isArray(settings.messages) ? settings.messages : [];
@@ -5825,7 +6241,7 @@
         }
 
         index += 1;
-        delay = 250 + Math.floor(Math.random() * 551);
+        delay = 300 + Math.floor(Math.random() * 401);
         window.setTimeout(appendNext, delay);
       }
 
@@ -5845,7 +6261,7 @@
   }
 
   function initApp() {
-    document.title = "心屿";
+    document.title = "心屿空间";
     applySavedTheme();
     bindHomeActions();
     bindNavigationActions();
@@ -5910,6 +6326,10 @@
     updateGroupThoughtsButton: updateGroupThoughtsButton,
     updateOfflineThoughtsButton: updateOfflineThoughtsButton,
     updateThoughtHeartButtons: updateThoughtHeartButtons,
+    buildChatGenerationContext: buildChatGenerationContext,
+    finalizeChatGenerationContext: finalizeChatGenerationContext,
+    openChatMemoryPanel: openChatMemoryPanel,
+    openBodyStatePanel: openBodyStatePanel,
     insertBracketIntoInput: insertBracketIntoInput,
     openCharacterSpaceScreen: openCharacterSpaceScreen,
     openDiaryScreen: openDiaryScreen,
@@ -5921,7 +6341,8 @@
     renderWorldBookScreen: renderWorldBookScreen,
     renderDiaryScreen: renderDiaryScreen,
     renderCharacterSpaceScreen: renderCharacterSpaceScreen,
-    renderWechatScreen: renderWechatScreen
+    renderWechatScreen: renderWechatScreen,
+    showToast: showToast
   };
 
   document.addEventListener("DOMContentLoaded", initApp);

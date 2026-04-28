@@ -26,6 +26,14 @@
       .replace(/'/g, "&#039;");
   }
 
+  function normalizeDisplayText(text) {
+    if (window.AIService && window.AIService.normalizeAiMessageText) {
+      return window.AIService.normalizeAiMessageText(text);
+    }
+
+    return String(text || "").trim();
+  }
+
   function getCharacterById(characterId) {
     return window.AppStorage.getCharacters().find(function (character) {
       return character.id === characterId;
@@ -185,7 +193,7 @@
     if (event.role === "user" || event.type === "user") {
       return [
         '<div class="offline-user-row">',
-        '  <div class="offline-user-bubble">' + escapeHtml(event.content) + "</div>",
+        '  <div class="offline-user-bubble">' + escapeHtml(normalizeDisplayText(event.content)) + "</div>",
         '  <span class="offline-time">' + formatTime(event.createdAt) + "</span>",
         "</div>"
       ].join("");
@@ -206,7 +214,7 @@
       renderAvatar(character, "offline-avatar"),
       '  <div class="offline-speech-main">',
       '    <span class="offline-name">' + escapeHtml(event.characterName || character.name || "角色") + "</span>",
-      '    <div class="offline-speech-bubble">' + escapeHtml(event.content) + "</div>",
+      '    <div class="offline-speech-bubble">' + escapeHtml(normalizeDisplayText(event.content)) + "</div>",
       '    <span class="offline-time">' + formatTime(event.createdAt) + "</span>",
       "  </div>",
       "</div>"
@@ -218,7 +226,7 @@
 
     return [
       '<div class="offline-action-card' + cls + '">',
-      '  <span>' + escapeHtml(event.content) + "</span>",
+      '  <span>' + escapeHtml(normalizeDisplayText(event.content)) + "</span>",
       '  <i aria-hidden="true">✦</i>',
       '  <small>' + formatTime(event.createdAt) + "</small>",
       "</div>"
@@ -267,6 +275,7 @@
     var aiResult;
     var events;
     var latestUserInput;
+    var generationContext;
 
     if (!session || isAdvancing || !participants.length) {
       return;
@@ -292,13 +301,21 @@
     renderOfflineMessages();
 
     try {
+      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
+        ? window.AppExtras.buildChatGenerationContext("offline", session.id)
+        : {};
       aiResult = await window.AIService.sendOfflineRequest({
         mode: session.mode,
         targetId: session.targetId,
         userInput: latestUserInput,
         participants: participants,
         offlineHistory: historyForRequest,
-        sharedMemories: window.AppStorage.getMemoriesForCharacters(session.participantIds)
+        sharedMemories: window.AppStorage.getMemoriesForCharacters(session.participantIds),
+        chatMemories: generationContext.chatMemories,
+        bodyStateEnabled: generationContext.bodyStateEnabled,
+        bodyState: generationContext.bodyState,
+        memorySummaryDue: generationContext.memorySummaryDue,
+        memorySummaryRounds: generationContext.memorySummaryRounds
       });
       events = Array.isArray(aiResult) ? aiResult : (aiResult && aiResult.events || []);
       session = getCurrentSession();
@@ -307,6 +324,9 @@
       renderOfflineMessages();
       persistOfflineAiExtras(session, aiResult);
       await streamOfflineEvents(session, events);
+      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
+        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
+      }
       session = null;
     } catch (error) {
       session = getCurrentSession();
@@ -591,6 +611,7 @@
     var historyForRequest;
     var aiResult;
     var now;
+    var generationContext;
 
     if (!character || isAdvancing) {
       return;
@@ -601,7 +622,7 @@
     now = Date.now();
     messages = window.AppStorage.getChatHistory(character.id);
     historyForRequest = messages.slice();
-    messages.push(createInlineLoadingMessage(now, "剧情正在推进..."));
+    messages.push(createInlineLoadingMessage(now, "正在输入中"));
     window.AppStorage.saveChatHistory(character.id, messages);
 
     if (window.CharacterManager && window.CharacterManager.renderChatMessages) {
@@ -609,6 +630,9 @@
     }
 
     try {
+      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
+        ? window.AppExtras.buildChatGenerationContext("private", character.id)
+        : {};
       aiResult = await window.AIService.sendInlineOfflineRequest({
         mode: "private",
         targetId: character.id,
@@ -617,7 +641,12 @@
         userInput: getLatestInlineUserInput(historyForRequest),
         scene: inlineOfflineState.scene,
         userSettings: character.chatSettings || {},
-        memories: window.AppStorage.getMemoriesForCharacters([character.id])
+        memories: window.AppStorage.getMemoriesForCharacters([character.id]),
+        chatMemories: generationContext.chatMemories,
+        bodyStateEnabled: generationContext.bodyStateEnabled,
+        bodyState: generationContext.bodyState,
+        memorySummaryDue: generationContext.memorySummaryDue,
+        memorySummaryRounds: generationContext.memorySummaryRounds
       });
       messages = removeLoadingEvents(window.AppStorage.getChatHistory(character.id));
       window.AppStorage.saveChatHistory(character.id, messages);
@@ -626,6 +655,9 @@
       }
       persistInlineOfflineExtras("private", character.id, [character.id], aiResult);
       await streamInlineOfflineEvents(messages, "private", character.id, [character], aiResult && aiResult.events || []);
+      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
+        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
+      }
       messages = null;
     } catch (error) {
       messages = removeLoadingEvents(window.AppStorage.getChatHistory(character.id));
@@ -653,6 +685,7 @@
     var historyForRequest;
     var aiResult;
     var now;
+    var generationContext;
 
     if (!group || !participants.length || isAdvancing) {
       return;
@@ -663,7 +696,7 @@
     now = Date.now();
     messages = window.AppStorage.getGroupChatHistory(group.id);
     historyForRequest = messages.slice();
-    messages.push(createInlineLoadingMessage(now, "群聊剧情正在推进..."));
+    messages.push(createInlineLoadingMessage(now, "正在输入中"));
     window.AppStorage.saveGroupChatHistory(group.id, messages);
 
     if (window.GroupManager && window.GroupManager.renderGroupChatMessages) {
@@ -671,6 +704,9 @@
     }
 
     try {
+      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
+        ? window.AppExtras.buildChatGenerationContext("group", group.id)
+        : {};
       aiResult = await window.AIService.sendInlineOfflineRequest({
         mode: "group",
         targetId: group.id,
@@ -679,7 +715,12 @@
         userInput: getLatestInlineUserInput(historyForRequest),
         scene: inlineOfflineState.scene,
         userSettings: group.settings || {},
-        memories: window.AppStorage.getMemoriesForCharacters(group.memberIds || [])
+        memories: window.AppStorage.getMemoriesForCharacters(group.memberIds || []),
+        chatMemories: generationContext.chatMemories,
+        bodyStateEnabled: generationContext.bodyStateEnabled,
+        bodyState: generationContext.bodyState,
+        memorySummaryDue: generationContext.memorySummaryDue,
+        memorySummaryRounds: generationContext.memorySummaryRounds
       });
       messages = removeLoadingEvents(window.AppStorage.getGroupChatHistory(group.id));
       window.AppStorage.saveGroupChatHistory(group.id, messages);
@@ -688,6 +729,9 @@
       }
       persistInlineOfflineExtras("group", group.id, group.memberIds || [], aiResult);
       await streamInlineOfflineEvents(messages, "group", group.id, participants, aiResult && aiResult.events || []);
+      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
+        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
+      }
       messages = null;
     } catch (error) {
       messages = removeLoadingEvents(window.AppStorage.getGroupChatHistory(group.id));

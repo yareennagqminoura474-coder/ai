@@ -667,6 +667,10 @@
       bubbleClass += " message-error";
     }
 
+    if (message.type === "loading") {
+      bubbleClass += " typing-bubble";
+    }
+
     return [
       '<div class="message-row character group-character-row message-action-target" data-message-id="' + messageId + '">',
       selectCheck,
@@ -1007,6 +1011,9 @@
       window.AppStorage.saveGroupChatHistory(group.id, messages);
       renderGroupChatMessages(group.id);
       renderGroupList();
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast("已存入钱包。");
+      }
     }
   }
 
@@ -1484,6 +1491,7 @@
     var after;
     var aiResult;
     var replies;
+    var generationContext;
 
     if (!group || !characters.length || isGroupReplying) {
       return;
@@ -1520,15 +1528,22 @@
     renderGroupChatMessages(group.id);
 
     try {
+      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
+        ? window.AppExtras.buildChatGenerationContext("group", group.id)
+        : {};
       aiResult = normalizeGroupAiResult(await window.AIService.sendGroupChatRequest(
         group,
         characters,
         before,
-        window.AppStorage.getMemoriesForCharacters(group.memberIds)
+        window.AppStorage.getMemoriesForCharacters(group.memberIds),
+        generationContext
       ));
       persistGroupAiExtras(group, aiResult);
       replies = aiResult.replies;
       await streamGroupReplies(before.slice(), group, characters, replies, after);
+      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
+        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
+      }
       messages = null;
     } catch (error) {
       messages = before.concat([{
@@ -1625,14 +1640,17 @@
 
   function normalizeGroupAiResult(result) {
     if (Array.isArray(result)) {
-      return { replies: result, thoughts: [], memories: [] };
+      return { replies: result, actions: [], thoughts: [], memories: [], memorySummary: null, bodyState: null };
     }
 
     result = result && typeof result === "object" ? result : {};
     return {
       replies: Array.isArray(result.replies) ? result.replies : [],
+      actions: Array.isArray(result.actions) ? result.actions : [],
       thoughts: Array.isArray(result.thoughts) ? result.thoughts : [],
-      memories: Array.isArray(result.memories) ? result.memories : []
+      memories: Array.isArray(result.memories) ? result.memories : [],
+      memorySummary: result.memorySummary || null,
+      bodyState: result.bodyState || null
     };
   }
 
@@ -1782,6 +1800,7 @@
     var now;
     var aiResult;
     var replies;
+    var generationContext;
 
     if (!group || isGroupReplying || !characters.length) {
       return;
@@ -1819,7 +1838,7 @@
       role: "character",
       characterId: characters[0].id,
       characterName: characters[0].name,
-      content: "正在输入...",
+      content: "正在输入中",
       type: "loading",
       createdAt: now
     });
@@ -1827,11 +1846,15 @@
     renderGroupChatMessages(group.id);
 
     try {
+      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
+        ? window.AppExtras.buildChatGenerationContext("group", group.id)
+        : {};
       aiResult = normalizeGroupAiResult(await window.AIService.sendGroupChatRequest(
         group,
         characters,
         historyForRequest,
-        window.AppStorage.getMemoriesForCharacters(group.memberIds)
+        window.AppStorage.getMemoriesForCharacters(group.memberIds),
+        generationContext
       ));
       replies = aiResult.replies;
 
@@ -1842,6 +1865,9 @@
       }
       persistGroupAiExtras(group, aiResult);
       await streamGroupReplies(messages, group, characters, replies, []);
+      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
+        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
+      }
       messages = null;
     } catch (error) {
       messages = removeLoadingMessages(window.AppStorage.getGroupChatHistory(group.id));
@@ -1994,6 +2020,26 @@
     window.setActivePage("groupSettingsScreen");
   }
 
+  function openActiveGroupMemory() {
+    var group = activeGroupId ? getGroupById(activeGroupId) : null;
+
+    closeAllMenus();
+
+    if (group && window.AppExtras && window.AppExtras.openChatMemoryPanel) {
+      window.AppExtras.openChatMemoryPanel("group", group.id, (group.name || "群聊") + " · 记忆");
+    }
+  }
+
+  function openActiveGroupBodyState() {
+    var group = activeGroupId ? getGroupById(activeGroupId) : null;
+
+    closeAllMenus();
+
+    if (group && window.AppExtras && window.AppExtras.openBodyStatePanel) {
+      window.AppExtras.openBodyStatePanel("group", group.id, "身体状态");
+    }
+  }
+
   function renderUserPersonaOptions(selectedId) {
     var personas = window.AppStorage.getUserPersonas ? window.AppStorage.getUserPersonas() : [];
 
@@ -2058,7 +2104,10 @@
       '<section class="form-section">',
       '<div class="section-title-row"><h3>记忆设置</h3><span>Memory</span></div>',
       '<label class="switch-row"><input data-group-settings-field="memorySharingEnabled" type="checkbox"' + (settings.memorySharingEnabled !== false ? " checked" : "") + '>群聊记忆共享</label>',
+      '<button class="outline-button" type="button" data-group-settings-action="view-memory">查看本群聊记忆</button>',
       '<button class="outline-button" type="button" data-group-settings-action="view-thoughts">查看成员心声</button>',
+      '<button class="outline-button" type="button" data-group-settings-action="view-body-state">查看身体状态</button>',
+      '<button class="outline-button danger" type="button" data-group-settings-action="clear-chat-memory">清空本群聊记忆</button>',
       '<button class="outline-button danger" type="button" data-group-settings-action="clear-group-memory">清空成员群聊记忆</button>',
       "</section>"
     ].join("");
@@ -2096,6 +2145,22 @@
 
     if (button.dataset.groupSettingsAction === "view-thoughts") {
       openActiveGroupThoughtsDrawer();
+      return;
+    }
+
+    if (button.dataset.groupSettingsAction === "view-memory") {
+      openActiveGroupMemory();
+      return;
+    }
+
+    if (button.dataset.groupSettingsAction === "view-body-state") {
+      openActiveGroupBodyState();
+      return;
+    }
+
+    if (button.dataset.groupSettingsAction === "clear-chat-memory" && window.confirm("确定清空本群聊记忆吗？")) {
+      window.AppStorage.clearChatMemories("group", group.id);
+      window.alert("已清空本群聊记忆");
       return;
     }
 
@@ -2275,6 +2340,8 @@
     openActiveGroupOffline: openActiveGroupOffline,
     updateInlineOfflineUi: updateInlineOfflineUi,
     openActiveGroupSettings: openActiveGroupSettings,
+    openActiveGroupMemory: openActiveGroupMemory,
+    openActiveGroupBodyState: openActiveGroupBodyState,
     saveGroupSettings: saveGroupSettings,
     openActiveGroupThoughts: openActiveGroupThoughts,
     openActiveGroupThoughtsDrawer: openActiveGroupThoughtsDrawer,

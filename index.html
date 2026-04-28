@@ -201,6 +201,9 @@
 
         <div id="chatActionMenu" class="action-menu chat-action-menu hidden" aria-label="聊天操作菜单">
           <button id="chatSettingsBtn" type="button">聊天设置</button>
+          <button id="chatMemoryBtn" type="button">记忆</button>
+          <button id="chatBodyStateBtn" type="button">身体状态</button>
+          <button id="chatThoughtsBtn" type="button">心声</button>
           <button id="chatSearchBtn" type="button">搜索聊天记录</button>
           <button id="chatBatchSelectBtn" type="button">多选消息</button>
           <button id="chatOfflineBtn" type="button">进入线下模式</button>
@@ -292,6 +295,9 @@
 
         <div id="groupChatActionMenu" class="action-menu chat-action-menu hidden" aria-label="群聊操作菜单">
           <button id="groupSettingsBtn" type="button">群聊设置</button>
+          <button id="groupMemoryBtn" type="button">记忆</button>
+          <button id="groupBodyStateBtn" type="button">身体状态</button>
+          <button id="groupThoughtsBtn" type="button">心声</button>
           <button id="groupSearchBtn" type="button">搜索聊天记录</button>
           <button id="groupBatchMessageSelectBtn" type="button">多选消息</button>
           <button id="groupOfflineBtn" type="button">进入线下模式</button>
@@ -387,20 +393,24 @@
           <span class="nav-spacer" aria-hidden="true"></span>
         </header>
 
-        <form id="settingsForm" class="screen-content form-content" autocomplete="off">
-          <section class="form-section" aria-label="接口设置">
+        <form id="settingsForm" class="screen-content form-content settings-content" autocomplete="off">
+          <section class="form-section" aria-label="当前使用">
+            <div class="section-title-row"><h3>当前使用</h3><span>Active</span></div>
             <div class="field-group">
               <label for="apiProfileSelect">API 预设</label>
               <select id="apiProfileSelect" name="apiProfileSelect"></select>
+            </div>
+          </section>
+
+          <section class="form-section" aria-label="API 预设">
+            <div class="section-title-row"><h3>API 预设</h3><span>Preset</span></div>
+            <div class="field-group">
+              <label for="apiProfileName">预设名称</label>
+              <input id="apiProfileName" name="apiProfileName" type="text" placeholder="例如：默认线路">
               <div class="settings-action-row api-profile-actions">
                 <button id="newApiProfileBtn" class="outline-button" type="button">新增预设</button>
                 <button id="deleteApiProfileBtn" class="outline-button danger" type="button">删除预设</button>
               </div>
-            </div>
-
-            <div class="field-group">
-              <label for="apiProfileName">预设名称</label>
-              <input id="apiProfileName" name="apiProfileName" type="text" placeholder="例如：默认线路">
             </div>
 
             <div class="field-group">
@@ -422,7 +432,10 @@
               <label for="apiTemperature">Temperature</label>
               <input id="apiTemperature" name="apiTemperature" type="number" min="0" max="2" step="0.1" value="0.8">
             </div>
+          </section>
 
+          <section class="form-section" aria-label="模型测试">
+            <div class="section-title-row"><h3>模型测试</h3><span>Models</span></div>
             <div class="field-group">
               <button id="fetchModelsBtn" class="outline-button" type="button">拉取模型列表</button>
               <div id="modelFetchTip" class="model-fetch-tip" aria-live="polite"></div>
@@ -430,16 +443,36 @@
             </div>
           </section>
 
+          <section class="form-section" aria-label="聊天智能设置">
+            <div class="section-title-row"><h3>聊天智能</h3><span>Memory</span></div>
+            <label class="switch-row"><input id="autoMemorySummaryEnabled" type="checkbox">自动记忆总结</label>
+            <div class="field-group">
+              <label for="autoMemorySummaryRounds">每多少轮自动总结一次</label>
+              <select id="autoMemorySummaryRounds">
+                <option value="5">5 轮</option>
+                <option value="10">10 轮</option>
+                <option value="15">15 轮</option>
+                <option value="20">20 轮</option>
+              </select>
+              <small class="field-help">达到指定聊天轮次后，会随本轮聊天回复一起生成一条总结记忆。</small>
+            </div>
+            <label class="switch-row"><input id="bodyStateEnabled" type="checkbox">启用身体状态系统</label>
+            <label class="switch-row"><input id="showThoughtUnreadBadge" type="checkbox">显示心声未读角标</label>
+          </section>
+
           <button class="full-button" type="submit">保存设置</button>
 
-          <section class="form-section data-section" aria-label="数据管理">
+          <section class="form-section data-section" aria-label="数据备份">
             <div class="section-title-row">
-              <h3>数据管理</h3>
+              <h3>数据备份</h3>
               <span>本地备份</span>
             </div>
             <div class="data-actions">
               <button id="exportDataBtn" class="outline-button" type="button">导出全部数据</button>
               <button id="importDataBtn" class="outline-button" type="button">导入数据</button>
+              <button id="clearPrivateChatMemoriesBtn" class="outline-button danger" type="button">清空全部私聊记忆</button>
+              <button id="clearGroupChatMemoriesBtn" class="outline-button danger" type="button">清空全部群聊记忆</button>
+              <button id="clearAllBodyStatesBtn" class="outline-button danger" type="button">清空全部身体状态</button>
               <button id="clearAllDataBtn" class="outline-button danger" type="button">清空全部数据</button>
             </div>
             <input id="importDataInput" class="visually-hidden" type="file" accept="application/json,.json">

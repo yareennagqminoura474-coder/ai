@@ -6,6 +6,9 @@
     settings: "myAiApp.settings",
     groups: "myAiApp.groups",
     memory: "myAiApp.memory",
+    chatMemories: "myAiApp.chatMemories",
+    chatRounds: "myAiApp.chatRounds",
+    bodyStates: "myAiApp.bodyStates",
     emojiPacks: "myAiApp.emojiPacks",
     worldBooks: "myAiApp.worldBooks",
     thoughts: "myAiApp.thoughts",
@@ -100,6 +103,9 @@
     saveCharacters(characters);
     deleteChatHistory(characterId);
     clearCharacterMemory(characterId);
+    clearChatMemories("private", characterId);
+    clearBodyState("private", characterId);
+    resetChatRoundCounter("private", characterId);
     clearCharacterThoughts(characterId);
     removeCharacterFromGroups(characterId);
   }
@@ -187,6 +193,9 @@
       return group.id !== groupId;
     }));
     deleteGroupChatHistory(groupId);
+    clearChatMemories("group", groupId);
+    clearBodyState("group", groupId);
+    resetChatRoundCounter("group", groupId);
     deleteOfflineSession("group-" + groupId);
   }
 
@@ -288,6 +297,237 @@
     var memory = getMemoryStore();
     delete memory[characterId];
     saveMemoryStore(memory);
+  }
+
+  function getChatScopedKey(targetType, targetId) {
+    return (targetType === "group" ? "group" : (targetType === "offline" ? "offline" : "private")) + ":" + String(targetId || "");
+  }
+
+  function getChatMemoryStore() {
+    var memories = parseJson(localStorage.getItem(STORAGE_KEYS.chatMemories), {});
+    return memories && typeof memories === "object" && !Array.isArray(memories) ? memories : {};
+  }
+
+  function saveChatMemoryStore(memories) {
+    localStorage.setItem(STORAGE_KEYS.chatMemories, JSON.stringify(memories || {}));
+  }
+
+  function getChatMemories(targetType, targetId) {
+    var store = getChatMemoryStore();
+    var key = getChatScopedKey(targetType, targetId);
+    var memories = store[key];
+    return Array.isArray(memories) ? memories.map(normalizeChatMemoryItem).filter(function (item) {
+      return item.content;
+    }) : [];
+  }
+
+  function saveChatMemories(targetType, targetId, memories) {
+    var store = getChatMemoryStore();
+    store[getChatScopedKey(targetType, targetId)] = Array.isArray(memories)
+      ? memories.map(normalizeChatMemoryItem).filter(function (item) { return item.content; })
+      : [];
+    saveChatMemoryStore(store);
+  }
+
+  function addChatMemory(targetType, targetId, memoryItem) {
+    var memories;
+    var item;
+
+    if (!targetId || !memoryItem || !memoryItem.content) {
+      return null;
+    }
+
+    memories = getChatMemories(targetType, targetId);
+    item = normalizeChatMemoryItem(memoryItem);
+    item.id = item.id || createId("chat_memory");
+    item.createdAt = item.createdAt || Date.now();
+    item.updatedAt = Date.now();
+    memories.unshift(item);
+    saveChatMemories(targetType, targetId, memories.slice(0, 200));
+    return item;
+  }
+
+  function updateChatMemory(targetType, targetId, memoryId, nextMemory) {
+    var memories = getChatMemories(targetType, targetId);
+    var index = memories.findIndex(function (memory) {
+      return memory.id === memoryId;
+    });
+
+    if (index === -1) {
+      return null;
+    }
+
+    memories[index] = normalizeChatMemoryItem(Object.assign({}, memories[index], nextMemory || {}, {
+      id: memoryId,
+      updatedAt: Date.now()
+    }));
+    saveChatMemories(targetType, targetId, memories);
+    return memories[index];
+  }
+
+  function deleteChatMemory(targetType, targetId, memoryId) {
+    saveChatMemories(targetType, targetId, getChatMemories(targetType, targetId).filter(function (memory) {
+      return memory.id !== memoryId;
+    }));
+  }
+
+  function clearChatMemories(targetType, targetId) {
+    var store = getChatMemoryStore();
+    delete store[getChatScopedKey(targetType, targetId)];
+    saveChatMemoryStore(store);
+  }
+
+  function clearAllChatMemoriesByType(targetType) {
+    var store = getChatMemoryStore();
+    var prefix = (targetType === "group" ? "group" : "private") + ":";
+
+    Object.keys(store).forEach(function (key) {
+      if (key.indexOf(prefix) === 0) {
+        delete store[key];
+      }
+    });
+
+    saveChatMemoryStore(store);
+  }
+
+  function normalizeChatMemoryItem(memory, index) {
+    var source = memory && typeof memory === "object" ? memory : {};
+    var now = Date.now();
+    var type = source.type === "auto" || source.type === "自动总结" ? "auto" : "manual";
+    var title = String(source.title || "").trim();
+    var content = String(source.content || source.body || "").trim();
+
+    if (!title && content) {
+      title = content.slice(0, 18) + (content.length > 18 ? "..." : "");
+    }
+
+    return {
+      id: String(source.id || (index !== undefined ? "chat_memory_" + now + "_" + index : "")),
+      title: title || (type === "auto" ? "自动总结" : "手动记忆"),
+      content: content,
+      sourceTime: Number(source.sourceTime) || Number(source.createdAt) || now,
+      type: type,
+      source: source.source === "group" || source.source === "offline" ? source.source : "private",
+      createdAt: Number(source.createdAt) || now,
+      updatedAt: Number(source.updatedAt) || Number(source.createdAt) || now
+    };
+  }
+
+  function getChatRoundStore() {
+    var rounds = parseJson(localStorage.getItem(STORAGE_KEYS.chatRounds), {});
+    return rounds && typeof rounds === "object" && !Array.isArray(rounds) ? rounds : {};
+  }
+
+  function saveChatRoundStore(rounds) {
+    localStorage.setItem(STORAGE_KEYS.chatRounds, JSON.stringify(rounds || {}));
+  }
+
+  function getChatRoundCounter(targetType, targetId) {
+    var value = Number(getChatRoundStore()[getChatScopedKey(targetType, targetId)]);
+    return Number.isFinite(value) ? Math.max(0, Math.floor(value)) : 0;
+  }
+
+  function setChatRoundCounter(targetType, targetId, count) {
+    var rounds = getChatRoundStore();
+    rounds[getChatScopedKey(targetType, targetId)] = Math.max(0, Math.floor(Number(count) || 0));
+    saveChatRoundStore(rounds);
+  }
+
+  function resetChatRoundCounter(targetType, targetId) {
+    setChatRoundCounter(targetType, targetId, 0);
+  }
+
+  function getBodyStateStore() {
+    var states = parseJson(localStorage.getItem(STORAGE_KEYS.bodyStates), {});
+    return states && typeof states === "object" && !Array.isArray(states) ? states : {};
+  }
+
+  function saveBodyStateStore(states) {
+    localStorage.setItem(STORAGE_KEYS.bodyStates, JSON.stringify(states || {}));
+  }
+
+  function getDefaultBodyState() {
+    return normalizeBodyState({});
+  }
+
+  function getBodyState(targetType, targetId) {
+    var store = getBodyStateStore();
+    return normalizeBodyState(store[getChatScopedKey(targetType, targetId)] || {});
+  }
+
+  function saveBodyState(targetType, targetId, bodyState) {
+    var store = getBodyStateStore();
+    store[getChatScopedKey(targetType, targetId)] = normalizeBodyState(bodyState || {});
+    saveBodyStateStore(store);
+    return store[getChatScopedKey(targetType, targetId)];
+  }
+
+  function clearBodyState(targetType, targetId) {
+    var store = getBodyStateStore();
+    delete store[getChatScopedKey(targetType, targetId)];
+    saveBodyStateStore(store);
+  }
+
+  function clearAllBodyStates() {
+    saveBodyStateStore({});
+  }
+
+  function normalizeBodyState(bodyState) {
+    var source = bodyState && typeof bodyState === "object" ? bodyState : {};
+    var parts = source.parts && typeof source.parts === "object" && !Array.isArray(source.parts) ? source.parts : {};
+    var normalizedParts = {};
+    var defaultParts = ["手心", "臀部", "大腿", "臀腿连接处", "腰背", "肩颈", "膝腿", "其他受影响区域"];
+
+    defaultParts.forEach(function (partName) {
+      normalizedParts[partName] = normalizeBodyPartState(parts[partName] || {});
+    });
+
+    Object.keys(parts).forEach(function (partName) {
+      normalizedParts[partName] = normalizeBodyPartState(parts[partName]);
+    });
+
+    return {
+      overallCondition: String(source.overallCondition || "正常"),
+      currentNote: String(source.currentNote || source.note || "当前无明显异常"),
+      energy: Math.max(0, Math.min(100, Number(source.energy) || 80)),
+      moodInfluence: String(source.moodInfluence || "影响轻微"),
+      sorenessLevel: Math.max(0, Math.min(100, Number(source.sorenessLevel) || 0)),
+      painLevel: Math.max(0, Math.min(100, Number(source.painLevel) || 0)),
+      rednessLevel: Math.max(0, Math.min(100, Number(source.rednessLevel) || 0)),
+      bruiseRisk: String(source.bruiseRisk || "低"),
+      sittingComfort: String(source.sittingComfort || "正常"),
+      walkingComfort: String(source.walkingComfort || "正常"),
+      handUseComfort: String(source.handUseComfort || "正常"),
+      touchSensitivity: String(source.touchSensitivity || "正常"),
+      bodyTemperature: String(source.bodyTemperature || "正常"),
+      feverRisk: String(source.feverRisk || "低"),
+      skinBreakage: String(source.skinBreakage || "无"),
+      restNeeded: normalizeBoolean(source.restNeeded),
+      recoverySuggestion: String(source.recoverySuggestion || "保持休息、补水，若出现持续疼痛或发热请及时停止剧情并处理。"),
+      parts: normalizedParts,
+      updatedAt: Number(source.updatedAt) || Date.now()
+    };
+  }
+
+  function normalizeBodyPartState(part) {
+    var source = part && typeof part === "object" ? part : {};
+    return {
+      status: String(source.status || "正常"),
+      soreness: Math.max(0, Math.min(100, Number(source.soreness) || 0)),
+      pain: Math.max(0, Math.min(100, Number(source.pain) || 0)),
+      redness: Math.max(0, Math.min(100, Number(source.redness) || 0)),
+      notes: String(source.notes || "")
+    };
+  }
+
+  function normalizeBoolean(value) {
+    if (value === true || value === "true" || value === "是" || value === "需要") {
+      return true;
+    }
+    if (value === false || value === "false" || value === "否" || value === "不需要") {
+      return false;
+    }
+    return Boolean(value);
   }
 
   function getOfflineSession(sessionId) {
@@ -1271,6 +1511,9 @@
       groupChatHistory: getAllGroupChatHistories(),
       offlineSessions: getAllOfflineSessions(),
       memory: getMemoryStore(),
+      chatMemories: getChatMemoryStore(),
+      chatRounds: getChatRoundStore(),
+      bodyStates: getBodyStateStore(),
       emojiPacks: getEmojiPacks(),
       worldBooks: getWorldBooks(),
       thoughts: getThoughtStore(),
@@ -1314,6 +1557,9 @@
     saveSettings(normalized.settings);
     saveGroups(normalized.groups);
     saveMemoryStore(normalized.memory);
+    saveChatMemoryStore(normalized.chatMemories);
+    saveChatRoundStore(normalized.chatRounds);
+    saveBodyStateStore(normalized.bodyStates);
     saveEmojiPacks(normalized.emojiPacks);
     saveWorldBooks(normalized.worldBooks);
     saveThoughtStore(normalized.thoughts);
@@ -1370,6 +1616,9 @@
       groupChatHistory: normalizeMessageMap(data.groupChatHistory || data.groupChatHistories || {}),
       offlineSessions: normalizeOfflineSessions(data.offlineSessions || data.offline || {}),
       memory: normalizeMemory(data.memory || {}),
+      chatMemories: normalizeChatMemories(data.chatMemories || data.chatMemory || {}),
+      chatRounds: normalizeChatRounds(data.chatRounds || data.roundCounters || {}),
+      bodyStates: normalizeBodyStates(data.bodyStates || data.bodyState || {}),
       emojiPacks: normalizeEmojiPacks(data.emojiPacks || []),
       worldBooks: normalizeWorldBooks(data.worldBooks || []),
       thoughts: normalizeThoughts(data.thoughts || {}),
@@ -1423,6 +1672,10 @@
       apiKey: activeProfile.apiKey || "",
       modelName: activeProfile.modelName || "",
       temperature: clampTemperature(activeProfile.temperature),
+      autoMemorySummaryEnabled: source.autoMemorySummaryEnabled !== false,
+      autoMemorySummaryRounds: Math.max(5, Math.min(50, Number(source.autoMemorySummaryRounds) || 10)),
+      bodyStateEnabled: source.bodyStateEnabled !== false,
+      showThoughtUnreadBadge: source.showThoughtUnreadBadge !== false,
       activeApiProfile: Object.assign({}, activeProfile, {
         temperature: clampTemperature(activeProfile.temperature)
       })
@@ -1653,6 +1906,50 @@
           return item.content;
         })
         : [];
+    });
+
+    return normalized;
+  }
+
+  function normalizeChatMemories(memories) {
+    var normalized = {};
+
+    if (!memories || typeof memories !== "object" || Array.isArray(memories)) {
+      return normalized;
+    }
+
+    Object.keys(memories).forEach(function (key) {
+      normalized[String(key)] = Array.isArray(memories[key])
+        ? memories[key].map(normalizeChatMemoryItem).filter(function (memory) { return memory.content; })
+        : [];
+    });
+
+    return normalized;
+  }
+
+  function normalizeChatRounds(rounds) {
+    var normalized = {};
+
+    if (!rounds || typeof rounds !== "object" || Array.isArray(rounds)) {
+      return normalized;
+    }
+
+    Object.keys(rounds).forEach(function (key) {
+      normalized[String(key)] = Math.max(0, Math.floor(Number(rounds[key]) || 0));
+    });
+
+    return normalized;
+  }
+
+  function normalizeBodyStates(states) {
+    var normalized = {};
+
+    if (!states || typeof states !== "object" || Array.isArray(states)) {
+      return normalized;
+    }
+
+    Object.keys(states).forEach(function (key) {
+      normalized[String(key)] = normalizeBodyState(states[key]);
     });
 
     return normalized;
@@ -2186,6 +2483,9 @@
     localStorage.removeItem(STORAGE_KEYS.settings);
     localStorage.removeItem(STORAGE_KEYS.groups);
     localStorage.removeItem(STORAGE_KEYS.memory);
+    localStorage.removeItem(STORAGE_KEYS.chatMemories);
+    localStorage.removeItem(STORAGE_KEYS.chatRounds);
+    localStorage.removeItem(STORAGE_KEYS.bodyStates);
     localStorage.removeItem(STORAGE_KEYS.emojiPacks);
     localStorage.removeItem(STORAGE_KEYS.worldBooks);
     localStorage.removeItem(STORAGE_KEYS.thoughts);
@@ -2249,6 +2549,21 @@
     addCharacterMemory: addCharacterMemory,
     getMemoriesForCharacters: getMemoriesForCharacters,
     clearCharacterMemory: clearCharacterMemory,
+    getChatMemories: getChatMemories,
+    saveChatMemories: saveChatMemories,
+    addChatMemory: addChatMemory,
+    updateChatMemory: updateChatMemory,
+    deleteChatMemory: deleteChatMemory,
+    clearChatMemories: clearChatMemories,
+    clearAllChatMemoriesByType: clearAllChatMemoriesByType,
+    getChatRoundCounter: getChatRoundCounter,
+    setChatRoundCounter: setChatRoundCounter,
+    resetChatRoundCounter: resetChatRoundCounter,
+    getBodyState: getBodyState,
+    saveBodyState: saveBodyState,
+    clearBodyState: clearBodyState,
+    clearAllBodyStates: clearAllBodyStates,
+    getDefaultBodyState: getDefaultBodyState,
     getOfflineSession: getOfflineSession,
     saveOfflineSession: saveOfflineSession,
     deleteOfflineSession: deleteOfflineSession,
