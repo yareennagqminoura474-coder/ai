@@ -617,31 +617,31 @@
   }
 
   function renderWechatMomentsTab(content) {
-    var profile = window.AppStorage.getUserProfile();
-    var momentAuthor = getDefaultUserPersonaForDisplay();
-    var moments = window.AppStorage.getMoments ? window.AppStorage.getMoments() : [];
+    var moments = renderMomentFeed();
 
     content.innerHTML = [
       '<section class="moments-page">',
-      '  <form id="momentsComposer" class="moments-composer" autocomplete="off">',
-      '    <div class="moments-composer-head">',
-      renderProfileAvatar(momentAuthor),
-      '      <span><strong>' + escapeHtml(momentAuthor.name || profile.name || "林澈") + '</strong><em>发布一条只属于心屿空间的近况</em></span>',
-      "    </div>",
-      '    <textarea id="momentsInput" maxlength="280" placeholder="写点此刻想留下的话"></textarea>',
-      '    <div class="moments-composer-actions"><span id="momentsPublishTip"></span><button type="submit">发布</button></div>',
-      "  </form>",
+      '  <div class="moments-toolbar">',
+      '    <div><strong>朋友圈</strong><em>所有人的近况都在这里</em></div>',
+      '    <button type="button" data-moment-action="open-publish">发朋友圈</button>',
+      '    <button type="button" data-moment-action="character-update">角色更新</button>',
+      "  </div>",
       '  <section class="moments-feed" aria-label="朋友圈列表">',
       moments.length ? moments.map(renderMomentItem).join("") : renderEmptyMoments(),
-      '    <article class="moment-card moment-placeholder">',
-      '      <span class="moment-avatar placeholder-avatar" aria-hidden="true">屿</span>',
-      '      <div class="moment-main"><strong>角色动态</strong><p>角色自动发布朋友圈的位置已经留好，之后可以接入角色日常和智能互评。</p><div class="moment-actions"><button type="button" disabled>赞</button><button type="button" disabled>评论</button></div></div>',
-      "    </article>",
       "  </section>",
       "</section>"
     ].join("");
 
     bindMomentsActions(content);
+    maybeGenerateCharacterMomentOnOpen();
+  }
+
+  function renderMomentFeed() {
+    var moments = window.AppStorage.getMoments ? window.AppStorage.getMoments() : [];
+
+    return moments.slice().sort(function (a, b) {
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
   }
 
   function renderEmptyMoments() {
@@ -656,6 +656,10 @@
       name: source.authorName || profile.name || "林澈",
       avatar: source.authorAvatar || profile.avatar || ""
     };
+    var userLikeKey = getMomentUserLikeKey();
+    var liked = (source.likes || []).indexOf(userLikeKey) !== -1;
+    var comments = source.comments || [];
+    var collapsed = comments.length > 3;
 
     return [
       '<article class="moment-card" data-moment-id="' + escapeHtml(source.id) + '">',
@@ -663,53 +667,545 @@
       '  <div class="moment-main">',
       '    <div class="moment-meta"><strong>' + escapeHtml(author.name || "林澈") + '</strong><time>' + escapeHtml(formatDateTime(source.createdAt)) + "</time></div>",
       '    <p>' + escapeHtml(source.content || "") + "</p>",
-      '    <div class="moment-actions"><button type="button" data-moment-action="like">赞' + (source.likes && source.likes.length ? " " + source.likes.length : "") + '</button><button type="button" data-moment-action="comment">评论</button></div>',
-      source.comments && source.comments.length ? '<div class="moment-comments">' + source.comments.slice(0, 3).map(function (comment) {
-        return '<span><strong>' + escapeHtml(comment.authorName || "我") + '：</strong>' + escapeHtml(comment.content || "") + "</span>";
-      }).join("") + "</div>" : "",
+      renderMomentImages(source.images || []),
+      '    <div class="moment-actions"><button type="button" class="' + (liked ? "active" : "") + '" data-moment-action="like">' + (liked ? "已赞" : "赞") + ((source.likes || []).length ? " " + (source.likes || []).length : "") + '</button><button type="button" data-moment-action="comment">评论</button><button type="button" data-moment-action="delete">删除</button></div>',
+      comments.length ? '<div class="moment-comments' + (collapsed ? " collapsed" : "") + '">' + comments.map(renderMomentComment).join("") + (collapsed ? '<button type="button" data-moment-action="expand-comments">展开全部评论</button>' : "") + "</div>" : "",
       "  </div>",
       "</article>"
     ].join("");
   }
 
-  function bindMomentsActions(content) {
-    var form = content.querySelector("#momentsComposer");
-    var input = content.querySelector("#momentsInput");
-    var tip = content.querySelector("#momentsPublishTip");
+  function renderMomentImages(images) {
+    if (!images || !images.length) {
+      return "";
+    }
 
-    if (form && input) {
-      form.addEventListener("submit", function (event) {
-        var text = input.value.trim();
-        event.preventDefault();
-        if (!text) {
-          if (tip) {
-            tip.textContent = "先写一点内容";
-          }
+    return '<div class="moment-images">' + images.slice(0, 9).map(function (image) {
+      if (image.src) {
+        return '<img src="' + escapeHtml(image.src) + '" alt="' + escapeHtml(image.description || "朋友圈图片") + '">';
+      }
+      return '<span>' + escapeHtml(image.description || "图片") + "</span>";
+    }).join("") + "</div>";
+  }
+
+  function renderMomentComment(comment) {
+    return '<span><strong>' + escapeHtml(comment.authorName || "我") + '：</strong>' + escapeHtml(comment.content || "") + "</span>";
+  }
+
+  function getMomentUserLikeKey() {
+    var profile = window.AppStorage.getUserProfile ? window.AppStorage.getUserProfile() : {};
+    return "user:" + (profile.wxid || "me");
+  }
+
+  function bindMomentsActions(content) {
+    Array.prototype.forEach.call(content.querySelectorAll("[data-moment-action]"), function (button) {
+      button.addEventListener("click", function () {
+        handleMomentAction(button.dataset.momentAction, button.closest(".moment-card"), content);
+      });
+    });
+  }
+
+  function handleMomentAction(action, card, content) {
+    var momentId = card ? card.dataset.momentId : "";
+
+    if (action === "open-publish") {
+      openMomentPublishSheet();
+      return;
+    }
+
+    if (action === "character-update") {
+      openCharacterMomentPicker();
+      return;
+    }
+
+    if (!momentId) {
+      return;
+    }
+
+    if (action === "like") {
+      toggleMomentLike(momentId);
+      renderWechatMomentsTab(content);
+      return;
+    }
+
+    if (action === "comment") {
+      openMomentCommentSheet(momentId);
+      return;
+    }
+
+    if (action === "delete" && window.confirm("删除这条朋友圈吗？")) {
+      window.AppStorage.deleteMoment(momentId);
+      renderWechatMomentsTab(content);
+      return;
+    }
+
+    if (action === "expand-comments") {
+      card.querySelector(".moment-comments").classList.remove("collapsed");
+      card.querySelector("[data-moment-action='expand-comments']").remove();
+    }
+  }
+
+  function toggleMomentLike(momentId) {
+    var moment = getMomentById(momentId);
+    var likeKey = getMomentUserLikeKey();
+    var likes;
+
+    if (!moment || !window.AppStorage.updateMoment) {
+      return;
+    }
+
+    likes = (moment.likes || []).slice();
+    if (likes.indexOf(likeKey) === -1) {
+      likes.push(likeKey);
+    } else {
+      likes = likes.filter(function (item) {
+        return item !== likeKey;
+      });
+    }
+    window.AppStorage.updateMoment(momentId, { likes: likes });
+  }
+
+  function getMomentById(momentId) {
+    return (window.AppStorage.getMoments ? window.AppStorage.getMoments() : []).find(function (moment) {
+      return moment.id === momentId;
+    }) || null;
+  }
+
+  function openMomentPublishSheet() {
+    var author = getDefaultUserPersonaForDisplay();
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      "  <h3>发朋友圈</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<form id="momentPublishForm" class="wechat-sheet-form moment-publish-form" autocomplete="off">',
+      '  <div class="moment-publish-author">' + renderProfileAvatar(author) + '<span><strong>' + escapeHtml(author.name || "我") + '</strong><em>发布到统一朋友圈</em></span></div>',
+      '  <label class="wechat-sheet-field"><span>内容</span><textarea id="momentPublishText" maxlength="500" placeholder="写点此刻想留下的话"></textarea></label>',
+      '  <label class="wechat-sheet-field"><span>图片</span><input id="momentPublishImage" type="file" accept="image/*"></label>',
+      '  <div id="momentPublishPreview" class="moment-publish-preview hidden"></div>',
+      '  <p id="momentPublishError" class="sheet-error" role="alert"></p>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button id="momentPublishSubmit" type="submit" class="full-button">发布</button></div>',
+      "</form>"
+    ].join(""), function (sheet) {
+      var form = sheet.querySelector("#momentPublishForm");
+      var fileInput = sheet.querySelector("#momentPublishImage");
+      var preview = sheet.querySelector("#momentPublishPreview");
+      var imageData = "";
+
+      bindSheetCloseButtons(sheet);
+
+      fileInput.addEventListener("change", function () {
+        var file = fileInput.files && fileInput.files[0];
+        if (!file) {
+          imageData = "";
+          preview.classList.add("hidden");
+          preview.innerHTML = "";
           return;
         }
 
-        if (window.AppStorage.addMoment) {
-          window.AppStorage.addMoment({
+        readFileAsDataUrl(file).then(function (dataUrl) {
+          imageData = dataUrl;
+          preview.classList.remove("hidden");
+          preview.innerHTML = '<img src="' + escapeHtml(dataUrl) + '" alt="">';
+        }).catch(function () {
+          sheet.querySelector("#momentPublishError").textContent = "图片读取失败，请重新选择。";
+        });
+      });
+
+      form.addEventListener("submit", async function (event) {
+        event.preventDefault();
+        await publishUserMoment(sheet, imageData);
+      });
+    });
+  }
+
+  async function publishUserMoment(sheet, imageData) {
+    var text = sheet.querySelector("#momentPublishText").value.trim();
+    var error = sheet.querySelector("#momentPublishError");
+    var submit = sheet.querySelector("#momentPublishSubmit");
+    var profile = window.AppStorage.getUserProfile();
+    var author = getDefaultUserPersonaForDisplay();
+    var comments = [];
+    var aiResult;
+    var moment;
+
+    if (!text && !imageData) {
+      error.textContent = "先写一点内容，或添加一张图片。";
+      return;
+    }
+
+    submit.disabled = true;
+    submit.textContent = "发布中";
+
+    if (isApiConfigured() && profile.momentsAutoReview) {
+      try {
+        aiResult = await generateMomentWithComments({
+          author: {
             authorType: "user",
-            authorName: momentAuthor.name || profile.name || "林澈",
-            authorAvatar: momentAuthor.avatar || profile.avatar || "",
-            content: text
-          });
+            id: profile.wxid || "me",
+            name: author.name || profile.name || "我",
+            avatar: author.avatar || profile.avatar || "",
+            personality: author.extra || profile.persona || ""
+          },
+          prompt: text,
+          relatedCharacters: getRelatedCharactersForMoment(""),
+          reason: "用户发布朋友圈",
+          memories: window.AppStorage.getMemoriesForCharacters(window.AppStorage.getCharacters().map(function (character) {
+            return character.id;
+          }))
+        });
+        comments = buildMomentComments(aiResult.comments || []);
+      } catch (apiError) {
+        comments = [];
+      }
+    }
+
+    moment = window.AppStorage.addMoment({
+      authorType: "user",
+      authorId: profile.wxid || "me",
+      authorName: author.name || profile.name || "我",
+      authorAvatar: author.avatar || profile.avatar || "",
+      content: text || "分享了一张图片",
+      images: imageData ? [{ src: imageData, description: "用户上传的朋友圈图片" }] : [],
+      comments: comments,
+      source: "manual",
+      visibility: "all"
+    });
+    writeMomentInteractionMemory(moment);
+    closeWeChatSheet();
+    renderWechatScreen();
+  }
+
+  function openMomentCommentSheet(momentId) {
+    var moment = getMomentById(momentId);
+    var profile = window.AppStorage.getUserProfile();
+    var author = getDefaultUserPersonaForDisplay();
+
+    if (!moment) {
+      return;
+    }
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      "  <h3>评论朋友圈</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<form id="momentCommentForm" class="wechat-sheet-form" autocomplete="off">',
+      '  <label class="wechat-sheet-field"><span>评论</span><textarea id="momentCommentText" maxlength="160" placeholder="写一句评论"></textarea></label>',
+      '  <p id="momentCommentError" class="sheet-error" role="alert"></p>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">发送</button></div>',
+      "</form>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      sheet.querySelector("#momentCommentForm").addEventListener("submit", function (event) {
+        var text = sheet.querySelector("#momentCommentText").value.trim();
+        event.preventDefault();
+
+        if (!text) {
+          sheet.querySelector("#momentCommentError").textContent = "先写一句评论。";
+          return;
         }
-        input.value = "";
-        renderWechatMomentsTab(content);
+
+        addMomentComment(momentId, {
+          authorType: "user",
+          authorId: profile.wxid || "me",
+          authorName: author.name || profile.name || "我",
+          authorAvatar: author.avatar || profile.avatar || "",
+          content: text,
+          createdAt: Date.now()
+        });
+        closeWeChatSheet();
+        renderWechatScreen();
+      });
+    });
+  }
+
+  function addMomentComment(momentId, comment) {
+    var added = window.AppStorage.addMomentComment ? window.AppStorage.addMomentComment(momentId, comment) : null;
+    var moment = getMomentById(momentId);
+
+    if (added && moment && comment && comment.authorType === "user" && moment.authorType === "character" && moment.authorId) {
+      window.AppStorage.addCharacterMemory(moment.authorId, {
+        content: "用户评论了我的朋友圈：" + comment.content,
+        source: "moments",
+        createdAt: Date.now()
       });
     }
 
-    Array.prototype.forEach.call(content.querySelectorAll("[data-moment-action]"), function (button) {
-      button.addEventListener("click", function () {
-        if (button.dataset.momentAction === "like") {
-          window.alert("点赞占位已保留，后续可接入角色互动。");
-          return;
-        }
-        window.alert("评论占位已保留，后续可接入角色回复。");
+    return added;
+  }
+
+  function openCharacterMomentPicker() {
+    var characters = window.AppStorage.getCharacters().filter(function (character) {
+      return getCharacterMomentSettings(character).autoPostEnabled;
+    });
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      "  <h3>让角色更新朋友圈</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<div class="wechat-sheet-form moment-character-picker">',
+      characters.length ? characters.map(function (character) {
+        return '<button type="button" data-character-moment="' + escapeHtml(character.id) + '">' + renderSmallAvatar(character, "moment-picker-avatar") + '<span><strong>' + escapeHtml(character.name || "角色") + '</strong><em>' + escapeHtml(character.identity || "允许主动发朋友圈") + "</em></span></button>";
+      }).join("") : '<div class="soft-empty">还没有开启主动朋友圈的角色。</div>',
+      '  <p id="characterMomentError" class="sheet-error" role="alert"></p>',
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      Array.prototype.forEach.call(sheet.querySelectorAll("[data-character-moment]"), function (button) {
+        button.addEventListener("click", async function () {
+          var error = sheet.querySelector("#characterMomentError");
+          button.disabled = true;
+          error.textContent = "正在生成朋友圈...";
+          try {
+            await generateCharacterMoment(button.dataset.characterMoment);
+            closeWeChatSheet();
+            renderWechatScreen();
+          } catch (generateError) {
+            error.textContent = generateError && generateError.message ? generateError.message : "生成失败。";
+            button.disabled = false;
+          }
+        });
       });
     });
+  }
+
+  function getCharacterMomentSettings(character) {
+    var source = character && character.momentSettings || {};
+    var frequency = ["low", "normal", "high"].indexOf(source.frequency) === -1 ? "normal" : source.frequency;
+
+    return {
+      autoPostEnabled: source.autoPostEnabled !== false,
+      frequency: frequency,
+      allowRelatedCharacterComments: source.allowRelatedCharacterComments !== false,
+      lastGeneratedAt: Number(source.lastGeneratedAt) || 0
+    };
+  }
+
+  function getCharacterDiarySettings(character) {
+    var source = character && character.diarySettings || {};
+    var frequency = ["daily", "often", "low"].indexOf(source.frequency) === -1 ? "daily" : source.frequency;
+
+    return {
+      autoDiaryEnabled: source.autoDiaryEnabled !== false,
+      frequency: frequency,
+      allowUseChatHistory: source.allowUseChatHistory !== false,
+      allowUseThoughts: source.allowUseThoughts !== false
+    };
+  }
+
+  function getRelatedCharactersForMoment(authorCharacterId) {
+    var characters = window.AppStorage.getCharacters();
+    var groups = window.AppStorage.getGroups ? window.AppStorage.getGroups() : [];
+    var author = authorCharacterId ? getCharacterById(authorCharacterId) : null;
+    var relatedIds = {};
+    var authorText = author ? [author.name, author.relationship, author.personality, author.background].join(" ") : "";
+
+    if (!authorCharacterId) {
+      return characters.slice(0, 8);
+    }
+
+    groups.forEach(function (group) {
+      if ((group.memberIds || []).indexOf(authorCharacterId) === -1) {
+        return;
+      }
+      (group.memberIds || []).forEach(function (memberId) {
+        if (memberId !== authorCharacterId) {
+          relatedIds[memberId] = true;
+        }
+      });
+    });
+
+    characters.forEach(function (character) {
+      var text = [character.name, character.relationship, character.personality, character.background].join(" ");
+      if (character.id !== authorCharacterId && author && (text.indexOf(author.name) !== -1 || authorText.indexOf(character.name) !== -1)) {
+        relatedIds[character.id] = true;
+      }
+    });
+
+    return characters.filter(function (character) {
+      return relatedIds[character.id];
+    }).slice(0, 8);
+  }
+
+  async function generateCharacterMoment(characterId) {
+    var character = getCharacterById(characterId);
+    var settings = getCharacterMomentSettings(character);
+    var relatedCharacters;
+    var aiResult;
+    var moment;
+
+    if (!character) {
+      throw new Error("没有找到角色。");
+    }
+
+    if (!settings.autoPostEnabled) {
+      throw new Error("这个角色没有开启主动发朋友圈。");
+    }
+
+    if (!isApiConfigured()) {
+      throw new Error("请先在设置页填写 API 地址、API Key 和模型名称。");
+    }
+
+    relatedCharacters = settings.allowRelatedCharacterComments ? getRelatedCharactersForMoment(characterId) : [];
+    aiResult = await generateMomentWithComments({
+      author: Object.assign({ authorType: "character" }, character),
+      prompt: character.name + " 想更新一条朋友圈。",
+      reason: "角色主动发朋友圈",
+      recentText: collectMomentRecentText(characterId),
+      relatedCharacters: relatedCharacters,
+      userSettings: character.chatSettings || {},
+      memories: window.AppStorage.getMemoriesForCharacters([characterId].concat(relatedCharacters.map(function (item) {
+        return item.id;
+      })))
+    });
+
+    moment = window.AppStorage.addMoment({
+      authorType: "character",
+      authorId: character.id,
+      authorName: character.name,
+      authorAvatar: character.avatar || "",
+      content: aiResult.moment.content || "今天也在心屿空间里留了一点痕迹。",
+      images: aiResult.moment.images || [],
+      comments: buildMomentComments(aiResult.comments || []),
+      source: "ai",
+      visibility: "all"
+    });
+    writeMomentInteractionMemory(moment, aiResult.memories || []);
+    window.AppStorage.updateCharacter(character.id, {
+      momentSettings: Object.assign({}, settings, {
+        lastGeneratedAt: Date.now()
+      })
+    });
+    return moment;
+  }
+
+  async function generateMomentWithComments(context) {
+    if (!window.AIService || !window.AIService.generateMomentWithComments) {
+      return { moment: { content: "" }, comments: [], memories: [] };
+    }
+
+    return window.AIService.generateMomentWithComments(context || {});
+  }
+
+  function buildMomentComments(comments) {
+    return (comments || []).map(function (comment) {
+      var character = getCharacterById(comment.characterId);
+      if (!character || !comment.content) {
+        return null;
+      }
+      return {
+        authorType: "character",
+        authorId: character.id,
+        authorName: character.name,
+        authorAvatar: character.avatar || "",
+        content: comment.content,
+        createdAt: Date.now()
+      };
+    }).filter(Boolean).slice(0, 5);
+  }
+
+  function writeMomentInteractionMemory(moment, memories) {
+    if (!moment) {
+      return;
+    }
+
+    if (moment.authorType === "character" && moment.authorId) {
+      window.AppStorage.addCharacterMemory(moment.authorId, {
+        content: "我发了一条朋友圈：" + moment.content,
+        source: "moments",
+        createdAt: moment.createdAt || Date.now()
+      });
+    }
+
+    (moment.comments || []).forEach(function (comment) {
+      if (comment.authorType === "character" && comment.authorId) {
+        window.AppStorage.addCharacterMemory(comment.authorId, {
+          content: "我评论了" + (moment.authorName || "别人") + "的朋友圈：" + comment.content,
+          source: "moments",
+          createdAt: comment.createdAt || Date.now()
+        });
+      }
+    });
+
+    (memories || []).forEach(function (memory) {
+      if (memory.characterId && memory.content) {
+        window.AppStorage.addCharacterMemory(memory.characterId, {
+          content: memory.content,
+          source: "moments",
+          createdAt: Date.now()
+        });
+      }
+    });
+  }
+
+  function collectMomentRecentText(characterId) {
+    var privateText = window.AppStorage.getChatHistory(characterId).slice(-8).map(formatMessageForDiary).join("\n");
+    var memoryText = window.AppStorage.getCharacterMemory(characterId).slice(-8).map(function (memory) {
+      return memory.content;
+    }).join("\n");
+    var thoughtText = window.AppStorage.getRecentThoughts(characterId, 3).map(function (thought) {
+      return thought.visibleSummary || thought.content;
+    }).join("\n");
+
+    return [privateText, memoryText, thoughtText].filter(Boolean).join("\n");
+  }
+
+  function isApiConfigured() {
+    var settings = window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
+    return Boolean(settings.apiUrl && settings.apiKey && settings.modelName);
+  }
+
+  function maybeGenerateCharacterMomentOnOpen() {
+    var characters;
+    var candidate;
+
+    if (!isApiConfigured() || maybeGenerateCharacterMomentOnOpen.running) {
+      return;
+    }
+
+    characters = window.AppStorage.getCharacters().filter(shouldAutoGenerateMoment);
+    if (!characters.length) {
+      return;
+    }
+
+    candidate = characters[Math.floor(Math.random() * characters.length)];
+    maybeGenerateCharacterMomentOnOpen.running = true;
+    generateCharacterMoment(candidate.id).then(function () {
+      if (getActivePage() === "wechatScreen") {
+        renderWechatScreen();
+      }
+    }).catch(function () {
+      // Silent: opening朋友圈 should never be blocked by an optional AI update.
+    }).finally(function () {
+      maybeGenerateCharacterMomentOnOpen.running = false;
+    });
+  }
+
+  function shouldAutoGenerateMoment(character) {
+    var settings = getCharacterMomentSettings(character);
+    var intervalMap = {
+      low: 36 * 60 * 60 * 1000,
+      normal: 18 * 60 * 60 * 1000,
+      high: 8 * 60 * 60 * 1000
+    };
+    var chanceMap = {
+      low: 0.08,
+      normal: 0.16,
+      high: 0.28
+    };
+
+    if (!settings.autoPostEnabled) {
+      return false;
+    }
+
+    if (Date.now() - settings.lastGeneratedAt < intervalMap[settings.frequency]) {
+      return false;
+    }
+
+    return Math.random() < chanceMap[settings.frequency];
   }
 
   function renderWechatDiscoverTab(content) {
@@ -745,9 +1241,9 @@
     var profile = window.AppStorage.getUserProfile();
     var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { balance: 0, ledger: [], familyCards: [] };
     var personas = window.AppStorage.getUserPersonas ? window.AppStorage.getUserPersonas() : [];
+    var activePersona = window.AppStorage.resolveUserPersona && profile.activePersonaId ? window.AppStorage.resolveUserPersona(profile.activePersonaId) : null;
     var listItems = [
-      ["我的头像", "avatar", "设置用户消息和朋友圈头像"],
-      ["我的人设", "persona", "管理 " + personas.length + " 个我的预设"],
+      ["我的人设", "persona", "管理 " + personas.length + " 个我的预设", activePersona],
       ["聊天设置", "chat-settings", "接口、备份和全局设置"],
       ["联系人分组", "layers", "管理角色关系"],
       ["日记本", "diary", "我的日记和角色日记"],
@@ -757,9 +1253,8 @@
     content.innerHTML = [
       '<section class="me-page">',
       '  <div class="me-section-label">账户</div>',
-      '  <button class="me-profile-card" type="button" data-me-action="profile">',
-      renderProfileAvatar(profile),
-      '    <span class="me-profile-main"><strong>' + escapeHtml(profile.name || "林澈") + "</strong><em>微信号：" + escapeHtml(profile.wxid) + " · 我的资料</em></span>",
+      '  <button class="me-profile-card me-profile-compact" type="button" data-me-action="profile">',
+      '    <span class="me-profile-main"><strong>' + escapeHtml(profile.name || "林澈") + "</strong><em>微信号：" + escapeHtml(profile.wxid) + " · 简洁资料</em></span>",
       '    <span class="me-arrow">›</span>',
       "  </button>",
       '  <button class="me-wallet-entry" type="button" data-me-action="wallet"><span>▣</span><strong>钱包</strong><em>余额 ¥' + formatMoney(wallet.balance) + "</em><i>›</i></button>",
@@ -768,12 +1263,21 @@
       '  <div class="me-section-label">工具</div>',
       '  <section class="me-list-card">',
       listItems.map(function (item) {
-        return '<button type="button" data-me-action="' + item[1] + '"><span>' + escapeHtml(item[0].slice(0, 1)) + '</span><strong>' + escapeHtml(item[0]) + '</strong><em>' + escapeHtml(item[2]) + '</em><i>›</i></button>';
+        return renderMeListItem(item);
       }).join(""),
       "  </section>",
       "</section>"
     ].join("");
     bindMeActions(content);
+  }
+
+  function renderMeListItem(item) {
+    var persona = item[3] || null;
+    var icon = persona && persona.avatar
+      ? '<img src="' + escapeHtml(persona.avatar) + '" alt="">'
+      : escapeHtml(item[0].slice(0, 1));
+
+    return '<button type="button" data-me-action="' + item[1] + '"><span>' + icon + '</span><strong>' + escapeHtml(item[0]) + '</strong><em>' + escapeHtml(item[2]) + '</em><i>›</i></button>';
   }
 
   function renderProfileAvatar(profile) {
@@ -897,11 +1401,11 @@
 
     showWeChatSheet([
       '<div class="wechat-sheet-header">',
-      "  <h3>我的头像</h3>",
+      "  <h3>默认头像</h3>",
       '  <button type="button" data-close-sheet>取消</button>',
       "</div>",
       '<div class="wechat-sheet-form avatar-sheet-form">',
-      '  <div class="avatar-sheet-preview">' + renderProfileAvatar(profile) + "<span>当前头像会用于你的消息、朋友圈和钱包资料。</span></div>",
+      '  <div class="avatar-sheet-preview">' + renderProfileAvatar(profile) + "<span>未绑定人设时使用这个默认头像。</span></div>",
       '  <input id="profileAvatarValue" type="hidden" value="' + escapeHtml(profile.avatar || "") + '">',
       '  <input id="profileAvatarFile" type="file" accept="image/*">',
       '  <label class="wechat-sheet-field"><span>或粘贴头像地址 / data URL</span><input id="profileAvatarInput" type="text" value="' + escapeHtml(profile.avatar || "") + '"></label>',
@@ -2011,6 +2515,11 @@
           amount = normalizeAmount(amountInput.value);
         } catch (amountError) {
           error.textContent = amountError.message;
+          return;
+        }
+
+        if (window.AppStorage.getWallet && window.AppStorage.getWallet().balance < Number(amount)) {
+          error.textContent = "余额不足，请先充值。";
           return;
         }
 
@@ -3144,6 +3653,10 @@
   function renderCharacterDiaryPane(characters) {
     var selected = getCharacterById(diaryCharacterId) || characters[0] || null;
     var diaries = selected ? window.AppStorage.getDiariesByCharacter(selected.id) : [];
+    var autoCharacters = characters.filter(function (character) {
+      return getCharacterDiarySettings(character).autoDiaryEnabled;
+    });
+    var selectedDiarySettings = getCharacterDiarySettings(selected);
 
     if (selected && diaryCharacterId !== selected.id) {
       diaryCharacterId = selected.id;
@@ -3157,6 +3670,7 @@
         return '<option value="' + escapeHtml(character.id) + '"' + (selected && selected.id === character.id ? " selected" : "") + ">" + escapeHtml(character.name) + "</option>";
       }).join("") + "</select>",
       "  </div>",
+      selected ? '<div class="diary-auto-summary"><strong>' + (selectedDiarySettings.autoDiaryEnabled ? "已允许自动写日记" : "未开启自动写日记") + '</strong><span>当前允许自动写日记：' + escapeHtml(autoCharacters.map(function (character) { return character.name; }).join("、") || "暂无") + "</span></div>" : "",
       '  <button class="full-button" type="button" data-diary-action="generate"' + (!selected ? " disabled" : "") + ">生成今日日记</button>",
       "</section>",
       selected ? renderDiaryList(diaries, "character") : '<div class="soft-empty">请先创建角色</div>'
@@ -3373,6 +3887,7 @@
   }
 
   function collectCharacterDiaryContext(character, date) {
+    var diarySettings = getCharacterDiarySettings(character);
     var chatText = window.AppStorage.getChatHistory(character.id).filter(function (message) {
       return formatMessageDate(message.createdAt) === date;
     }).map(function (message) {
@@ -3404,10 +3919,10 @@
 
     return {
       date: date,
-      chatText: chatText,
-      groupText: groupText,
-      offlineText: offlineText,
-      thoughtText: thoughtText,
+      chatText: diarySettings.allowUseChatHistory ? chatText : "",
+      groupText: diarySettings.allowUseChatHistory ? groupText : "",
+      offlineText: diarySettings.allowUseChatHistory ? offlineText : "",
+      thoughtText: diarySettings.allowUseThoughts ? thoughtText : "",
       memoryText: memoryText
     };
   }
@@ -4792,6 +5307,11 @@
     insertBracketIntoInput: insertBracketIntoInput,
     openCharacterSpaceScreen: openCharacterSpaceScreen,
     openDiaryScreen: openDiaryScreen,
+    renderMomentFeed: renderMomentFeed,
+    addMomentComment: addMomentComment,
+    getRelatedCharactersForMoment: getRelatedCharactersForMoment,
+    generateCharacterMoment: generateCharacterMoment,
+    generateMomentWithComments: generateMomentWithComments,
     renderWorldBookScreen: renderWorldBookScreen,
     renderDiaryScreen: renderDiaryScreen,
     renderCharacterSpaceScreen: renderCharacterSpaceScreen,

@@ -796,6 +796,51 @@
     return next;
   }
 
+  function updateMoment(momentId, nextMoment) {
+    var moments = getMoments();
+    var index = moments.findIndex(function (moment) {
+      return moment.id === momentId;
+    });
+
+    if (index === -1) {
+      return null;
+    }
+
+    moments[index] = normalizeMoment(Object.assign({}, moments[index], nextMoment || {}, {
+      id: momentId
+    }), index);
+    saveMoments(moments);
+    return moments[index];
+  }
+
+  function deleteMoment(momentId) {
+    saveMoments(getMoments().filter(function (moment) {
+      return moment.id !== momentId;
+    }));
+  }
+
+  function addMomentComment(momentId, comment) {
+    var moments = getMoments();
+    var index = moments.findIndex(function (moment) {
+      return moment.id === momentId;
+    });
+    var source = comment && typeof comment === "object" ? comment : { content: comment };
+    var nextComment;
+
+    if (index === -1 || !String(source.content || "").trim()) {
+      return null;
+    }
+
+    nextComment = normalizeMomentComment(Object.assign({
+      id: createId("momentComment"),
+      authorType: "user",
+      createdAt: Date.now()
+    }, source), moments[index].comments.length);
+    moments[index].comments.push(nextComment);
+    saveMoments(moments);
+    return nextComment;
+  }
+
   function getInlineOfflineStates() {
     var states = parseJson(localStorage.getItem(STORAGE_KEYS.inlineOffline), {});
     return states && typeof states === "object" && !Array.isArray(states) ? states : {};
@@ -960,6 +1005,9 @@
       if (normalized.direction === "income") {
         wallet.balance = roundAmount(wallet.balance + normalized.amount);
       } else if (normalized.direction === "expense") {
+        if (settings.preventOverdraft && wallet.balance < normalized.amount) {
+          return null;
+        }
         wallet.balance = roundAmount(wallet.balance - normalized.amount);
       }
     }
@@ -1116,6 +1164,8 @@
         groupId: info.groupId || "",
         note: source.note || source.content || (source.type === "redPacket" ? "红包" : "转账"),
         createdAt: source.createdAt || Date.now()
+      }, {
+        preventOverdraft: direction === "expense"
       });
     }
 
@@ -1264,7 +1314,33 @@
       relationship: String(source.relationship || ""),
       openingMessage: String(source.openingMessage || ""),
       chatSettings: normalizePrivateChatSettings(source.chatSettings || {}),
+      momentSettings: normalizeCharacterMomentSettings(source.momentSettings || {}),
+      diarySettings: normalizeCharacterDiarySettings(source.diarySettings || {}),
       createdAt: Number(source.createdAt) || Date.now()
+    };
+  }
+
+  function normalizeCharacterMomentSettings(settings) {
+    var source = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+    var frequency = ["low", "normal", "high"].indexOf(source.frequency) === -1 ? "normal" : source.frequency;
+
+    return {
+      autoPostEnabled: source.autoPostEnabled !== false,
+      frequency: frequency,
+      allowRelatedCharacterComments: source.allowRelatedCharacterComments !== false,
+      lastGeneratedAt: Number(source.lastGeneratedAt) || 0
+    };
+  }
+
+  function normalizeCharacterDiarySettings(settings) {
+    var source = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+    var frequency = ["daily", "often", "low"].indexOf(source.frequency) === -1 ? "daily" : source.frequency;
+
+    return {
+      autoDiaryEnabled: source.autoDiaryEnabled !== false,
+      frequency: frequency,
+      allowUseChatHistory: source.allowUseChatHistory !== false,
+      allowUseThoughts: source.allowUseThoughts !== false
     };
   }
 
@@ -1621,6 +1697,7 @@
     var source = moment && typeof moment === "object" ? moment : { content: moment };
     var authorType = source.authorType === "character" ? "character" : "user";
     var now = Date.now();
+    var images = Array.isArray(source.images) ? source.images : (source.image ? [source.image] : []);
 
     return {
       id: String(source.id || createId("moment") + "_" + (index || 0)),
@@ -1629,19 +1706,42 @@
       authorName: String(source.authorName || ""),
       authorAvatar: String(source.authorAvatar || ""),
       content: String(source.content || "").trim(),
-      likes: Array.isArray(source.likes) ? source.likes.map(String) : [],
-      comments: Array.isArray(source.comments) ? source.comments.map(function (comment, commentIndex) {
-        var item = comment && typeof comment === "object" ? comment : { content: comment };
+      images: images.map(function (image) {
+        if (image && typeof image === "object") {
+          return {
+            src: String(image.src || image.url || ""),
+            description: String(image.description || image.name || "")
+          };
+        }
         return {
-          id: String(item.id || createId("momentComment") + "_" + commentIndex),
-          authorName: String(item.authorName || "我"),
-          content: String(item.content || "").trim(),
-          createdAt: Number(item.createdAt) || now
+          src: String(image || ""),
+          description: ""
         };
-      }).filter(function (comment) {
+      }).filter(function (image) {
+        return image.src || image.description;
+      }).slice(0, 9),
+      likes: Array.isArray(source.likes) ? source.likes.map(String) : [],
+      comments: Array.isArray(source.comments) ? source.comments.map(normalizeMomentComment).filter(function (comment) {
         return comment.content;
       }) : [],
+      visibility: source.visibility === "private" ? "private" : "all",
+      source: ["manual", "ai", "diary", "chat"].indexOf(source.source) === -1 ? "manual" : source.source,
       createdAt: Number(source.createdAt) || now
+    };
+  }
+
+  function normalizeMomentComment(comment, index) {
+    var item = comment && typeof comment === "object" ? comment : { content: comment };
+    var authorType = item.authorType === "character" ? "character" : "user";
+
+    return {
+      id: String(item.id || createId("momentComment") + "_" + (index || 0)),
+      authorType: authorType,
+      authorId: String(item.authorId || ""),
+      authorName: String(item.authorName || (authorType === "user" ? "我" : "角色")),
+      authorAvatar: String(item.authorAvatar || ""),
+      content: String(item.content || "").trim(),
+      createdAt: Number(item.createdAt) || Date.now()
     };
   }
 
@@ -1676,7 +1776,7 @@
   function normalizeWallet(wallet) {
     var source = wallet && typeof wallet === "object" && !Array.isArray(wallet) ? wallet : {};
     return {
-      balance: roundAmount(source.balance === undefined ? 250001 : source.balance),
+      balance: roundAmount(source.balance === undefined ? 0 : source.balance),
       ledger: Array.isArray(source.ledger) ? source.ledger.map(normalizeLedgerRecord).filter(function (record) {
         return record.type;
       }) : [],
@@ -1899,6 +1999,9 @@
     getMoments: getMoments,
     saveMoments: saveMoments,
     addMoment: addMoment,
+    updateMoment: updateMoment,
+    deleteMoment: deleteMoment,
+    addMomentComment: addMomentComment,
     getInlineOfflineState: getInlineOfflineState,
     setInlineOfflineState: setInlineOfflineState,
     clearInlineOfflineState: clearInlineOfflineState,

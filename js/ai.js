@@ -830,6 +830,97 @@
     };
   }
 
+  async function generateMomentWithComments(context) {
+    var source = context || {};
+    var author = source.author || {};
+    var relatedCharacters = Array.isArray(source.relatedCharacters) ? source.relatedCharacters : [];
+    var memories = source.memories || {};
+    var userContext = buildUserContext(source.userSettings || {});
+    var contextText = [
+      source.prompt || "",
+      source.recentText || "",
+      source.memoryText || "",
+      source.worldText || ""
+    ].join("\n");
+    var worldBookContext = source.worldText || buildWorldBookContext(
+      contextText,
+      author.authorType === "character" || author.id ? "private" : "global",
+      author.id || "",
+      {
+        characters: author.id ? [author].concat(relatedCharacters) : relatedCharacters
+      }
+    );
+    var relatedLines = relatedCharacters.map(function (character) {
+      return [
+        "角色ID：" + character.id,
+        "名称：" + valueOrFallback(character.name),
+        "身份：" + valueOrFallback(character.identity),
+        "性格：" + valueOrFallback(character.personality),
+        "关系：" + valueOrFallback(character.relationship),
+        "说话风格：" + valueOrFallback(character.speakingStyle),
+        "相关记忆：" + (formatMemoryList(memories[character.id] || []) || "暂无")
+      ].join("；");
+    });
+    var rawContent = await sendConfiguredChatMessages([
+      {
+        role: "system",
+        content: [
+          "你正在为心屿空间生成朋友圈动态和评论。",
+          "只能一次性返回 JSON，不要 Markdown，不要解释，不要额外调用。",
+          "评论必须和朋友圈正文同一次返回；评论像真实朋友圈短评，每条不超过 40 字。",
+          "评论者只能从 relatedCharacters 里选择，最多 5 条；没有关系或不该评论就返回空数组。",
+          "所有内容都要贴合角色人设、关系、记忆、世界书和当前用户人设。",
+          "用户信息：" + valueOrFallback(userContext.name) + "；" + valueOrFallback(userContext.persona),
+          "发布者：" + valueOrFallback(author.name) + "（" + (author.authorType === "user" ? "用户" : "角色") + "）",
+          "发布者设定：" + valueOrFallback(author.personality || author.extra || ""),
+          "认识的人：",
+          relatedLines.join("\n") || "暂无",
+          "世界书：",
+          worldBookContext || "暂无匹配世界书。",
+          "JSON 格式：{\"moment\":{\"content\":\"朋友圈正文\",\"images\":[{\"description\":\"可选图片描述\"}]},\"comments\":[{\"characterId\":\"角色ID\",\"content\":\"评论内容\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"可写入记忆的内容\"}]}"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: [
+          "触发原因：" + valueOrFallback(source.reason || "朋友圈更新"),
+          "用户/角色输入：" + valueOrFallback(source.prompt),
+          "最近上下文：",
+          contextText || "暂无"
+        ].join("\n")
+      }
+    ]);
+    var parsed = parseJsonFromText(rawContent) || {};
+    var moment = parsed.moment && typeof parsed.moment === "object" ? parsed.moment : {};
+
+    return {
+      moment: {
+        content: String(moment.content || rawContent || "").trim(),
+        images: Array.isArray(moment.images) ? moment.images.map(function (image) {
+          if (image && typeof image === "object") {
+            return {
+              src: String(image.src || ""),
+              description: String(image.description || "")
+            };
+          }
+          return { src: "", description: String(image || "") };
+        }).filter(function (image) {
+          return image.src || image.description;
+        }) : []
+      },
+      comments: Array.isArray(parsed.comments) ? parsed.comments.map(function (comment) {
+        var item = comment && typeof comment === "object" ? comment : {};
+        return {
+          characterId: String(item.characterId || ""),
+          content: String(item.content || "").trim()
+        };
+      }).filter(function (comment) {
+        return comment.characterId && comment.content;
+      }).slice(0, 5) : [],
+      memories: normalizeMemoryList(parsed.memories)
+    };
+  }
+
   async function sendConfiguredChatMessages(messages) {
     var settings = window.AppStorage.getSettings();
     var apiUrl = settings.apiUrl.trim();
@@ -1639,6 +1730,7 @@
     sendOfflineRequest: sendOfflineRequest,
     buildWorldBookContext: buildWorldBookContext,
     generateCharacterDiary: generateCharacterDiary,
+    generateMomentWithComments: generateMomentWithComments,
     buildChatCompletionsUrl: buildChatCompletionsUrl,
     buildModelsUrl: buildModelsUrl,
     extractAiText: extractAiText,

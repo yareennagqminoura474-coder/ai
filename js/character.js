@@ -436,6 +436,9 @@
   }
 
   function fillCharacterForm(character) {
+    var momentSettings = getCharacterMomentSettings(character);
+    var diarySettings = getCharacterDiarySettings(character);
+
     setFieldValue("characterName", character.name);
     setFieldValue("characterGender", character.gender || "未设定");
     setFieldValue("characterIdentity", character.identity);
@@ -444,6 +447,13 @@
     setFieldValue("characterSpeakingStyle", character.speakingStyle);
     setFieldValue("characterRelationship", character.relationship);
     setFieldValue("characterOpeningMessage", character.openingMessage);
+    setCheckedValue("characterMomentAutoPost", momentSettings.autoPostEnabled);
+    setFieldValue("characterMomentFrequency", momentSettings.frequency);
+    setCheckedValue("characterMomentAllowComments", momentSettings.allowRelatedCharacterComments);
+    setCheckedValue("characterDiaryAuto", diarySettings.autoDiaryEnabled);
+    setFieldValue("characterDiaryFrequency", diarySettings.frequency);
+    setCheckedValue("characterDiaryUseChat", diarySettings.allowUseChatHistory);
+    setCheckedValue("characterDiaryUseThoughts", diarySettings.allowUseThoughts);
   }
 
   function setFieldValue(id, value) {
@@ -451,6 +461,18 @@
     if (field) {
       field.value = value || "";
     }
+  }
+
+  function setCheckedValue(id, checked) {
+    var field = getElement(id);
+    if (field) {
+      field.checked = Boolean(checked);
+    }
+  }
+
+  function getCheckedValue(id) {
+    var field = getElement(id);
+    return Boolean(field && field.checked);
   }
 
   function saveCharacterFromForm() {
@@ -499,7 +521,43 @@
       relationship: getFieldValue("characterRelationship"),
       openingMessage: getFieldValue("characterOpeningMessage"),
       chatSettings: existing && existing.chatSettings ? existing.chatSettings : undefined,
+      momentSettings: {
+        autoPostEnabled: getCheckedValue("characterMomentAutoPost"),
+        frequency: getFieldValue("characterMomentFrequency") || "normal",
+        allowRelatedCharacterComments: getCheckedValue("characterMomentAllowComments"),
+        lastGeneratedAt: existing && existing.momentSettings ? Number(existing.momentSettings.lastGeneratedAt) || 0 : 0
+      },
+      diarySettings: {
+        autoDiaryEnabled: getCheckedValue("characterDiaryAuto"),
+        frequency: getFieldValue("characterDiaryFrequency") || "daily",
+        allowUseChatHistory: getCheckedValue("characterDiaryUseChat"),
+        allowUseThoughts: getCheckedValue("characterDiaryUseThoughts")
+      },
       createdAt: existing ? existing.createdAt : now
+    };
+  }
+
+  function getCharacterMomentSettings(character) {
+    var source = character && character.momentSettings || {};
+    var frequency = ["low", "normal", "high"].indexOf(source.frequency) === -1 ? "normal" : source.frequency;
+
+    return {
+      autoPostEnabled: source.autoPostEnabled !== false,
+      frequency: frequency,
+      allowRelatedCharacterComments: source.allowRelatedCharacterComments !== false,
+      lastGeneratedAt: Number(source.lastGeneratedAt) || 0
+    };
+  }
+
+  function getCharacterDiarySettings(character) {
+    var source = character && character.diarySettings || {};
+    var frequency = ["daily", "often", "low"].indexOf(source.frequency) === -1 ? "daily" : source.frequency;
+
+    return {
+      autoDiaryEnabled: source.autoDiaryEnabled !== false,
+      frequency: frequency,
+      allowUseChatHistory: source.allowUseChatHistory !== false,
+      allowUseThoughts: source.allowUseThoughts !== false
     };
   }
 
@@ -2167,6 +2225,8 @@
   function renderPrivateChatSettings(character) {
     var form = getElement("privateChatSettingsForm");
     var settings = getPrivateChatSettings(character);
+    var momentSettings = getCharacterMomentSettings(character);
+    var diarySettings = getCharacterDiarySettings(character);
     var persona = settings.userPersonaOverride || {};
     var familyCards = window.AppStorage.getFamilyCardsForCharacter ? window.AppStorage.getFamilyCardsForCharacter(character.id) : [];
 
@@ -2184,6 +2244,19 @@
       '<div class="field-group"><label>角色人设</label><textarea data-private-field="personality">' + escapeHtml(character.personality || "") + '</textarea></div>',
       '<div class="field-group"><label>说话风格</label><textarea data-private-field="speakingStyle">' + escapeHtml(character.speakingStyle || "") + '</textarea></div>',
       '<div class="field-group"><label>关系设定</label><input data-private-field="relationship" type="text" value="' + escapeHtml(character.relationship || "") + '"></div>',
+      "</section>",
+      '<section class="form-section">',
+      '<div class="section-title-row"><h3>朋友圈设置</h3><span>动态</span></div>',
+      '<label class="switch-row"><input data-private-field="momentAutoPostEnabled" type="checkbox"' + (momentSettings.autoPostEnabled ? " checked" : "") + '>允许主动发朋友圈</label>',
+      '<div class="field-group"><label>朋友圈频率</label><select data-private-field="momentFrequency">' + renderMomentFrequencyOptions(momentSettings.frequency) + '</select></div>',
+      '<label class="switch-row"><input data-private-field="momentAllowRelatedComments" type="checkbox"' + (momentSettings.allowRelatedCharacterComments ? " checked" : "") + '>允许认识的人评论</label>',
+      "</section>",
+      '<section class="form-section">',
+      '<div class="section-title-row"><h3>日记设置</h3><span>记录</span></div>',
+      '<label class="switch-row"><input data-private-field="diaryAutoEnabled" type="checkbox"' + (diarySettings.autoDiaryEnabled ? " checked" : "") + '>允许自动写日记</label>',
+      '<div class="field-group"><label>日记频率</label><select data-private-field="diaryFrequency">' + renderDiaryFrequencyOptions(diarySettings.frequency) + '</select></div>',
+      '<label class="switch-row"><input data-private-field="diaryUseChatHistory" type="checkbox"' + (diarySettings.allowUseChatHistory ? " checked" : "") + '>允许使用聊天记录</label>',
+      '<label class="switch-row"><input data-private-field="diaryUseThoughts" type="checkbox"' + (diarySettings.allowUseThoughts ? " checked" : "") + '>允许使用心声</label>',
       "</section>",
       '<section class="form-section">',
       '<div class="section-title-row"><h3>我在聊天中的身份</h3><span>专属</span></div>',
@@ -2229,6 +2302,22 @@
       '<option value="below"' + (value === "below" ? " selected" : "") + ">气泡下方</option>",
       '<option value="center"' + (value === "center" ? " selected" : "") + ">居中分隔</option>",
       '<option value="none"' + (value === "none" ? " selected" : "") + ">不显示</option>"
+    ].join("");
+  }
+
+  function renderMomentFrequencyOptions(value) {
+    return [
+      '<option value="low"' + (value === "low" ? " selected" : "") + ">偶尔</option>",
+      '<option value="normal"' + (value === "normal" ? " selected" : "") + ">普通</option>",
+      '<option value="high"' + (value === "high" ? " selected" : "") + ">较频繁</option>"
+    ].join("");
+  }
+
+  function renderDiaryFrequencyOptions(value) {
+    return [
+      '<option value="daily"' + (value === "daily" ? " selected" : "") + ">每日</option>",
+      '<option value="often"' + (value === "often" ? " selected" : "") + ">经常</option>",
+      '<option value="low"' + (value === "low" ? " selected" : "") + ">偶尔</option>"
     ].join("");
   }
 
@@ -2297,6 +2386,18 @@
       personality: getPrivateField("personality"),
       speakingStyle: getPrivateField("speakingStyle"),
       relationship: getPrivateField("relationship"),
+      momentSettings: {
+        autoPostEnabled: getPrivateChecked("momentAutoPostEnabled"),
+        frequency: getPrivateField("momentFrequency") || "normal",
+        allowRelatedCharacterComments: getPrivateChecked("momentAllowRelatedComments"),
+        lastGeneratedAt: character.momentSettings ? Number(character.momentSettings.lastGeneratedAt) || 0 : 0
+      },
+      diarySettings: {
+        autoDiaryEnabled: getPrivateChecked("diaryAutoEnabled"),
+        frequency: getPrivateField("diaryFrequency") || "daily",
+        allowUseChatHistory: getPrivateChecked("diaryUseChatHistory"),
+        allowUseThoughts: getPrivateChecked("diaryUseThoughts")
+      },
       chatSettings: {
         pinned: getPrivateChecked("pinned"),
         remarkName: getPrivateField("remarkName"),

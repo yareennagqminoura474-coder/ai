@@ -1028,6 +1028,43 @@ button {
   gap: 14px;
 }
 
+.moments-toolbar {
+  padding: 12px 14px;
+  border-radius: 14px;
+  background: #ffffff;
+  box-shadow: 0 10px 24px rgba(29, 37, 33, 0.06);
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.moments-toolbar strong {
+  display: block;
+  font-size: 18px;
+}
+
+.moments-toolbar em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.moments-toolbar button {
+  min-height: 36px;
+  padding: 0 12px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--green);
+  color: #ffffff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.moments-toolbar button + button {
+  background: var(--blue);
+}
+
 .moments-composer,
 .moment-card {
   border-radius: 16px;
@@ -1131,6 +1168,33 @@ button {
   color: var(--text);
   line-height: 1.55;
   word-break: break-word;
+  white-space: pre-wrap;
+}
+
+.moment-images {
+  margin: 8px 0 10px;
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.moment-images img,
+.moment-images span {
+  width: 100%;
+  aspect-ratio: 1;
+  border-radius: 8px;
+  object-fit: cover;
+  background: #f6f0f4;
+}
+
+.moment-images span {
+  padding: 8px;
+  display: grid;
+  place-items: center;
+  color: #7a6872;
+  font-size: 12px;
+  line-height: 1.35;
+  text-align: center;
 }
 
 .moment-actions {
@@ -1149,6 +1213,11 @@ button {
   font-weight: 900;
 }
 
+.moment-actions button.active {
+  background: #fff0f4;
+  color: #cf4d68;
+}
+
 .moment-comments {
   margin-top: 9px;
   padding: 9px 10px;
@@ -1158,6 +1227,89 @@ button {
   gap: 5px;
   color: var(--muted);
   font-size: 12px;
+}
+
+.moment-comments.collapsed span:nth-of-type(n + 4) {
+  display: none;
+}
+
+.moment-comments button {
+  width: fit-content;
+  min-height: 28px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--blue-dark);
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.moment-publish-author {
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+}
+
+.moment-publish-author .me-avatar {
+  width: 44px;
+  height: 44px;
+  border-radius: 12px;
+  font-size: 16px;
+}
+
+.moment-publish-author span {
+  display: grid;
+  gap: 2px;
+}
+
+.moment-publish-author em {
+  color: var(--muted);
+  font-size: 12px;
+  font-style: normal;
+}
+
+.moment-publish-form textarea {
+  min-height: 108px;
+}
+
+.moment-publish-preview img {
+  width: 92px;
+  height: 92px;
+  border-radius: 10px;
+  object-fit: cover;
+}
+
+.moment-character-picker {
+  gap: 8px;
+}
+
+.moment-character-picker button {
+  width: 100%;
+  min-height: 62px;
+  padding: 10px;
+  border: 1px solid rgba(228, 232, 226, 0.95);
+  border-radius: 12px;
+  background: #ffffff;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 42px minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  text-align: left;
+}
+
+.moment-picker-avatar {
+  width: 42px;
+  height: 42px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  object-fit: cover;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--green), var(--blue));
+  color: #ffffff;
+  font-weight: 900;
 }
 
 .moment-placeholder {
@@ -1265,13 +1417,13 @@ button {
 }
 
 .me-profile-card {
-  min-height: 126px;
-  padding: 18px;
+  min-height: 76px;
+  padding: 14px;
   border: 0;
   color: var(--text);
   display: grid;
-  grid-template-columns: 76px minmax(0, 1fr) 22px;
-  gap: 16px;
+  grid-template-columns: minmax(0, 1fr) 22px;
+  gap: 12px;
   align-items: center;
   text-align: left;
 }
@@ -1296,7 +1448,7 @@ button {
 }
 
 .me-profile-main strong {
-  font-size: 24px;
+  font-size: 18px;
 }
 
 .me-profile-main em,
@@ -1340,6 +1492,14 @@ button {
   display: grid;
   place-items: center;
   font-weight: 900;
+  overflow: hidden;
+}
+
+.me-list-card button span img {
+  width: 100%;
+  height: 100%;
+  display: block;
+  object-fit: cover;
 }
 
 .me-switch-card {
@@ -2366,6 +2526,25 @@ textarea::placeholder {
 .simple-list {
   display: grid;
   gap: 12px;
+}
+
+.diary-auto-summary {
+  padding: 10px 12px;
+  border-radius: 10px;
+  background: #f6f8f7;
+  color: var(--text);
+  display: grid;
+  gap: 3px;
+}
+
+.diary-auto-summary strong {
+  font-size: 13px;
+}
+
+.diary-auto-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.45;
 }
 
 .world-book-card,
@@ -3915,8 +4094,8 @@ textarea::placeholder {
 }
 
 .wallet-card {
-  min-height: 220px;
-  padding: 24px 22px 20px;
+  min-height: 188px;
+  padding: 20px 20px 18px;
   border-radius: 20px;
   color: #20322c;
   background:
@@ -3953,7 +4132,7 @@ textarea::placeholder {
 
 .wallet-card > em {
   grid-column: 1 / -1;
-  font-size: 40px;
+  font-size: 34px;
   line-height: 1;
   font-style: normal;
   font-weight: 900;

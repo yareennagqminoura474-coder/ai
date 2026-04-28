@@ -151,6 +151,35 @@
               <textarea id="characterOpeningMessage" name="characterOpeningMessage" placeholder="角色第一次见到你时会说什么"></textarea>
             </div>
           </section>
+
+          <section class="form-section" aria-label="朋友圈设置">
+            <div class="section-title-row"><h3>朋友圈设置</h3><span>动态</span></div>
+            <label class="switch-row"><input id="characterMomentAutoPost" type="checkbox" checked>允许主动发朋友圈</label>
+            <div class="field-group">
+              <label for="characterMomentFrequency">朋友圈频率</label>
+              <select id="characterMomentFrequency">
+                <option value="low">偶尔</option>
+                <option value="normal" selected>普通</option>
+                <option value="high">较频繁</option>
+              </select>
+            </div>
+            <label class="switch-row"><input id="characterMomentAllowComments" type="checkbox" checked>允许认识的人评论</label>
+          </section>
+
+          <section class="form-section" aria-label="日记设置">
+            <div class="section-title-row"><h3>日记设置</h3><span>记录</span></div>
+            <label class="switch-row"><input id="characterDiaryAuto" type="checkbox" checked>允许自动写日记</label>
+            <div class="field-group">
+              <label for="characterDiaryFrequency">日记频率</label>
+              <select id="characterDiaryFrequency">
+                <option value="daily" selected>每日</option>
+                <option value="often">经常</option>
+                <option value="low">偶尔</option>
+              </select>
+            </div>
+            <label class="switch-row"><input id="characterDiaryUseChat" type="checkbox" checked>允许使用聊天记录</label>
+            <label class="switch-row"><input id="characterDiaryUseThoughts" type="checkbox" checked>允许使用心声</label>
+          </section>
         </form>
       </section>
 
