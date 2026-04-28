@@ -195,6 +195,31 @@
     return value.slice(0, limit - 1) + "…";
   }
 
+  function normalizeAiMessageText(text) {
+    var value = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
+    var lines;
+    var shouldJoin;
+
+    if (!value) {
+      return "";
+    }
+
+    value = value.replace(/\n{3,}/g, "\n\n");
+    lines = value.split("\n").map(function (line) {
+      return line.trim();
+    });
+
+    shouldJoin = lines.length >= 2 && lines.every(function (line) {
+      return !line || /^[\u4e00-\u9fa5A-Za-z0-9，。！？!?、~～…,.]{1,2}$/.test(line);
+    });
+
+    if (shouldJoin) {
+      return lines.join("").replace(/\s+/g, "").trim();
+    }
+
+    return lines.join("\n").replace(/[ \t]{2,}/g, " ").trim();
+  }
+
   async function sendPrivateChatRequest(character, chatHistory) {
     var messages = buildPrivateReplyMessages(character, chatHistory);
     var rawContent = await sendConfiguredChatMessages(messages);
@@ -921,15 +946,43 @@
     };
   }
 
+  async function generateShopProducts() {
+    var rawContent = await sendConfiguredChatMessages([
+      {
+        role: "system",
+        content: [
+          "你正在为心屿空间的小手机购物 App 生成商品。",
+          "只调用一次并一次性返回全部商品 JSON，不要 Markdown，不要解释。",
+          "商品要适合角色互动小手机：可爱、生活、学习、礼物、零食、日用品、角色周边，价格合理。",
+          "外卖至少 4 个店铺，每个店铺至少 5 个商品；网购至少 20 个商品。",
+          "JSON 格式：{\"foodShops\":[{\"name\":\"店铺名\",\"description\":\"店铺描述\",\"products\":[{\"name\":\"商品名\",\"description\":\"商品描述\",\"price\":12.8,\"category\":\"主食\",\"imagePrompt\":\"可选图片提示\",\"stock\":99}]}],\"mallProducts\":[{\"name\":\"商品名\",\"description\":\"商品描述\",\"price\":39.9,\"category\":\"生活用品\",\"imagePrompt\":\"可选图片提示\",\"stock\":99}]}"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: "请生成一批温暖、有生活感、适合和虚拟角色互动的小手机商品。"
+      }
+    ]);
+    var parsed = parseJsonFromText(rawContent) || {};
+
+    return {
+      foodShops: Array.isArray(parsed.foodShops) ? parsed.foodShops : [],
+      mallProducts: Array.isArray(parsed.mallProducts) ? parsed.mallProducts : []
+    };
+  }
+
   async function sendConfiguredChatMessages(messages) {
     var settings = window.AppStorage.getSettings();
     var apiUrl = settings.apiUrl.trim();
     var apiKey = settings.apiKey.trim();
     var modelName = settings.modelName.trim();
+    var temperature = Number(settings.temperature);
     var chatUrl;
     var response;
     var data;
     var content;
+    var requestBody;
+    var errorMessage;
 
     if (!apiUrl || !apiKey || !modelName) {
       throw new Error(MISSING_SETTINGS_MESSAGE);
@@ -942,23 +995,39 @@
       如果项目要公开部署，不应该把 API Key 暴露在前端，后续需要改成后端代理。
     */
     try {
+      requestBody = {
+        model: modelName,
+        messages: messages,
+        temperature: Number.isFinite(temperature) ? Math.max(0, Math.min(2, temperature)) : 0.8
+      };
       response = await fetch(chatUrl, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
           "Authorization": "Bearer " + apiKey
         },
-        body: JSON.stringify({
-          model: modelName,
-          messages: messages,
-          temperature: 0.8
-        })
+        body: JSON.stringify(requestBody)
       });
 
       data = await readResponseJson(response);
 
       if (!response.ok) {
-        throw new Error("聊天接口请求失败：" + getApiErrorMessage(data, response));
+        errorMessage = getApiErrorMessage(data, response);
+        if (/temperature/i.test(errorMessage)) {
+          delete requestBody.temperature;
+          response = await fetch(chatUrl, {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "Authorization": "Bearer " + apiKey
+            },
+            body: JSON.stringify(requestBody)
+          });
+          data = await readResponseJson(response);
+        }
+        if (!response.ok) {
+          throw new Error("聊天接口请求失败：" + getApiErrorMessage(data, response));
+        }
       }
     } catch (error) {
       if (error && error.message && error.message.indexOf("聊天接口请求失败：") === 0) {
@@ -1492,7 +1561,7 @@
       reply.status = source.status ? String(source.status) : "pending";
     }
 
-    reply.content = content;
+    reply.content = normalizeAiMessageText(content);
     return reply;
   }
 
@@ -1590,7 +1659,7 @@
     parts = cleaned
       .split(/(?:\n+|(?<=[\u3002\uFF01\uFF1F\uFF5E\u2026\uFF1B;.!?]))/g)
       .map(function (part) {
-        return part.replace(/^[-*\d.\s]+/, "").trim();
+        return normalizeAiMessageText(part.replace(/^[-*\d.\s]+/, ""));
       })
       .filter(function (part) {
         return part && part.length > 0;
@@ -1722,6 +1791,7 @@
     buildMessages: buildMessages,
     summarizeMessageForAI: summarizeMessageForAI,
     normalizeReplyList: normalizeReplyList,
+    normalizeAiMessageText: normalizeAiMessageText,
     sendChatRequest: sendChatRequest,
     sendPrivateChatRequest: sendPrivateChatRequest,
     buildGroupSystemPrompt: buildGroupSystemPrompt,
@@ -1731,6 +1801,7 @@
     buildWorldBookContext: buildWorldBookContext,
     generateCharacterDiary: generateCharacterDiary,
     generateMomentWithComments: generateMomentWithComments,
+    generateShopProducts: generateShopProducts,
     buildChatCompletionsUrl: buildChatCompletionsUrl,
     buildModelsUrl: buildModelsUrl,
     extractAiText: extractAiText,

@@ -20,6 +20,7 @@
     "walletScreen",
     "walletBillScreen",
     "familyCardScreen",
+    "shopScreen",
     "worldBookScreen",
     "diaryScreen",
     "characterSpaceScreen",
@@ -30,6 +31,9 @@
   var emojiSendCallback = null;
   var imageSendCallback = null;
   var diaryTab = "character";
+  var shopTab = "food";
+  var shopMallCategory = "all";
+  var shopGenerating = false;
   var diaryCharacterId = "";
   var characterSpaceId = "";
   var thoughtsReturnPage = "homeScreen";
@@ -60,9 +64,9 @@
     { id: "photo", name: "相册", icon: "相", className: "desktop-photo", action: "photo" },
     { id: "worldbook", name: "世界书", icon: "世", className: "desktop-worldbook", action: "worldbook" },
     { id: "diary", name: "日记", icon: "日", className: "desktop-diary", action: "diary" },
-    { id: "space", name: "角色空间", icon: "屿", className: "desktop-space", action: "space" },
     { id: "theme", name: "美化", icon: "美", className: "desktop-theme", action: "theme" },
-    { id: "settings", name: "设置", icon: "设", className: "desktop-setting", action: "settings" }
+    { id: "settings", name: "设置", icon: "设", className: "desktop-setting", action: "settings" },
+    { id: "shop", name: "购物", icon: "购", className: "desktop-shop", action: "shop" }
   ];
   var desktopPageSize = 10;
   var themePresets = [
@@ -159,6 +163,10 @@
       renderFamilyCardScreen();
     }
 
+    if (pageId === "shopScreen") {
+      renderShopScreen();
+    }
+
     if (pageId === "characterListScreen") {
       window.CharacterManager.renderCharacterList();
     }
@@ -223,7 +231,7 @@
     if (dockTheme) {
       dockTheme.classList.toggle("active", pageId === "photoScreen");
     }
-    dockSettings.classList.toggle("active", pageId === "settingsScreen" || pageId === "worldBookScreen" || pageId === "themeScreen" || pageId === "walletScreen" || pageId === "walletBillScreen" || pageId === "familyCardScreen");
+    dockSettings.classList.toggle("active", pageId === "settingsScreen" || pageId === "worldBookScreen" || pageId === "themeScreen" || pageId === "walletScreen" || pageId === "walletBillScreen" || pageId === "familyCardScreen" || pageId === "shopScreen");
   }
 
   function refreshHomeSummary() {
@@ -362,6 +370,10 @@
     }
     if (action === "settings") {
       setActivePage("settingsScreen");
+      return;
+    }
+    if (action === "shop") {
+      setActivePage("shopScreen");
       return;
     }
     if (action === "worldbook") {
@@ -552,7 +564,7 @@
     }
 
     if (action === "group") {
-      setActivePage("groupListScreen");
+      window.GroupManager.openCreateGroupScreen();
       return;
     }
 
@@ -1595,8 +1607,10 @@
         originalTitle: character.name,
         avatar: character.avatar,
         fallback: character.name ? character.name.slice(0, 1) : "心",
-        preview: last ? formatRecentPreview(last) : "还没有聊天记录",
+        preview: last ? formatRecentPreview(last) : "开始和 TA 聊天",
         time: last ? last.createdAt : 0,
+        createdAt: Number(character.createdAt) || 0,
+        hasHistory: Boolean(last),
         unread: window.AppStorage.getUnreadThoughtCount ? window.AppStorage.getUnreadThoughtCount([character.id], character.id) : 0,
         pinned: Boolean(chatSettings.pinned)
       };
@@ -1611,8 +1625,12 @@
         id: group.id,
         title: group.name,
         memberIds: group.memberIds || [],
-        preview: last ? formatRecentPreview(last) : "还没有群聊消息",
+        avatar: group.settings && group.settings.avatar || "",
+        fallback: group.name ? group.name.slice(0, 1) : "群",
+        preview: last ? formatRecentPreview(last) : "进入群聊",
         time: last ? last.createdAt : 0,
+        createdAt: Number(group.createdAt) || 0,
+        hasHistory: Boolean(last),
         unread: window.AppStorage.getUnreadThoughtCount ? window.AppStorage.getUnreadThoughtCount(group.memberIds || [], group.id) : 0,
         pinned: Boolean(groupSettings.pinned)
       };
@@ -1620,13 +1638,19 @@
 
     return privateItems.concat(groupItems).filter(function (item) {
       var hiddenAt = window.AppStorage.getRecentHiddenAt ? window.AppStorage.getRecentHiddenAt(item.type, item.id) : 0;
-      return item.time && (!hiddenAt || item.time > hiddenAt);
+      return !hiddenAt || (item.time && item.time > hiddenAt);
     }).sort(function (a, b) {
       if (a.pinned !== b.pinned) {
         return a.pinned ? -1 : 1;
       }
-      return b.time - a.time;
-    }).slice(0, 20);
+      if (a.hasHistory !== b.hasHistory) {
+        return a.hasHistory ? -1 : 1;
+      }
+      if (a.hasHistory && b.hasHistory) {
+        return b.time - a.time;
+      }
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
   }
 
   function handleRecentAction(action, type, id, time) {
@@ -1844,7 +1868,8 @@
     getElement("characterBatchSelectBtn").addEventListener("click", window.CharacterManager.toggleCharacterSelectionMode);
     getElement("createBackBtn").addEventListener("click", window.CharacterManager.closeCreateCharacterScreen);
     getElement("chatBackBtn").addEventListener("click", function () {
-      setActivePage("characterListScreen");
+      setWechatTab("wechat");
+      setActivePage("wechatScreen");
     });
     getElement("groupListBack").addEventListener("click", function () {
       setActivePage("wechatScreen");
@@ -1852,10 +1877,12 @@
     getElement("newGroupBtn").addEventListener("click", window.GroupManager.openCreateGroupScreen);
     getElement("groupBatchSelectBtn").addEventListener("click", window.GroupManager.toggleGroupSelectionMode);
     getElement("createGroupBackBtn").addEventListener("click", function () {
-      setActivePage("groupListScreen");
+      setWechatTab("wechat");
+      setActivePage("wechatScreen");
     });
     getElement("groupChatBackBtn").addEventListener("click", function () {
-      setActivePage("groupListScreen");
+      setWechatTab("wechat");
+      setActivePage("wechatScreen");
     });
     getElement("offlineBackBtn").addEventListener("click", window.OfflineManager.goBack);
     getElement("wechatBackBtn").addEventListener("click", goHome);
@@ -1873,6 +1900,7 @@
     getElement("familyCardBackBtn").addEventListener("click", function () {
       setActivePage("walletScreen");
     });
+    getElement("shopBackBtn").addEventListener("click", goHome);
     getElement("newFamilyCardBtn").addEventListener("click", openFamilyCardEditor);
     getElement("settingsBackBtn").addEventListener("click", goHome);
     getElement("privateChatSettingsBackBtn").addEventListener("click", function () {
@@ -2119,6 +2147,14 @@
 
   function bindDataManagementActions() {
     getElement("fetchModelsBtn").addEventListener("click", fetchModelsFromSettings);
+    getElement("apiProfileSelect").addEventListener("change", function (event) {
+      switchApiProfile(event.target.value);
+    });
+    getElement("newApiProfileBtn").addEventListener("click", createApiProfile);
+    getElement("deleteApiProfileBtn").addEventListener("click", deleteActiveApiProfile);
+    getElement("refreshShopProductsBtn").addEventListener("click", function () {
+      refreshShopProducts(true);
+    });
     getElement("exportDataBtn").addEventListener("click", exportAllData);
     getElement("newWorldBookBtn").addEventListener("click", createWorldBook);
     getElement("importPhotoBtn").addEventListener("click", function () {
@@ -4703,6 +4739,409 @@
     });
   }
 
+  function renderShopScreen() {
+    var content = getElement("shopContent");
+    var shop = window.AppStorage.getShop ? window.AppStorage.getShop() : { foodShops: [], mallProducts: [], cart: [], orders: [] };
+
+    if (!content) {
+      return;
+    }
+
+    content.innerHTML = [
+      '<section class="shop-tabs" aria-label="购物分类">',
+      renderShopTabButton("food", "外卖"),
+      renderShopTabButton("mall", "网购"),
+      renderShopTabButton("cart", "购物车" + (shop.cart.length ? " · " + shop.cart.length : "")),
+      renderShopTabButton("orders", "订单"),
+      "</section>",
+      shopGenerating ? '<div class="shop-loading">正在生成商品...</div>' : "",
+      '<section class="shop-panel">',
+      renderShopActivePanel(shop),
+      "</section>"
+    ].join("");
+
+    bindShopActions(content);
+    ensureShopProducts();
+  }
+
+  function renderShopTabButton(tab, label) {
+    return '<button type="button" data-shop-tab="' + tab + '" class="' + (shopTab === tab ? "active" : "") + '">' + escapeHtml(label) + "</button>";
+  }
+
+  function renderShopActivePanel(shop) {
+    if (shopTab === "mall") {
+      return renderShopMall(shop);
+    }
+    if (shopTab === "cart") {
+      return renderShopCart(shop);
+    }
+    if (shopTab === "orders") {
+      return renderShopOrders(shop);
+    }
+    return renderShopFood(shop);
+  }
+
+  function shopHasProducts(shop) {
+    return Boolean(shop && ((shop.foodShops || []).length || (shop.mallProducts || []).length));
+  }
+
+  function ensureShopProducts() {
+    var shop = window.AppStorage.getShop ? window.AppStorage.getShop() : null;
+
+    if (!shopGenerating && !shopHasProducts(shop)) {
+      refreshShopProducts(false);
+    }
+  }
+
+  async function refreshShopProducts(force) {
+    var current = window.AppStorage.getShop();
+    var generated;
+    var next;
+
+    if (shopGenerating || (!force && shopHasProducts(current))) {
+      return;
+    }
+
+    shopGenerating = true;
+    renderShopScreen();
+
+    try {
+      if (!window.AIService || !window.AIService.generateShopProducts) {
+        throw new Error("AI shop generator unavailable");
+      }
+      generated = await window.AIService.generateShopProducts();
+      if (!isValidGeneratedShop(generated)) {
+        throw new Error("Generated shop data is incomplete");
+      }
+      next = {
+        productsGeneratedAt: Date.now(),
+        foodShops: generated.foodShops,
+        mallProducts: generated.mallProducts,
+        cart: force ? [] : current.cart,
+        orders: current.orders
+      };
+    } catch (error) {
+      next = window.AppStorage.getDefaultShopProducts();
+      next.cart = force ? [] : current.cart;
+      next.orders = current.orders;
+    } finally {
+      window.AppStorage.saveShop(next);
+      shopGenerating = false;
+      renderShopScreen();
+    }
+  }
+
+  function isValidGeneratedShop(shop) {
+    var foodCount = shop && Array.isArray(shop.foodShops) ? shop.foodShops.length : 0;
+    var mallCount = shop && Array.isArray(shop.mallProducts) ? shop.mallProducts.length : 0;
+    var foodOk = foodCount >= 4 && shop.foodShops.every(function (item) {
+      return item && Array.isArray(item.products) && item.products.length >= 5;
+    });
+
+    return foodOk && mallCount >= 20;
+  }
+
+  function renderShopFood(shop) {
+    if (!shopHasProducts(shop)) {
+      return '<div class="soft-empty">商品准备中...</div>';
+    }
+
+    return (shop.foodShops || []).map(function (foodShop) {
+      return [
+        '<article class="food-shop-card">',
+        '  <div class="shop-section-title"><strong>' + escapeHtml(foodShop.name) + '</strong><em>' + escapeHtml(foodShop.description || "今日可点") + "</em></div>",
+        '  <div class="product-grid">',
+        (foodShop.products || []).map(function (product) {
+          return renderProductCard(product, "food", foodShop.id);
+        }).join(""),
+        "  </div>",
+        "</article>"
+      ].join("");
+    }).join("");
+  }
+
+  function renderShopMall(shop) {
+    var categories = getMallCategories(shop.mallProducts || []);
+    var products = (shop.mallProducts || []).filter(function (product) {
+      return shopMallCategory === "all" || product.category === shopMallCategory;
+    });
+
+    if (!shopHasProducts(shop)) {
+      return '<div class="soft-empty">商品准备中...</div>';
+    }
+
+    return [
+      '<div class="shop-category-row">',
+      categories.map(function (category) {
+        return '<button type="button" data-shop-category="' + escapeHtml(category) + '" class="' + (shopMallCategory === category ? "active" : "") + '">' + escapeHtml(category === "all" ? "全部" : category) + "</button>";
+      }).join(""),
+      "</div>",
+      '<div class="product-grid">',
+      products.map(function (product) {
+        return renderProductCard(product, "mall", "");
+      }).join(""),
+      "</div>"
+    ].join("");
+  }
+
+  function getMallCategories(products) {
+    var seen = { all: true };
+    var categories = ["all"];
+
+    (products || []).forEach(function (product) {
+      var category = product.category || "生活";
+      if (!seen[category]) {
+        seen[category] = true;
+        categories.push(category);
+      }
+    });
+
+    return categories;
+  }
+
+  function renderProductCard(product, sourceType, shopId) {
+    return [
+      '<article class="product-card">',
+      '  <div class="product-card-main">',
+      '    <strong>' + escapeHtml(product.name) + "</strong>",
+      '    <p>' + escapeHtml(product.description || "适合小手机日常互动的小物") + "</p>",
+      '    <em>' + escapeHtml(product.category || "生活") + "</em>",
+      "  </div>",
+      '  <div class="product-card-bottom"><span>¥' + escapeHtml(formatMoney(product.price)) + '</span><button type="button" data-shop-add="' + escapeHtml(product.id) + '" data-shop-source="' + escapeHtml(sourceType) + '" data-shop-id="' + escapeHtml(shopId || "") + '">加入</button></div>',
+      "</article>"
+    ].join("");
+  }
+
+  function renderShopCart(shop) {
+    var total = getShopCartTotal(shop.cart);
+    var cards = window.AppStorage.getFamilyCards ? window.AppStorage.getFamilyCards().filter(function (card) {
+      return card.enabled && card.usedAmount < card.totalLimit;
+    }) : [];
+
+    if (!shop.cart.length) {
+      return '<div class="soft-empty">购物车是空的。</div>';
+    }
+
+    return [
+      '<div class="cart-list">',
+      shop.cart.map(renderCartItem).join(""),
+      "</div>",
+      '<section class="cart-checkout">',
+      '  <strong>合计 ¥' + escapeHtml(formatMoney(total)) + "</strong>",
+      '  <label><span>支付方式</span><select id="shopPayMethod"><option value="wallet">钱包余额</option><option value="familyCard">亲属卡</option></select></label>',
+      '  <label><span>亲属卡</span><select id="shopFamilyCardId">' + cards.map(function (card) {
+        return '<option value="' + escapeHtml(card.id) + '">' + escapeHtml(card.name) + " · 剩余 ¥" + escapeHtml(formatMoney(card.totalLimit - card.usedAmount)) + "</option>";
+      }).join("") + "</select></label>",
+      '  <button type="button" class="full-button" data-shop-checkout>结算</button>',
+      "</section>"
+    ].join("");
+  }
+
+  function renderCartItem(item) {
+    return [
+      '<article class="cart-item">',
+      '  <div><strong>' + escapeHtml(item.name) + "</strong><em>¥" + escapeHtml(formatMoney(item.price)) + " × " + escapeHtml(item.quantity) + "</em></div>",
+      '  <span>¥' + escapeHtml(formatMoney(item.price * item.quantity)) + "</span>",
+      '  <div class="cart-item-actions">',
+      '    <button type="button" data-shop-qty="' + escapeHtml(item.id) + '" data-shop-delta="-1">-</button>',
+      '    <button type="button" data-shop-qty="' + escapeHtml(item.id) + '" data-shop-delta="1">+</button>',
+      '    <button type="button" data-shop-remove="' + escapeHtml(item.id) + '">删除</button>',
+      "  </div>",
+      "</article>"
+    ].join("");
+  }
+
+  function renderShopOrders(shop) {
+    if (!shop.orders.length) {
+      return '<div class="soft-empty">还没有订单。</div>';
+    }
+
+    return '<div class="order-list">' + shop.orders.map(function (order) {
+      return [
+        '<article class="order-card">',
+        '  <div><strong>¥' + escapeHtml(formatMoney(order.totalAmount)) + "</strong><em>" + escapeHtml(order.payMethod === "familyCard" ? "亲属卡支付" : "余额支付") + "</em></div>",
+        '  <p>' + escapeHtml(order.items.map(function (item) { return item.name + "×" + item.quantity; }).join("，")) + "</p>",
+        '  <small>' + escapeHtml(formatDateTime(order.createdAt)) + "</small>",
+        "</article>"
+      ].join("");
+    }).join("") + "</div>";
+  }
+
+  function bindShopActions(content) {
+    Array.prototype.forEach.call(content.querySelectorAll("[data-shop-tab]"), function (button) {
+      button.addEventListener("click", function () {
+        shopTab = button.dataset.shopTab;
+        renderShopScreen();
+      });
+    });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-shop-category]"), function (button) {
+      button.addEventListener("click", function () {
+        shopMallCategory = button.dataset.shopCategory;
+        renderShopScreen();
+      });
+    });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-shop-add]"), function (button) {
+      button.addEventListener("click", function () {
+        addProductToCart(button.dataset.shopAdd, button.dataset.shopSource, button.dataset.shopId);
+      });
+    });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-shop-qty]"), function (button) {
+      button.addEventListener("click", function () {
+        updateCartQuantity(button.dataset.shopQty, Number(button.dataset.shopDelta) || 0);
+      });
+    });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-shop-remove]"), function (button) {
+      button.addEventListener("click", function () {
+        removeCartItem(button.dataset.shopRemove);
+      });
+    });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-shop-checkout]"), function (button) {
+      button.addEventListener("click", checkoutShopCart);
+    });
+  }
+
+  function findShopProduct(productId, sourceType, shopId) {
+    var shop = window.AppStorage.getShop();
+    var foodShop;
+
+    if (sourceType === "food") {
+      foodShop = (shop.foodShops || []).find(function (item) {
+        return item.id === shopId;
+      });
+      return foodShop ? (foodShop.products || []).find(function (product) {
+        return product.id === productId;
+      }) : null;
+    }
+
+    return (shop.mallProducts || []).find(function (product) {
+      return product.id === productId;
+    }) || null;
+  }
+
+  function addProductToCart(productId, sourceType, shopId) {
+    var shop = window.AppStorage.getShop();
+    var product = findShopProduct(productId, sourceType, shopId);
+    var existing;
+
+    if (!product) {
+      return;
+    }
+
+    existing = shop.cart.find(function (item) {
+      return item.productId === product.id && item.sourceType === sourceType && item.shopId === (shopId || "");
+    });
+
+    if (existing) {
+      existing.quantity = Math.min(99, existing.quantity + 1);
+    } else {
+      shop.cart.push({
+        id: "cart_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+        productId: product.id,
+        sourceType: sourceType === "food" ? "food" : "mall",
+        shopId: shopId || "",
+        name: product.name,
+        price: product.price,
+        quantity: 1
+      });
+    }
+
+    window.AppStorage.saveShop(shop);
+    renderShopScreen();
+  }
+
+  function updateCartQuantity(cartId, delta) {
+    var shop = window.AppStorage.getShop();
+    shop.cart = shop.cart.map(function (item) {
+      if (item.id === cartId) {
+        item.quantity = Math.max(1, Math.min(99, item.quantity + delta));
+      }
+      return item;
+    });
+    window.AppStorage.saveShop(shop);
+    renderShopScreen();
+  }
+
+  function removeCartItem(cartId) {
+    var shop = window.AppStorage.getShop();
+    shop.cart = shop.cart.filter(function (item) {
+      return item.id !== cartId;
+    });
+    window.AppStorage.saveShop(shop);
+    renderShopScreen();
+  }
+
+  function getShopCartTotal(cart) {
+    return (cart || []).reduce(function (sum, item) {
+      return sum + Number(item.price || 0) * Number(item.quantity || 1);
+    }, 0);
+  }
+
+  function checkoutShopCart() {
+    var shop = window.AppStorage.getShop();
+    var total = Math.round(getShopCartTotal(shop.cart) * 100) / 100;
+    var payMethod = getElement("shopPayMethod") ? getElement("shopPayMethod").value : "wallet";
+    var familyCardId = getElement("shopFamilyCardId") ? getElement("shopFamilyCardId").value : "";
+    var ledger;
+    var order;
+
+    if (!shop.cart.length || !total) {
+      window.alert("购物车是空的。");
+      return;
+    }
+
+    if (payMethod === "familyCard") {
+      if (!familyCardId) {
+        window.alert("没有可用亲属卡。");
+        return;
+      }
+      ledger = window.AppStorage.spendFamilyCard(familyCardId, total, {
+        sourceType: "shop",
+        sourceId: "shop",
+        note: "亲属卡购物消费"
+      });
+      if (!ledger) {
+        window.alert("亲属卡额度不足。");
+        return;
+      }
+    } else {
+      ledger = window.AppStorage.addWalletLedger({
+        type: "shopping",
+        direction: "expense",
+        amount: total,
+        sourceType: "shop",
+        sourceId: "shop",
+        note: "购物消费",
+        createdAt: Date.now()
+      }, {
+        preventOverdraft: true
+      });
+      if (!ledger) {
+        window.alert("余额不足，请充值或使用亲属卡");
+        return;
+      }
+    }
+
+    order = {
+      id: "order_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      items: shop.cart.slice(),
+      totalAmount: total,
+      payMethod: payMethod === "familyCard" ? "familyCard" : "wallet",
+      familyCardId: payMethod === "familyCard" ? familyCardId : "",
+      createdAt: Date.now()
+    };
+    shop.orders.unshift(order);
+    shop.cart = [];
+    window.AppStorage.saveShop(shop);
+    shopTab = "orders";
+    renderShopScreen();
+    renderWalletScreen();
+  }
+
   function renderWalletScreen() {
     var content = getElement("walletContent");
     var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { balance: 0, ledger: [], familyCards: [] };
@@ -4818,6 +5257,7 @@
       redpacket_in: "福",
       redpacket_out: "福",
       familycard_pay: "亲",
+      shopping: "购",
       gift: "礼",
       system: "账"
     };
@@ -4832,6 +5272,7 @@
       redpacket_in: "收到红包",
       redpacket_out: "红包支出",
       familycard_pay: "亲属卡支付",
+      shopping: "购物消费",
       gift: "礼物",
       system: "系统记录"
     };
@@ -4864,6 +5305,10 @@
 
     if (record.sourceType === "offline") {
       return "线下模式";
+    }
+
+    if (record.sourceType === "shop") {
+      return "购物";
     }
 
     return "系统";
@@ -4977,9 +5422,12 @@
     var settings = window.AppStorage.getSettings();
     var savedTip = getElement("settingsSavedTip");
 
+    renderApiProfileSelect(settings);
+    getElement("apiProfileName").value = settings.activeApiProfile.name || "";
     getElement("apiUrl").value = settings.apiUrl;
     getElement("apiKey").value = settings.apiKey;
     getElement("modelName").value = settings.modelName;
+    getElement("apiTemperature").value = settings.temperature;
 
     if (savedTip) {
       savedTip.textContent = "";
@@ -4987,17 +5435,142 @@
     }
   }
 
+  function renderApiProfileSelect(settings) {
+    var select = getElement("apiProfileSelect");
+    var current = settings || window.AppStorage.getSettings();
+
+    if (!select) {
+      return;
+    }
+
+    select.innerHTML = current.apiProfiles.map(function (profile) {
+      return '<option value="' + escapeHtml(profile.id) + '"' + (profile.id === current.activeApiProfileId ? " selected" : "") + ">" + escapeHtml(profile.name || "API 预设") + "</option>";
+    }).join("");
+  }
+
   function saveSettingsFromForm() {
     window.AppStorage.saveSettings(getSettingsFromForm());
+    loadSettingsIntoForm();
     showSettingsTip("设置已保存");
   }
 
   function getSettingsFromForm() {
+    var current = window.AppStorage.getSettings();
+    var activeId = getElement("apiProfileSelect").value || current.activeApiProfileId;
+    var profiles = current.apiProfiles.map(function (profile) {
+      if (profile.id !== activeId) {
+        return profile;
+      }
+
+      return Object.assign({}, profile, {
+        name: getElement("apiProfileName").value.trim() || "API 预设",
+        apiUrl: getElement("apiUrl").value.trim(),
+        apiKey: getElement("apiKey").value.trim(),
+        modelName: getElement("modelName").value.trim(),
+        temperature: normalizeTemperatureInput(getElement("apiTemperature").value),
+        updatedAt: Date.now()
+      });
+    });
+
     return {
+      activeApiProfileId: activeId,
+      apiProfiles: profiles,
       apiUrl: getElement("apiUrl").value.trim(),
       apiKey: getElement("apiKey").value.trim(),
-      modelName: getElement("modelName").value.trim()
+      modelName: getElement("modelName").value.trim(),
+      temperature: normalizeTemperatureInput(getElement("apiTemperature").value)
     };
+  }
+
+  function normalizeTemperatureInput(value) {
+    var temperature = Number(value);
+
+    if (!Number.isFinite(temperature)) {
+      return 0.8;
+    }
+
+    return Math.max(0, Math.min(2, Math.round(temperature * 100) / 100));
+  }
+
+  function switchApiProfile(profileId) {
+    var current = window.AppStorage.getSettings();
+    var settings;
+    var profile;
+
+    settings = {
+      activeApiProfileId: profileId,
+      apiProfiles: current.apiProfiles.map(function (item) {
+        if (item.id !== current.activeApiProfileId) {
+          return item;
+        }
+        return Object.assign({}, item, {
+          name: getElement("apiProfileName").value.trim() || "API 预设",
+          apiUrl: getElement("apiUrl").value.trim(),
+          apiKey: getElement("apiKey").value.trim(),
+          modelName: getElement("modelName").value.trim(),
+          temperature: normalizeTemperatureInput(getElement("apiTemperature").value),
+          updatedAt: Date.now()
+        });
+      })
+    };
+
+    profile = settings.apiProfiles.find(function (item) {
+      return item.id === profileId;
+    });
+
+    if (!profile) {
+      return;
+    }
+
+    window.AppStorage.saveSettings(settings);
+    loadSettingsIntoForm();
+    showModelFetchTip("");
+  }
+
+  function createApiProfile() {
+    var settings = getSettingsFromForm();
+    var now = Date.now();
+    var profile = {
+      id: "api_" + now + "_" + Math.random().toString(36).slice(2, 7),
+      name: "新预设",
+      apiUrl: "",
+      apiKey: "",
+      modelName: "",
+      temperature: 0.8,
+      createdAt: now,
+      updatedAt: now
+    };
+
+    settings.apiProfiles.push(profile);
+    settings.activeApiProfileId = profile.id;
+    window.AppStorage.saveSettings(settings);
+    loadSettingsIntoForm();
+    showSettingsTip("已新增 API 预设");
+  }
+
+  function deleteActiveApiProfile() {
+    var current = window.AppStorage.getSettings();
+    var activeId = current.activeApiProfileId;
+    var profiles;
+
+    if (current.apiProfiles.length <= 1) {
+      showSettingsTip("至少保留一个 API 预设", true);
+      return;
+    }
+
+    if (!window.confirm("确定删除当前 API 预设吗？")) {
+      return;
+    }
+
+    profiles = current.apiProfiles.filter(function (profile) {
+      return profile.id !== activeId;
+    });
+    window.AppStorage.saveSettings({
+      activeApiProfileId: profiles[0].id,
+      apiProfiles: profiles
+    });
+    loadSettingsIntoForm();
+    showSettingsTip("已删除 API 预设");
   }
 
   async function fetchModelsFromSettings() {
@@ -5230,6 +5803,36 @@
     }, 2200);
   }
 
+  function appendMessagesWithStreamEffect(options) {
+    var settings = options || {};
+    var messages = Array.isArray(settings.messages) ? settings.messages : [];
+    var index = 0;
+
+    return new Promise(function (resolve) {
+      function appendNext() {
+        var delay;
+
+        if (index >= messages.length) {
+          if (typeof settings.onDone === "function") {
+            settings.onDone();
+          }
+          resolve();
+          return;
+        }
+
+        if (typeof settings.renderOne === "function") {
+          settings.renderOne(messages[index], index);
+        }
+
+        index += 1;
+        delay = 250 + Math.floor(Math.random() * 551);
+        window.setTimeout(appendNext, delay);
+      }
+
+      appendNext();
+    });
+  }
+
   function updateStatusTime() {
     var statusTime = getElement("statusTime");
     var now = new Date();
@@ -5287,6 +5890,9 @@
   window.AppNavigation = {
     getActivePage: getActivePage,
     refreshHomeSummary: refreshHomeSummary
+  };
+  window.AppStream = {
+    appendMessagesWithStreamEffect: appendMessagesWithStreamEffect
   };
   window.AppExtras = {
     openThoughtsForCharacter: openThoughtsForCharacter,

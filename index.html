@@ -390,6 +390,20 @@
         <form id="settingsForm" class="screen-content form-content" autocomplete="off">
           <section class="form-section" aria-label="接口设置">
             <div class="field-group">
+              <label for="apiProfileSelect">API 预设</label>
+              <select id="apiProfileSelect" name="apiProfileSelect"></select>
+              <div class="settings-action-row api-profile-actions">
+                <button id="newApiProfileBtn" class="outline-button" type="button">新增预设</button>
+                <button id="deleteApiProfileBtn" class="outline-button danger" type="button">删除预设</button>
+              </div>
+            </div>
+
+            <div class="field-group">
+              <label for="apiProfileName">预设名称</label>
+              <input id="apiProfileName" name="apiProfileName" type="text" placeholder="例如：默认线路">
+            </div>
+
+            <div class="field-group">
               <label for="apiUrl">API 地址</label>
               <input id="apiUrl" name="apiUrl" type="url" placeholder="https://api.example.com/v1/chat/completions">
             </div>
@@ -402,6 +416,11 @@
             <div class="field-group">
               <label for="modelName">模型名称</label>
               <input id="modelName" name="modelName" type="text" placeholder="gpt-4o-mini 或其他">
+            </div>
+
+            <div class="field-group">
+              <label for="apiTemperature">Temperature</label>
+              <input id="apiTemperature" name="apiTemperature" type="number" min="0" max="2" step="0.1" value="0.8">
             </div>
 
             <div class="field-group">
@@ -473,6 +492,15 @@
           <button id="newFamilyCardBtn" class="nav-text-button" type="button">新增</button>
         </header>
         <div id="familyCardContent" class="screen-content wallet-content"></div>
+      </section>
+
+      <section id="shopScreen" class="screen" aria-label="购物">
+        <header class="nav-bar">
+          <button id="shopBackBtn" class="nav-button" type="button" aria-label="返回首页">‹</button>
+          <h2>购物</h2>
+          <button id="refreshShopProductsBtn" class="nav-text-button" type="button">刷新商品</button>
+        </header>
+        <div id="shopContent" class="screen-content shop-content"></div>
       </section>
 
       <section id="worldBookScreen" class="screen" aria-label="世界书">

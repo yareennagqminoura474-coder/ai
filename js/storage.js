@@ -17,6 +17,7 @@
     moments: "myAiApp.moments",
     inlineOffline: "myAiApp.inlineOffline",
     wallet: "myAiApp.wallet",
+    shop: "myAiApp.shop",
     recentHidden: "myAiApp.recentHidden",
     theme: "myAiApp.theme",
     photos: "myAiApp.photos",
@@ -116,20 +117,22 @@
   }
 
   function getSettings() {
-    var settings = parseJson(localStorage.getItem(STORAGE_KEYS.settings), {});
-    return {
-      apiUrl: settings.apiUrl || "",
-      apiKey: settings.apiKey || "",
-      modelName: settings.modelName || ""
-    };
+    var rawSettings = parseJson(localStorage.getItem(STORAGE_KEYS.settings), {});
+    var settings = normalizeSettings(rawSettings);
+
+    if (!rawSettings || typeof rawSettings !== "object" || !Array.isArray(rawSettings.apiProfiles)) {
+      saveSettings(settings);
+    }
+
+    return settings;
   }
 
   function saveSettings(settings) {
-    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify({
-      apiUrl: settings.apiUrl || "",
-      apiKey: settings.apiKey || "",
-      modelName: settings.modelName || ""
-    }));
+    localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(normalizeSettings(settings || {})));
+  }
+
+  function getActiveApiProfile() {
+    return normalizeSettings(parseJson(localStorage.getItem(STORAGE_KEYS.settings), {})).activeApiProfile;
   }
 
   function getChatHistory(characterId) {
@@ -984,6 +987,18 @@
     }));
   }
 
+  function getShop() {
+    return normalizeShop(parseJson(localStorage.getItem(STORAGE_KEYS.shop), {}));
+  }
+
+  function saveShop(shop) {
+    localStorage.setItem(STORAGE_KEYS.shop, JSON.stringify(normalizeShop(shop || {})));
+  }
+
+  function getDefaultShopProducts() {
+    return createDefaultShopData();
+  }
+
   function getWallet() {
     return normalizeWallet(parseJson(localStorage.getItem(STORAGE_KEYS.wallet), {}));
   }
@@ -1138,6 +1153,12 @@
       return source;
     }
 
+    if (source.role !== "user") {
+      source.received = Boolean(source.received);
+      source.walletRecorded = Boolean(source.walletRecorded || source.walletLedgerId);
+      return source;
+    }
+
     if (source.paymentMethod === "familyCard" && source.familyCardId) {
       record = spendFamilyCard(source.familyCardId, amount, {
         sourceType: info.sourceType || "private",
@@ -1176,6 +1197,53 @@
     return source;
   }
 
+  function receiveMoneyMessage(message, context) {
+    var source = message && typeof message === "object" ? message : null;
+    var info = context || {};
+    var amount;
+    var record;
+    var type;
+
+    if (!source || source.role === "user" || (source.type !== "redPacket" && source.type !== "transfer")) {
+      return source;
+    }
+
+    if (source.received || source.walletRecorded || source.walletLedgerId) {
+      source.received = true;
+      source.walletRecorded = true;
+      return source;
+    }
+
+    amount = normalizePositiveAmount(source.amount);
+    if (!amount) {
+      return source;
+    }
+
+    type = source.type === "redPacket" ? "redpacket_in" : "transfer_in";
+    record = addWalletLedger({
+      type: type,
+      amount: amount,
+      direction: "income",
+      sourceType: info.sourceType || "private",
+      sourceId: info.sourceId || "",
+      characterId: info.characterId || source.characterId || "",
+      groupId: info.groupId || "",
+      note: source.note || source.content || (source.type === "redPacket" ? "红包" : "转账"),
+      createdAt: Date.now()
+    });
+
+    if (record) {
+      source.received = true;
+      source.receivedAt = record.createdAt;
+      source.walletRecorded = true;
+      source.walletLedgerId = record.id;
+      source.ledgerId = record.id;
+      source.status = source.type === "redPacket" ? "received" : "accepted";
+    }
+
+    return source;
+  }
+
   function getAllPrefixedItems(prefix) {
     var items = {};
 
@@ -1195,6 +1263,9 @@
       exportedAt: Date.now(),
       characters: getCharacters(),
       settings: getSettings(),
+      apiProfiles: getSettings().apiProfiles,
+      activeApiProfileId: getSettings().activeApiProfileId,
+      temperature: getSettings().temperature,
       chatHistory: getAllChatHistories(),
       groups: getGroups(),
       groupChatHistory: getAllGroupChatHistories(),
@@ -1204,6 +1275,14 @@
       worldBooks: getWorldBooks(),
       thoughts: getThoughtStore(),
       diaries: getDiaries(),
+      diarySettings: getCharacters().reduce(function (settings, character) {
+        settings[character.id] = character.diarySettings || {};
+        return settings;
+      }, {}),
+      momentSettings: getCharacters().reduce(function (settings, character) {
+        settings[character.id] = character.momentSettings || {};
+        return settings;
+      }, {}),
       userProfile: getUserProfile(),
       userPersonas: getUserPersonas(),
       desktopState: getDesktopState(),
@@ -1211,6 +1290,7 @@
       moments: getMoments(),
       inlineOffline: getInlineOfflineStates(),
       wallet: getWallet(),
+      shop: getShop(),
       themes: getTheme(),
       photos: getPhotos(),
       notes: getNotes(),
@@ -1245,6 +1325,7 @@
     saveMoments(normalized.moments);
     saveInlineOfflineStates(normalized.inlineOffline);
     saveWallet(normalized.wallet);
+    saveShop(normalized.shop);
     saveTheme(normalized.themes);
     savePhotos(normalized.photos);
     saveNotes(normalized.notes);
@@ -1269,12 +1350,21 @@
     }
 
     return {
-      characters: Array.isArray(data.characters) ? data.characters.map(normalizeCharacter) : [],
-      settings: {
-        apiUrl: String(data.settings && data.settings.apiUrl || ""),
-        apiKey: String(data.settings && data.settings.apiKey || ""),
-        modelName: String(data.settings && data.settings.modelName || "")
-      },
+      characters: Array.isArray(data.characters) ? data.characters.map(function (character, index) {
+        var normalized = normalizeCharacter(character, index);
+        if (data.diarySettings && data.diarySettings[normalized.id]) {
+          normalized.diarySettings = normalizeCharacterDiarySettings(data.diarySettings[normalized.id]);
+        }
+        if (data.momentSettings && data.momentSettings[normalized.id]) {
+          normalized.momentSettings = normalizeCharacterMomentSettings(data.momentSettings[normalized.id]);
+        }
+        return normalized;
+      }) : [],
+      settings: normalizeSettings(Object.assign({}, data.settings || {}, {
+        apiProfiles: data.apiProfiles || data.settings && data.settings.apiProfiles,
+        activeApiProfileId: data.activeApiProfileId || data.settings && data.settings.activeApiProfileId,
+        temperature: data.temperature !== undefined ? data.temperature : data.settings && data.settings.temperature
+      })),
       chatHistory: normalizeMessageMap(data.chatHistory || data.privateChatHistories || data.privateChatHistory || {}),
       groups: Array.isArray(data.groups) ? data.groups.map(normalizeGroup) : [],
       groupChatHistory: normalizeMessageMap(data.groupChatHistory || data.groupChatHistories || {}),
@@ -1291,11 +1381,78 @@
       moments: normalizeMoments(data.moments || data.momentPosts || []),
       inlineOffline: normalizeInlineOfflineStates(data.inlineOffline || data.inlineOfflineStates || {}),
       wallet: normalizeWallet(data.wallet || {}),
+      shop: normalizeShop(data.shop || {}),
       themes: normalizeTheme(data.themes || data.theme || {}),
       photos: normalizePhotos(data.photos || []),
       notes: normalizeNotes(data.notes || []),
       recentHidden: normalizeRecentHidden(data.recentHidden || {})
     };
+  }
+
+  function normalizeSettings(settings) {
+    var source = settings && typeof settings === "object" && !Array.isArray(settings) ? settings : {};
+    var profiles = Array.isArray(source.apiProfiles) ? source.apiProfiles.map(normalizeApiProfile).filter(function (profile) {
+      return profile.id;
+    }) : [];
+    var legacyTemperature = clampTemperature(source.temperature);
+    var activeId = String(source.activeApiProfileId || "");
+    var activeProfile;
+
+    if (!profiles.length) {
+      profiles.push(normalizeApiProfile({
+        id: activeId || "default",
+        name: "默认预设",
+        apiUrl: source.apiUrl || "",
+        apiKey: source.apiKey || "",
+        modelName: source.modelName || "",
+        temperature: legacyTemperature,
+        createdAt: source.createdAt || Date.now(),
+        updatedAt: source.updatedAt || Date.now()
+      }));
+    }
+
+    activeProfile = profiles.find(function (profile) {
+      return profile.id === activeId;
+    }) || profiles[0];
+    activeId = activeProfile.id;
+
+    return {
+      activeApiProfileId: activeId,
+      apiProfiles: profiles,
+      apiUrl: activeProfile.apiUrl || "",
+      apiKey: activeProfile.apiKey || "",
+      modelName: activeProfile.modelName || "",
+      temperature: clampTemperature(activeProfile.temperature),
+      activeApiProfile: Object.assign({}, activeProfile, {
+        temperature: clampTemperature(activeProfile.temperature)
+      })
+    };
+  }
+
+  function normalizeApiProfile(profile, index) {
+    var source = profile && typeof profile === "object" && !Array.isArray(profile) ? profile : {};
+    var now = Date.now();
+
+    return {
+      id: String(source.id || createId("api") + "_" + (index || 0)),
+      name: String(source.name || "API 预设"),
+      apiUrl: String(source.apiUrl || ""),
+      apiKey: String(source.apiKey || ""),
+      modelName: String(source.modelName || ""),
+      temperature: clampTemperature(source.temperature),
+      createdAt: Number(source.createdAt) || now,
+      updatedAt: Number(source.updatedAt) || now
+    };
+  }
+
+  function clampTemperature(value) {
+    var temperature = Number(value);
+
+    if (!Number.isFinite(temperature)) {
+      temperature = 0.8;
+    }
+
+    return Math.max(0, Math.min(2, Math.round(temperature * 100) / 100));
   }
 
   function normalizeCharacter(character, index) {
@@ -1773,6 +1930,143 @@
     return normalized;
   }
 
+  function normalizeShop(shop) {
+    var source = shop && typeof shop === "object" && !Array.isArray(shop) ? shop : {};
+
+    return {
+      productsGeneratedAt: Number(source.productsGeneratedAt) || 0,
+      foodShops: Array.isArray(source.foodShops) ? source.foodShops.map(normalizeFoodShop).filter(function (shopItem) {
+        return shopItem.name && shopItem.products.length;
+      }) : [],
+      mallProducts: Array.isArray(source.mallProducts) ? source.mallProducts.map(function (product, index) {
+        return normalizeProduct(product, "mall", index);
+      }).filter(function (product) {
+        return product.name;
+      }) : [],
+      cart: Array.isArray(source.cart) ? source.cart.map(normalizeCartItem).filter(function (item) {
+        return item.name && item.quantity > 0;
+      }) : [],
+      orders: Array.isArray(source.orders) ? source.orders.map(normalizeShopOrder).filter(function (order) {
+        return order.items.length;
+      }) : []
+    };
+  }
+
+  function normalizeFoodShop(shop, index) {
+    var source = shop && typeof shop === "object" ? shop : {};
+    var shopId = String(source.id || createId("foodshop") + "_" + (index || 0));
+
+    return {
+      id: shopId,
+      name: String(source.name || ""),
+      description: String(source.description || ""),
+      products: Array.isArray(source.products) ? source.products.map(function (product, productIndex) {
+        return normalizeProduct(Object.assign({}, product || {}, {
+          shopId: shopId
+        }), "food", productIndex);
+      }).filter(function (product) {
+        return product.name;
+      }) : []
+    };
+  }
+
+  function normalizeProduct(product, sourceType, index) {
+    var source = product && typeof product === "object" ? product : {};
+    var price = Math.max(0.1, roundAmount(source.price || source.amount || 1));
+
+    return {
+      id: String(source.id || createId("product") + "_" + (index || 0)),
+      name: String(source.name || ""),
+      description: String(source.description || ""),
+      price: price,
+      imagePrompt: String(source.imagePrompt || ""),
+      category: String(source.category || (sourceType === "food" ? "日常" : "生活")),
+      stock: Math.max(0, Number(source.stock) || 99),
+      shopId: String(source.shopId || "")
+    };
+  }
+
+  function normalizeCartItem(item, index) {
+    var source = item && typeof item === "object" ? item : {};
+
+    return {
+      id: String(source.id || createId("cart") + "_" + (index || 0)),
+      productId: String(source.productId || ""),
+      sourceType: source.sourceType === "food" ? "food" : "mall",
+      shopId: String(source.shopId || ""),
+      name: String(source.name || ""),
+      price: Math.max(0, roundAmount(source.price)),
+      quantity: Math.max(1, Math.min(99, Number(source.quantity) || 1))
+    };
+  }
+
+  function normalizeShopOrder(order, index) {
+    var source = order && typeof order === "object" ? order : {};
+
+    return {
+      id: String(source.id || createId("order") + "_" + (index || 0)),
+      items: Array.isArray(source.items) ? source.items.map(normalizeCartItem).filter(function (item) {
+        return item.name;
+      }) : [],
+      totalAmount: normalizePositiveAmount(source.totalAmount),
+      payMethod: source.payMethod === "familyCard" ? "familyCard" : "wallet",
+      familyCardId: String(source.familyCardId || ""),
+      createdAt: Number(source.createdAt) || Date.now()
+    };
+  }
+
+  function createDefaultShopData() {
+    var foodNames = [
+      ["晚风便当铺", "适合边聊天边吃的温柔便当", [["海苔鸡排饭", 18.8, "主食"], ["番茄牛肉饭", 22.5, "主食"], ["玉子烧小盒", 9.9, "小食"], ["柠檬气泡水", 7.5, "饮品"], ["热乎味噌汤", 6.8, "汤品"]]],
+      ["月亮甜品屋", "送给角色也不突兀的小甜点", [["草莓云朵卷", 16.8, "甜品"], ["焦糖布丁", 12.8, "甜品"], ["小熊曲奇袋", 13.9, "零食"], ["桂花乌龙奶茶", 14.5, "饮品"], ["栗子奶油盒", 17.8, "甜品"]]],
+      ["课间小食堂", "学习间隙的轻松补给", [["芝士饭团", 8.8, "主食"], ["咖喱可乐饼", 10.5, "小食"], ["热狗小船", 12.0, "小食"], ["冰镇酸奶", 6.5, "饮品"], ["午后水果杯", 11.8, "水果"]]],
+      ["深夜粥铺", "安静夜晚的一点热气", [["皮蛋瘦肉粥", 15.8, "粥品"], ["南瓜小米粥", 12.8, "粥品"], ["葱油拌面", 13.8, "主食"], ["糖心蛋", 4.0, "小食"], ["蜂蜜柚子茶", 8.8, "饮品"]]]
+    ];
+    var mallNames = [
+      ["软绵绵抱枕", 39.9, "日用品"], ["透明便利贴", 9.9, "学习"], ["星星笔记本", 16.8, "学习"], ["角色同款发夹", 19.9, "周边"], ["迷你香薰石", 22.0, "生活"],
+      ["暖手小方块", 29.9, "日用品"], ["告白信纸套装", 12.8, "礼物"], ["云朵马克杯", 35.0, "生活"], ["小兔钥匙扣", 15.8, "周边"], ["夜读台灯", 49.9, "学习"],
+      ["奶盐饼干罐", 18.8, "零食"], ["薄荷糖小盒", 7.5, "零食"], ["雨天贴纸包", 8.8, "学习"], ["柔软围巾", 59.0, "穿搭"], ["拍立得相册", 32.0, "生活"],
+      ["可爱便当袋", 26.8, "日用品"], ["心情记录卡", 11.9, "学习"], ["角色生日徽章", 13.8, "周边"], ["樱花洗衣珠", 24.9, "日用品"], ["午睡眼罩", 21.8, "生活"]
+    ];
+
+    return {
+      productsGeneratedAt: Date.now(),
+      foodShops: foodNames.map(function (shop) {
+        var shopId = createId("foodshop");
+        return {
+          id: shopId,
+          name: shop[0],
+          description: shop[1],
+          products: shop[2].map(function (product) {
+            return {
+              id: createId("food"),
+              name: product[0],
+              description: "适合心屿小手机里的日常互动。",
+              price: product[1],
+              imagePrompt: product[0],
+              category: product[2],
+              stock: 99,
+              shopId: shopId
+            };
+          })
+        };
+      }),
+      mallProducts: mallNames.map(function (product) {
+        return {
+          id: createId("mall"),
+          name: product[0],
+          description: "可以自用，也可以当作送给角色的小礼物。",
+          price: product[1],
+          imagePrompt: product[0],
+          category: product[2],
+          stock: 99
+        };
+      }),
+      cart: [],
+      orders: []
+    };
+  }
+
   function normalizeWallet(wallet) {
     var source = wallet && typeof wallet === "object" && !Array.isArray(wallet) ? wallet : {};
     return {
@@ -1903,6 +2197,7 @@
     localStorage.removeItem(STORAGE_KEYS.moments);
     localStorage.removeItem(STORAGE_KEYS.inlineOffline);
     localStorage.removeItem(STORAGE_KEYS.wallet);
+    localStorage.removeItem(STORAGE_KEYS.shop);
     localStorage.removeItem(STORAGE_KEYS.recentHidden);
     localStorage.removeItem(STORAGE_KEYS.theme);
     localStorage.removeItem(STORAGE_KEYS.photos);
@@ -2020,6 +2315,10 @@
     addNote: addNote,
     updateNote: updateNote,
     deleteNote: deleteNote,
+    getActiveApiProfile: getActiveApiProfile,
+    getShop: getShop,
+    saveShop: saveShop,
+    getDefaultShopProducts: getDefaultShopProducts,
     getWallet: getWallet,
     saveWallet: saveWallet,
     addWalletLedger: addWalletLedger,
@@ -2032,6 +2331,7 @@
     getFamilyCardById: getFamilyCardById,
     spendFamilyCard: spendFamilyCard,
     recordMoneyMessage: recordMoneyMessage,
+    receiveMoneyMessage: receiveMoneyMessage,
     exportAllData: exportAllData,
     importAllData: importAllData,
     clearAllData: clearAllData

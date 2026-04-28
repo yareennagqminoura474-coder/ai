@@ -33,6 +33,20 @@
     return amount.toFixed(2);
   }
 
+  function normalizeDisplayText(text) {
+    if (window.AIService && window.AIService.normalizeAiMessageText) {
+      return window.AIService.normalizeAiMessageText(text);
+    }
+
+    return String(text || "").trim();
+  }
+
+  function getBubbleTextClass(text) {
+    var value = normalizeDisplayText(text);
+
+    return value.length > 0 && value.length <= 6 && value.indexOf("\n") === -1 ? " short-text" : "";
+  }
+
   function getActivePage() {
     if (window.AppNavigation && window.AppNavigation.getActivePage) {
       return window.AppNavigation.getActivePage();
@@ -583,7 +597,12 @@
       return;
     }
 
-    window.setActivePage("characterListScreen");
+    if (createReturnPage === "wechatScreen") {
+      window.setActivePage("wechatScreen");
+      return;
+    }
+
+    window.setActivePage(createReturnPage || "characterListScreen");
   }
 
   function getFieldValue(id) {
@@ -869,7 +888,7 @@
     var settings = getPrivateChatSettings(character);
     var roleClass = message.role === "user" ? "user" : "character";
     var avatar = roleClass === "character" ? renderAvatar(character, "message-avatar") : renderPrivateUserMessageAvatar(character, settings);
-    var bubbleClass = "message-bubble";
+    var bubbleClass = "message-bubble" + getBubbleTextClass(message.content);
     var selectCheck = renderPrivateMessageSelectCheck(message);
 
     if (message.type === "offlineAction") {
@@ -927,7 +946,7 @@
     return [
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="message-bubble">' + escapeHtml(message.content) + "</div>",
+      '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + "</div>",
       "</div>"
     ].join("");
   }
@@ -963,7 +982,7 @@
   }
 
   function renderMessageContent(message) {
-    return escapeHtml(message.content);
+    return escapeHtml(normalizeDisplayText(message.content));
   }
 
   function isStandaloneMessage(message) {
@@ -1080,28 +1099,38 @@
   }
 
   function renderRedPacketMessage(message) {
+    var canReceive = message.role === "character";
+    var received = isMoneyMessageReceived(message);
     return [
-      '<button class="message-special-wrapper red-packet-card message-detail-trigger" type="button" data-message-id="' + escapeHtml(message.id || "") + '">',
+      '<button class="message-special-wrapper red-packet-card message-detail-trigger' + (received ? " received" : "") + '" type="button" data-message-id="' + escapeHtml(message.id || "") + '"' + (canReceive && !received ? ' data-money-claim="redPacket"' : "") + '>',
       '  <span class="money-card-icon">福</span>',
       '  <span class="money-card-main">',
       "    <strong>" + escapeHtml(message.content || "恭喜发财，大吉大利") + "</strong>",
       "    <em>微信红包</em>",
+      canReceive ? '    <small class="money-card-action">' + (received ? "已领取" : "领取红包") + "</small>" : "",
       "  </span>",
       "</button>"
     ].join("");
   }
 
   function renderTransferMessage(message) {
+    var canReceive = message.role === "character";
+    var received = isMoneyMessageReceived(message);
     return [
-      '<button class="message-special-wrapper transfer-message-card message-detail-trigger" type="button" data-message-id="' + escapeHtml(message.id || "") + '">',
+      '<button class="message-special-wrapper transfer-message-card message-detail-trigger' + (received ? " received" : "") + '" type="button" data-message-id="' + escapeHtml(message.id || "") + '"' + (canReceive && !received ? ' data-money-claim="transfer"' : "") + '>',
       '  <span class="money-card-icon">¥</span>',
       '  <span class="money-card-main">',
       "    <strong>¥" + escapeHtml(message.amount || "0.00") + "</strong>",
       "    <em>" + escapeHtml(message.note || "转账") + "</em>",
       "    <small>微信转账</small>",
+      canReceive ? '    <small class="money-card-action">' + (received ? "已收款" : "收款") + "</small>" : "",
       "  </span>",
       "</button>"
     ].join("");
+  }
+
+  function isMoneyMessageReceived(message) {
+    return Boolean(message && (message.received || message.walletRecorded || message.walletLedgerId));
   }
 
   function bindPrivateMessageActions(container, messages) {
@@ -1188,11 +1217,46 @@
           return;
         }
 
+        if (message && button.dataset.moneyClaim) {
+          receivePrivateMoneyMessage(message.id);
+          return;
+        }
+
         if (message && window.WeChatTools && window.WeChatTools.showMessageDetail) {
           window.WeChatTools.showMessageDetail(message);
         }
       });
     });
+  }
+
+  function receivePrivateMoneyMessage(messageId) {
+    var character = activeCharacterId ? getCharacterById(activeCharacterId) : null;
+    var messages;
+    var changed = false;
+
+    if (!character || !window.AppStorage.receiveMoneyMessage) {
+      return;
+    }
+
+    messages = window.AppStorage.getChatHistory(character.id).map(function (message) {
+      if (message.id !== messageId) {
+        return message;
+      }
+
+      changed = true;
+      return window.AppStorage.receiveMoneyMessage(Object.assign({}, message), {
+        sourceType: "private",
+        sourceId: character.id,
+        characterId: character.id,
+        sourceName: character.name
+      });
+    });
+
+    if (changed) {
+      window.AppStorage.saveChatHistory(character.id, messages);
+      renderChatMessages(character.id);
+      renderCharacterList();
+    }
   }
 
   function isPrivateMessageSelectable(message) {
@@ -1762,8 +1826,9 @@
         replies = aiResult.replies;
       }
 
-      messages = appendPrivateReplies(before.slice(), requestCharacterId, replies).concat(after);
       persistPrivateAiExtras(requestCharacterId, aiResult, "private");
+      await streamPrivateReplies(before.slice(), requestCharacterId, replies, after);
+      messages = null;
     } catch (error) {
       messages = before.concat([{
         id: String(Date.now()),
@@ -1774,7 +1839,9 @@
       }], after);
     } finally {
       if (getCharacterById(requestCharacterId)) {
-        window.AppStorage.saveChatHistory(requestCharacterId, messages);
+        if (messages) {
+          window.AppStorage.saveChatHistory(requestCharacterId, messages);
+        }
         if (activeCharacterId === requestCharacterId) {
           renderChatMessages(requestCharacterId);
         }
@@ -1808,6 +1875,52 @@
     });
 
     return messages;
+  }
+
+  function streamPrivateReplies(baseMessages, characterId, replies, suffixMessages) {
+    var shown = [];
+    var startAt = Date.now();
+    var suffix = Array.isArray(suffixMessages) ? suffixMessages : [];
+    var items = (replies || []).slice(0, 50).filter(function (item) {
+      return item && item.content;
+    });
+
+    if (!window.AppStream || !window.AppStream.appendMessagesWithStreamEffect) {
+      window.AppStorage.saveChatHistory(characterId, appendPrivateReplies(baseMessages.slice(), characterId, items).concat(suffix));
+      if (activeCharacterId === characterId) {
+        renderChatMessages(characterId);
+      }
+      return Promise.resolve();
+    }
+
+    return window.AppStream.appendMessagesWithStreamEffect({
+      targetType: "private",
+      targetId: characterId,
+      messages: items,
+      renderOne: function (item, index) {
+        var character = getCharacterById(characterId);
+        var createdAt = startAt + index;
+        var message;
+
+        if (!character) {
+          return;
+        }
+
+        message = createPrivateCharacterReplyMessage(item, createdAt);
+        message = recordPrivateMoneyMessage(message, character);
+        shown.push(message);
+        window.AppStorage.addCharacterMemory(characterId, {
+          content: "角色曾回复：" + getMessageMemoryText(message),
+          source: "private",
+          createdAt: createdAt
+        });
+        window.AppStorage.saveChatHistory(characterId, baseMessages.concat(shown, suffix));
+        if (activeCharacterId === characterId) {
+          renderChatMessages(characterId);
+        }
+        renderCharacterList();
+      }
+    });
   }
 
   function normalizePrivateAiResult(result) {
@@ -1920,6 +2033,7 @@
       message.content = source.content || "转账";
     }
 
+    message.content = normalizeDisplayText(message.content || source.content || "");
     return message;
   }
 
@@ -2006,8 +2120,13 @@
       }
 
       messages = removeLoadingMessages(window.AppStorage.getChatHistory(requestCharacterId));
-      messages = appendPrivateReplies(messages, requestCharacterId, replies);
+      window.AppStorage.saveChatHistory(requestCharacterId, messages);
+      if (activeCharacterId === requestCharacterId) {
+        renderChatMessages(requestCharacterId);
+      }
       persistPrivateAiExtras(requestCharacterId, aiResult, "private");
+      await streamPrivateReplies(messages, requestCharacterId, replies, []);
+      messages = null;
     } catch (error) {
       errorContent = error && error.message === window.AIService.MISSING_SETTINGS_MESSAGE
         ? window.AIService.MISSING_SETTINGS_MESSAGE
@@ -2023,7 +2142,9 @@
       });
     } finally {
       if (getCharacterById(requestCharacterId)) {
-        window.AppStorage.saveChatHistory(requestCharacterId, messages);
+        if (messages) {
+          window.AppStorage.saveChatHistory(requestCharacterId, messages);
+        }
         if (activeCharacterId === requestCharacterId) {
           renderChatMessages(requestCharacterId);
         }

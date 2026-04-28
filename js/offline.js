@@ -303,8 +303,11 @@
       events = Array.isArray(aiResult) ? aiResult : (aiResult && aiResult.events || []);
       session = getCurrentSession();
       session.history = removeLoadingEvents(session.history);
-      appendOfflineEvents(session, events);
+      window.AppStorage.saveOfflineSession(session);
+      renderOfflineMessages();
       persistOfflineAiExtras(session, aiResult);
+      await streamOfflineEvents(session, events);
+      session = null;
     } catch (error) {
       session = getCurrentSession();
       session.history = removeLoadingEvents(session.history);
@@ -318,8 +321,10 @@
         createdAt: Date.now()
       });
     } finally {
-      session.updatedAt = Date.now();
-      window.AppStorage.saveOfflineSession(session);
+      if (session) {
+        session.updatedAt = Date.now();
+        window.AppStorage.saveOfflineSession(session);
+      }
       renderOfflineMessages();
       isAdvancing = false;
       setAdvanceState(false);
@@ -615,13 +620,20 @@
         memories: window.AppStorage.getMemoriesForCharacters([character.id])
       });
       messages = removeLoadingEvents(window.AppStorage.getChatHistory(character.id));
-      appendInlineOfflineEvents(messages, "private", character.id, [character], aiResult && aiResult.events || []);
+      window.AppStorage.saveChatHistory(character.id, messages);
+      if (window.CharacterManager && window.CharacterManager.renderChatMessages) {
+        window.CharacterManager.renderChatMessages(character.id);
+      }
       persistInlineOfflineExtras("private", character.id, [character.id], aiResult);
+      await streamInlineOfflineEvents(messages, "private", character.id, [character], aiResult && aiResult.events || []);
+      messages = null;
     } catch (error) {
       messages = removeLoadingEvents(window.AppStorage.getChatHistory(character.id));
       messages.push(createInlineErrorMessage(error));
     } finally {
-      window.AppStorage.saveChatHistory(character.id, messages);
+      if (messages) {
+        window.AppStorage.saveChatHistory(character.id, messages);
+      }
       if (window.CharacterManager && window.CharacterManager.renderChatMessages) {
         window.CharacterManager.renderChatMessages(character.id);
         window.CharacterManager.renderCharacterList();
@@ -670,13 +682,20 @@
         memories: window.AppStorage.getMemoriesForCharacters(group.memberIds || [])
       });
       messages = removeLoadingEvents(window.AppStorage.getGroupChatHistory(group.id));
-      appendInlineOfflineEvents(messages, "group", group.id, participants, aiResult && aiResult.events || []);
+      window.AppStorage.saveGroupChatHistory(group.id, messages);
+      if (window.GroupManager && window.GroupManager.renderGroupChatMessages) {
+        window.GroupManager.renderGroupChatMessages(group.id);
+      }
       persistInlineOfflineExtras("group", group.id, group.memberIds || [], aiResult);
+      await streamInlineOfflineEvents(messages, "group", group.id, participants, aiResult && aiResult.events || []);
+      messages = null;
     } catch (error) {
       messages = removeLoadingEvents(window.AppStorage.getGroupChatHistory(group.id));
       messages.push(createInlineErrorMessage(error, participants[0]));
     } finally {
-      window.AppStorage.saveGroupChatHistory(group.id, messages);
+      if (messages) {
+        window.AppStorage.saveGroupChatHistory(group.id, messages);
+      }
       if (window.GroupManager && window.GroupManager.renderGroupChatMessages) {
         window.GroupManager.renderGroupChatMessages(group.id);
         window.GroupManager.renderGroupList();
@@ -741,6 +760,131 @@
 
       recordOfflineMoneyEvent(event, mode, chatId, speechCharacter);
       writeInlineEventMemory(mode, chatId, participants, speechCharacter, event.content, now);
+    });
+  }
+
+  function streamInlineOfflineEvents(baseMessages, mode, chatId, participants, events) {
+    var participantMap = {};
+    var shown = [];
+    var items = (events || []).slice(0, 50).filter(function (event) {
+      return event && event.content;
+    });
+
+    (participants || []).forEach(function (character) {
+      participantMap[character.id] = character;
+    });
+
+    if (!window.AppStream || !window.AppStream.appendMessagesWithStreamEffect) {
+      appendInlineOfflineEvents(baseMessages, mode, chatId, participants, items);
+      if (mode === "group") {
+        window.AppStorage.saveGroupChatHistory(chatId, baseMessages);
+      } else {
+        window.AppStorage.saveChatHistory(chatId, baseMessages);
+      }
+      return Promise.resolve();
+    }
+
+    return window.AppStream.appendMessagesWithStreamEffect({
+      targetType: mode,
+      targetId: chatId,
+      messages: items,
+      renderOne: function (event, index) {
+        var now = Date.now() + index;
+        var character = event.characterId ? participantMap[event.characterId] : null;
+        var speechCharacter = event.type === "speech"
+          ? (character || participants[0])
+          : null;
+        var message = {
+          id: String(now + Math.random()),
+          role: speechCharacter ? "character" : "system",
+          type: speechCharacter ? "offlineSpeech" : "offlineAction",
+          characterId: speechCharacter ? speechCharacter.id : "",
+          characterName: speechCharacter ? speechCharacter.name : "",
+          content: event.content,
+          createdAt: now
+        };
+
+        shown.push(message);
+        recordOfflineMoneyEvent(event, mode, chatId, speechCharacter);
+        writeInlineEventMemory(mode, chatId, participants, speechCharacter, event.content, now);
+
+        if (mode === "group") {
+          window.AppStorage.saveGroupChatHistory(chatId, baseMessages.concat(shown));
+          if (window.GroupManager && window.GroupManager.renderGroupChatMessages) {
+            window.GroupManager.renderGroupChatMessages(chatId);
+          }
+        } else {
+          window.AppStorage.saveChatHistory(chatId, baseMessages.concat(shown));
+          if (window.CharacterManager && window.CharacterManager.renderChatMessages) {
+            window.CharacterManager.renderChatMessages(chatId);
+          }
+        }
+      }
+    });
+  }
+
+  function streamOfflineEvents(session, events) {
+    var baseHistory = session && Array.isArray(session.history) ? session.history.slice() : [];
+    var shown = [];
+    var items = (events || []).slice(0, 50).filter(function (event) {
+      return event && event.content;
+    });
+
+    if (!session || !window.AppStream || !window.AppStream.appendMessagesWithStreamEffect) {
+      if (session) {
+        appendOfflineEvents(session, items);
+        session.updatedAt = Date.now();
+        window.AppStorage.saveOfflineSession(session);
+      }
+      return Promise.resolve();
+    }
+
+    return window.AppStream.appendMessagesWithStreamEffect({
+      targetType: "offline",
+      targetId: session.id,
+      messages: items,
+      renderOne: function (event) {
+        var character = event.characterId ? getCharacterById(event.characterId) : null;
+        var now = Date.now();
+        var message = {
+          id: String(now + Math.random()),
+          role: event.type === "speech" ? "character" : "system",
+          type: event.type,
+          characterId: event.characterId || "",
+          characterName: character ? character.name : "",
+          content: event.content,
+          createdAt: now
+        };
+        var nextSession = window.AppStorage.getOfflineSession(session.id);
+
+        if (!nextSession) {
+          return;
+        }
+
+        shown.push(message);
+        recordOfflineMoneyEvent(event, session.mode, session.targetId, character);
+        if (event.type === "speech" && character) {
+          window.AppStorage.addCharacterMemory(character.id, {
+            content: "线下模式中说：" + event.content,
+            source: "offline",
+            createdAt: now
+          });
+        } else {
+          (session.participantIds || []).forEach(function (memberId) {
+            window.AppStorage.addCharacterMemory(memberId, {
+              content: "线下事件：" + event.content,
+              source: "offline",
+              createdAt: now
+            });
+          });
+        }
+        nextSession.history = baseHistory.concat(shown);
+        nextSession.updatedAt = Date.now();
+        window.AppStorage.saveOfflineSession(nextSession);
+        if (currentSessionId === session.id) {
+          renderOfflineMessages();
+        }
+      }
     });
   }
 

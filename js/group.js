@@ -3,6 +3,7 @@
 
   var selectedMemberIds = [];
   var activeGroupId = "";
+  var createReturnPage = "groupListScreen";
   var isGroupReplying = false;
   var isGroupSelectionMode = false;
   var selectedGroupIds = [];
@@ -21,6 +22,20 @@
       .replace(/>/g, "&gt;")
       .replace(/"/g, "&quot;")
       .replace(/'/g, "&#039;");
+  }
+
+  function normalizeDisplayText(text) {
+    if (window.AIService && window.AIService.normalizeAiMessageText) {
+      return window.AIService.normalizeAiMessageText(text);
+    }
+
+    return String(text || "").trim();
+  }
+
+  function getBubbleTextClass(text) {
+    var value = normalizeDisplayText(text);
+
+    return value.length > 0 && value.length <= 6 && value.indexOf("\n") === -1 ? " short-text" : "";
   }
 
   function getCharacterById(characterId) {
@@ -83,6 +98,14 @@
     if (window.AppNavigation && window.AppNavigation.refreshHomeSummary) {
       window.AppNavigation.refreshHomeSummary();
     }
+  }
+
+  function getActivePage() {
+    if (window.AppNavigation && window.AppNavigation.getActivePage) {
+      return window.AppNavigation.getActivePage();
+    }
+
+    return "homeScreen";
   }
 
   function renderGroupList() {
@@ -319,8 +342,10 @@
 
   function openCreateGroupScreen() {
     var form = getElement("createGroupForm");
+    var currentPage = getActivePage();
 
     selectedMemberIds = [];
+    createReturnPage = currentPage === "createGroupScreen" ? "groupListScreen" : currentPage;
     hideGroupFormError();
     if (form) {
       form.reset();
@@ -409,7 +434,11 @@
     hideGroupFormError();
     renderGroupList();
     refreshHomeSummary();
-    window.setActivePage("groupListScreen");
+    if (createReturnPage === "wechatScreen") {
+      window.setActivePage("wechatScreen");
+    } else {
+      window.setActivePage(createReturnPage || "groupListScreen");
+    }
   }
 
   function showGroupFormError(message) {
@@ -494,7 +523,7 @@
           return [
             '<div class="message-row user message-action-target" data-message-id="' + messageId + '">',
             selectCheck,
-            '  <div class="message-bubble">' + renderGroupMessageContent(message) + "</div>",
+            '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + renderGroupMessageContent(message) + "</div>",
             userAvatar,
             "</div>"
           ].join("");
@@ -626,7 +655,7 @@
 
   function renderCharacterGroupMessage(message) {
     var character = getCharacterById(message.characterId);
-    var bubbleClass = "message-bubble";
+    var bubbleClass = "message-bubble" + getBubbleTextClass(message.content);
     var messageId = escapeHtml(message.id || "");
     var selectCheck = renderGroupMessageSelectCheck(message);
 
@@ -667,7 +696,7 @@
     return [
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="message-bubble">' + escapeHtml(message.content) + "</div>",
+      '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + "</div>",
       "</div>"
     ].join("");
   }
@@ -703,7 +732,7 @@
   }
 
   function renderGroupMessageContent(message) {
-    return escapeHtml(message.content);
+    return escapeHtml(normalizeDisplayText(message.content));
   }
 
   function isStandaloneMessage(message) {
@@ -820,28 +849,38 @@
   }
 
   function renderRedPacketMessage(message) {
+    var canReceive = message.role === "character";
+    var received = isMoneyMessageReceived(message);
     return [
-      '<button class="message-special-wrapper red-packet-card message-detail-trigger" type="button" data-message-id="' + escapeHtml(message.id || "") + '">',
+      '<button class="message-special-wrapper red-packet-card message-detail-trigger' + (received ? " received" : "") + '" type="button" data-message-id="' + escapeHtml(message.id || "") + '"' + (canReceive && !received ? ' data-money-claim="redPacket"' : "") + '>',
       '  <span class="money-card-icon">福</span>',
       '  <span class="money-card-main">',
       "    <strong>" + escapeHtml(message.content || "恭喜发财，大吉大利") + "</strong>",
       "    <em>微信红包</em>",
+      canReceive ? '    <small class="money-card-action">' + (received ? "已领取" : "领取红包") + "</small>" : "",
       "  </span>",
       "</button>"
     ].join("");
   }
 
   function renderTransferMessage(message) {
+    var canReceive = message.role === "character";
+    var received = isMoneyMessageReceived(message);
     return [
-      '<button class="message-special-wrapper transfer-message-card message-detail-trigger" type="button" data-message-id="' + escapeHtml(message.id || "") + '">',
+      '<button class="message-special-wrapper transfer-message-card message-detail-trigger' + (received ? " received" : "") + '" type="button" data-message-id="' + escapeHtml(message.id || "") + '"' + (canReceive && !received ? ' data-money-claim="transfer"' : "") + '>',
       '  <span class="money-card-icon">¥</span>',
       '  <span class="money-card-main">',
       "    <strong>¥" + escapeHtml(message.amount || "0.00") + "</strong>",
       "    <em>" + escapeHtml(message.note || "转账") + "</em>",
       "    <small>微信转账</small>",
+      canReceive ? '    <small class="money-card-action">' + (received ? "已收款" : "收款") + "</small>" : "",
       "  </span>",
       "</button>"
     ].join("");
+  }
+
+  function isMoneyMessageReceived(message) {
+    return Boolean(message && (message.received || message.walletRecorded || message.walletLedgerId));
   }
 
   function bindGroupMessageActions(container, messages) {
@@ -928,11 +967,47 @@
           return;
         }
 
+        if (message && button.dataset.moneyClaim) {
+          receiveGroupMoneyMessage(message.id);
+          return;
+        }
+
         if (message && window.WeChatTools && window.WeChatTools.showMessageDetail) {
           window.WeChatTools.showMessageDetail(message);
         }
       });
     });
+  }
+
+  function receiveGroupMoneyMessage(messageId) {
+    var group = activeGroupId ? getGroupById(activeGroupId) : null;
+    var messages;
+    var changed = false;
+
+    if (!group || !window.AppStorage.receiveMoneyMessage) {
+      return;
+    }
+
+    messages = window.AppStorage.getGroupChatHistory(group.id).map(function (message) {
+      if (message.id !== messageId) {
+        return message;
+      }
+
+      changed = true;
+      return window.AppStorage.receiveMoneyMessage(Object.assign({}, message), {
+        sourceType: "group",
+        sourceId: group.id,
+        groupId: group.id,
+        characterId: message.characterId || "",
+        sourceName: message.characterName || group.name
+      });
+    });
+
+    if (changed) {
+      window.AppStorage.saveGroupChatHistory(group.id, messages);
+      renderGroupChatMessages(group.id);
+      renderGroupList();
+    }
   }
 
   function isGroupMessageSelectable(message) {
@@ -1451,9 +1526,10 @@
         before,
         window.AppStorage.getMemoriesForCharacters(group.memberIds)
       ));
-      replies = aiResult.replies;
-      messages = appendGroupReplies(before.slice(), group, characters, replies).concat(after);
       persistGroupAiExtras(group, aiResult);
+      replies = aiResult.replies;
+      await streamGroupReplies(before.slice(), group, characters, replies, after);
+      messages = null;
     } catch (error) {
       messages = before.concat([{
         id: String(Date.now()),
@@ -1465,7 +1541,9 @@
         createdAt: Date.now()
       }], after);
     } finally {
-      window.AppStorage.saveGroupChatHistory(group.id, messages);
+      if (messages) {
+        window.AppStorage.saveGroupChatHistory(group.id, messages);
+      }
       renderGroupChatMessages(group.id);
       renderGroupList();
       isGroupReplying = false;
@@ -1497,6 +1575,52 @@
     });
 
     return messages;
+  }
+
+  function streamGroupReplies(baseMessages, group, characters, replies, suffixMessages) {
+    var shown = [];
+    var startAt = Date.now();
+    var suffix = Array.isArray(suffixMessages) ? suffixMessages : [];
+    var items = (replies || []).slice(0, 50).filter(function (item) {
+      return item && item.content;
+    });
+
+    if (!window.AppStream || !window.AppStream.appendMessagesWithStreamEffect) {
+      window.AppStorage.saveGroupChatHistory(group.id, appendGroupReplies(baseMessages.slice(), group, characters, items).concat(suffix));
+      if (activeGroupId === group.id) {
+        renderGroupChatMessages(group.id);
+      }
+      return Promise.resolve();
+    }
+
+    return window.AppStream.appendMessagesWithStreamEffect({
+      targetType: "group",
+      targetId: group.id,
+      messages: items,
+      renderOne: function (reply, index) {
+        var character = getCharacterById(reply.characterId) || characters[0];
+        var createdAt = startAt + index;
+        var message;
+
+        if (!group || !character || !getGroupById(group.id)) {
+          return;
+        }
+
+        message = createGroupCharacterReplyMessage(reply, character, createdAt);
+        message = recordGroupMoneyMessage(message, group, character);
+        shown.push(message);
+        window.AppStorage.addCharacterMemory(character.id, {
+          content: "\u89d2\u8272\u5728\u7fa4\u804a\u91cc\u56de\u590d\u4e86\uff1a" + getMessageMemoryText(message),
+          source: "group",
+          createdAt: createdAt
+        });
+        window.AppStorage.saveGroupChatHistory(group.id, baseMessages.concat(shown, suffix));
+        if (activeGroupId === group.id) {
+          renderGroupChatMessages(group.id);
+        }
+        renderGroupList();
+      }
+    });
   }
 
   function normalizeGroupAiResult(result) {
@@ -1621,6 +1745,7 @@
       message.content = source.content || "\u8f6c\u8d26";
     }
 
+    message.content = normalizeDisplayText(message.content || source.content || "");
     return message;
   }
 
@@ -1711,8 +1836,13 @@
       replies = aiResult.replies;
 
       messages = removeLoadingMessages(window.AppStorage.getGroupChatHistory(group.id));
-      messages = appendGroupReplies(messages, group, characters, replies);
+      window.AppStorage.saveGroupChatHistory(group.id, messages);
+      if (activeGroupId === group.id) {
+        renderGroupChatMessages(group.id);
+      }
       persistGroupAiExtras(group, aiResult);
+      await streamGroupReplies(messages, group, characters, replies, []);
+      messages = null;
     } catch (error) {
       messages = removeLoadingMessages(window.AppStorage.getGroupChatHistory(group.id));
       messages.push({
@@ -1725,7 +1855,9 @@
         createdAt: Date.now()
       });
     } finally {
-      window.AppStorage.saveGroupChatHistory(group.id, messages);
+      if (messages) {
+        window.AppStorage.saveGroupChatHistory(group.id, messages);
+      }
       renderGroupChatMessages(group.id);
       renderGroupList();
       isGroupReplying = false;
