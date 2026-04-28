@@ -185,7 +185,7 @@
 
       <section id="chatScreen" class="screen chat-screen" aria-label="聊天">
         <header class="nav-bar">
-          <button id="chatBackBtn" class="nav-button" type="button" aria-label="返回角色列表">‹</button>
+          <button id="chatBackBtn" class="nav-button" type="button" aria-label="返回微信首页">‹</button>
           <div class="chat-title-wrap">
             <span id="chatHeaderAvatar" class="chat-header-avatar" aria-hidden="true">心</span>
             <h2 id="chatTitle">聊天</h2>
@@ -202,8 +202,6 @@
         <div id="chatActionMenu" class="action-menu chat-action-menu hidden" aria-label="聊天操作菜单">
           <button id="chatSettingsBtn" type="button">聊天设置</button>
           <button id="chatMemoryBtn" type="button">记忆</button>
-          <button id="chatBodyStateBtn" type="button">身体状态</button>
-          <button id="chatThoughtsBtn" type="button">心声</button>
           <button id="chatSearchBtn" type="button">搜索聊天记录</button>
           <button id="chatBatchSelectBtn" type="button">多选消息</button>
           <button id="chatOfflineBtn" type="button">进入线下模式</button>
@@ -238,8 +236,10 @@
             <input id="chatInput" class="chat-input" type="text" placeholder="输入消息" maxlength="500">
             <button id="privateBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">（）</button>
           </div>
-          <button class="send-button" type="submit">发送</button>
-          <button id="replyButton" class="reply-button" type="button">回复</button>
+          <button id="chatComposerBodyStateBtn" class="composer-mini-button body-state-composer-button" type="button" aria-label="身体状态" title="身体状态">身</button>
+          <button class="send-button composer-icon-button" type="submit" aria-label="发送" title="发送">↑</button>
+          <button id="replyButton" class="reply-button composer-icon-button" type="button" aria-label="回复" title="回复">↩</button>
+          <button id="chatRegenerateBtn" class="regenerate-button composer-text-button" type="button" aria-label="重回" title="重回">重回</button>
         </form>
       </section>
 
@@ -282,7 +282,7 @@
 
       <section id="groupChatScreen" class="screen chat-screen" aria-label="群聊聊天">
         <header class="nav-bar">
-          <button id="groupChatBackBtn" class="nav-button" type="button" aria-label="返回群聊列表">‹</button>
+          <button id="groupChatBackBtn" class="nav-button" type="button" aria-label="返回微信首页">‹</button>
           <h2 id="groupChatTitle">群聊</h2>
           <div class="nav-actions chat-top-actions">
             <button id="groupThoughtsHeartBtn" class="nav-button heart-button" type="button" aria-label="查看成员心声">
@@ -296,8 +296,6 @@
         <div id="groupChatActionMenu" class="action-menu chat-action-menu hidden" aria-label="群聊操作菜单">
           <button id="groupSettingsBtn" type="button">群聊设置</button>
           <button id="groupMemoryBtn" type="button">记忆</button>
-          <button id="groupBodyStateBtn" type="button">身体状态</button>
-          <button id="groupThoughtsBtn" type="button">心声</button>
           <button id="groupSearchBtn" type="button">搜索聊天记录</button>
           <button id="groupBatchMessageSelectBtn" type="button">多选消息</button>
           <button id="groupOfflineBtn" type="button">进入线下模式</button>
@@ -329,8 +327,10 @@
             <input id="groupChatInput" class="chat-input" type="text" placeholder="输入群聊消息" maxlength="500">
             <button id="groupBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">（）</button>
           </div>
-          <button class="send-button" type="submit">发送</button>
-          <button id="groupReplyButton" class="reply-button" type="button">回复</button>
+          <button id="groupComposerBodyStateBtn" class="composer-mini-button body-state-composer-button" type="button" aria-label="身体状态" title="身体状态">身</button>
+          <button class="send-button composer-icon-button" type="submit" aria-label="发送" title="发送">↑</button>
+          <button id="groupReplyButton" class="reply-button composer-icon-button" type="button" aria-label="回复" title="回复">↩</button>
+          <button id="groupRegenerateBtn" class="regenerate-button composer-text-button" type="button" aria-label="重回" title="重回">重回</button>
         </form>
       </section>
 

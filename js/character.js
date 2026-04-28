@@ -1440,7 +1440,7 @@
     }
 
     if (action === "regenerate" && message.role === "user") {
-      regeneratePrivateReplyFromMessage(messageId);
+      openPrivateRegenerateReplySheet(messageId);
     }
   }
 
@@ -1777,7 +1777,69 @@
     return "";
   }
 
-  async function regeneratePrivateReplyFromMessage(messageId) {
+  function findLatestPrivateRegenerateMessageId() {
+    var messages = activeCharacterId ? removeLoadingMessages(window.AppStorage.getChatHistory(activeCharacterId)) : [];
+    var index;
+    var nextIndex;
+    var hasCharacterReply;
+
+    for (index = messages.length - 1; index >= 0; index -= 1) {
+      if (!messages[index] || messages[index].role !== "user") {
+        continue;
+      }
+
+      hasCharacterReply = false;
+      nextIndex = index + 1;
+
+      while (nextIndex < messages.length && messages[nextIndex].role !== "user") {
+        if (messages[nextIndex].role === "character" && messages[nextIndex].type !== "error") {
+          hasCharacterReply = true;
+          break;
+        }
+        nextIndex += 1;
+      }
+
+      if (hasCharacterReply) {
+        return messages[index].id;
+      }
+    }
+
+    return "";
+  }
+
+  function openPrivateRegenerateReplySheet(messageId) {
+    if (!activeCharacterId || !messageId) {
+      window.alert("还没有可重回的角色回复。");
+      return;
+    }
+
+    if (window.AppExtras && window.AppExtras.openRegenerateReplySheet) {
+      window.AppExtras.openRegenerateReplySheet({
+        onConfirm: function (requirement) {
+          regeneratePrivateReplyFromMessage(messageId, requirement);
+        }
+      });
+      return;
+    }
+
+    regeneratePrivateReplyFromMessage(messageId, window.prompt("重回要求（可选）", "") || "");
+  }
+
+  function openActiveRegenerateReply() {
+    var messageId;
+
+    closeAllMenus();
+    messageId = findLatestPrivateRegenerateMessageId();
+
+    if (!messageId) {
+      window.alert("还没有可重回的角色回复。");
+      return;
+    }
+
+    openPrivateRegenerateReplySheet(messageId);
+  }
+
+  async function regeneratePrivateReplyFromMessage(messageId, requirement) {
     var requestCharacterId = activeCharacterId;
     var character = requestCharacterId ? getCharacterById(requestCharacterId) : null;
     var messages;
@@ -1826,7 +1888,10 @@
 
     try {
       generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
-        ? window.AppExtras.buildChatGenerationContext("private", requestCharacterId)
+        ? window.AppExtras.buildChatGenerationContext("private", requestCharacterId, {
+          regenerateRequest: true,
+          regenerateInstruction: String(requirement || "").trim()
+        })
         : {};
       if (window.AIService.sendPrivateChatRequest) {
         aiResult = normalizePrivateAiResult(await window.AIService.sendPrivateChatRequest(character, before, generationContext));
@@ -2185,16 +2250,27 @@
     });
   }
 
+  function setCompactReplyButton(button, label, busy) {
+    if (!button) {
+      return;
+    }
+
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+    button.textContent = busy ? "…" : (label === "推进" ? "▶" : "↩");
+  }
+
   function setReplyState(sending) {
     var replyButton = getElement("replyButton");
     var isOffline = isInlineOfflineActive();
+    var label = sending ? (isOffline ? "推进中" : "回复中") : (isOffline ? "推进" : "回复");
 
     if (!replyButton) {
       return;
     }
 
     replyButton.disabled = sending;
-    replyButton.textContent = sending ? (isOffline ? "推进中" : "回复中") : (isOffline ? "推进" : "回复");
+    setCompactReplyButton(replyButton, label, sending);
   }
 
   function toggleCardMenu(card) {
@@ -2311,7 +2387,7 @@
     }
 
     if (replyButton && !replyButton.disabled) {
-      replyButton.textContent = active ? "推进" : "回复";
+      setCompactReplyButton(replyButton, active ? "推进" : "回复", false);
     }
 
     if (menuButton) {
@@ -2765,6 +2841,7 @@
     openActivePrivateSettings: openActivePrivateSettings,
     openActiveChatMemory: openActiveChatMemory,
     openActiveBodyState: openActiveBodyState,
+    openActiveRegenerateReply: openActiveRegenerateReply,
     savePrivateChatSettings: savePrivateChatSettings,
     openActiveCharacterThoughts: openActiveCharacterThoughts,
     openActiveCharacterThoughtsDrawer: openActiveCharacterThoughtsDrawer,

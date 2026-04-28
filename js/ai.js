@@ -279,6 +279,7 @@
       JSON.stringify(options.bodyState || {}),
       "本轮必须在同一次 JSON 里返回 bodyState。若没有变化，也返回承接当前状态后的完整状态。",
       "bodyState 要和剧情一致，记录身体感受、舒适度、恢复建议和各部位状态；可以写体温、破皮/发热风险，但不要做医学诊断，不要渲染低俗露骨细节。",
+      "recoverySuggestion 只作为参考提醒，不要写成强制停止剧情或强行中断互动的命令。",
       "若角色是陪伴管教型，可让身体状态成为后续关心、监督、休息安排和边界提醒的依据。"
     ].join("\n");
   }
@@ -293,6 +294,20 @@
       "当前聊天已达到自动总结轮次：" + (options.memorySummaryRounds || 10) + " 轮。",
       "请在本轮同一次 JSON 中返回 memorySummary，概括这段聊天里对关系、承诺、边界、习惯或重要事件有长期价值的内容。",
       "不要流水账，不要把普通寒暄写进去。标题短一点，正文保留情绪和事实。"
+    ].join("\n");
+  }
+
+  function buildRegeneratePrompt(options) {
+    var requirement = String(options && options.regenerateInstruction || "").trim();
+
+    if (!options || !options.regenerateRequest) {
+      return "";
+    }
+
+    return [
+      "G. 重回要求",
+      "本轮是在重新生成最近一轮角色回复。只改写这轮角色消息，不要把整段聊天重演，不要跳到新的下一轮。",
+      requirement ? "用户补充要求：" + requirement : "用户没有额外要求，请换一种自然回复方式。"
     ].join("\n");
   }
 
@@ -398,6 +413,7 @@
           formatChatMemoryList(chatMemories) || "暂无",
           "",
           buildMemorySummaryPrompt(requestOptions),
+          buildRegeneratePrompt(requestOptions),
           buildBodyStatePrompt(requestOptions),
           "",
           buildThoughtGenerationRules("private"),
@@ -466,6 +482,7 @@
       memberLines.join("\n"),
       "",
       buildMemorySummaryPrompt(requestOptions),
+      buildRegeneratePrompt(requestOptions),
       buildBodyStatePrompt(requestOptions),
       "",
       "群聊生成规则",
@@ -1630,7 +1647,7 @@
       feverRisk: String(source.feverRisk || "低"),
       skinBreakage: String(source.skinBreakage || "无"),
       restNeeded: normalizeBooleanValue(source.restNeeded),
-      recoverySuggestion: String(source.recoverySuggestion || "保持休息、补水，若出现持续疼痛或发热请及时停止剧情并处理。"),
+      recoverySuggestion: String(source.recoverySuggestion || "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。"),
       parts: normalizedParts,
       updatedAt: Date.now()
     };

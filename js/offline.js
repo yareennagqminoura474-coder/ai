@@ -1044,7 +1044,9 @@
     var button = getElement(mode === "group" ? "groupReplyButton" : "replyButton");
     if (button) {
       button.disabled = advancing;
-      button.textContent = advancing ? "推进中" : "推进";
+      button.setAttribute("aria-label", advancing ? "推进中" : "推进");
+      button.setAttribute("title", advancing ? "推进中" : "推进");
+      button.textContent = advancing ? "…" : "▶";
     }
   }
 

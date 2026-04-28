@@ -1188,7 +1188,7 @@
     }
 
     if (action === "regenerate" && message.role === "user") {
-      regenerateGroupReplyFromMessage(messageId);
+      openGroupRegenerateReplySheet(messageId);
     }
   }
 
@@ -1481,7 +1481,69 @@
     return "";
   }
 
-  async function regenerateGroupReplyFromMessage(messageId) {
+  function findLatestGroupRegenerateMessageId() {
+    var messages = activeGroupId ? removeLoadingMessages(window.AppStorage.getGroupChatHistory(activeGroupId)) : [];
+    var index;
+    var nextIndex;
+    var hasCharacterReply;
+
+    for (index = messages.length - 1; index >= 0; index -= 1) {
+      if (!messages[index] || messages[index].role !== "user") {
+        continue;
+      }
+
+      hasCharacterReply = false;
+      nextIndex = index + 1;
+
+      while (nextIndex < messages.length && messages[nextIndex].role !== "user") {
+        if (messages[nextIndex].role === "character" && messages[nextIndex].type !== "error") {
+          hasCharacterReply = true;
+          break;
+        }
+        nextIndex += 1;
+      }
+
+      if (hasCharacterReply) {
+        return messages[index].id;
+      }
+    }
+
+    return "";
+  }
+
+  function openGroupRegenerateReplySheet(messageId) {
+    if (!activeGroupId || !messageId) {
+      window.alert("还没有可重回的群聊回复。");
+      return;
+    }
+
+    if (window.AppExtras && window.AppExtras.openRegenerateReplySheet) {
+      window.AppExtras.openRegenerateReplySheet({
+        onConfirm: function (requirement) {
+          regenerateGroupReplyFromMessage(messageId, requirement);
+        }
+      });
+      return;
+    }
+
+    regenerateGroupReplyFromMessage(messageId, window.prompt("重回要求（可选）", "") || "");
+  }
+
+  function openActiveGroupRegenerateReply() {
+    var messageId;
+
+    closeAllMenus();
+    messageId = findLatestGroupRegenerateMessageId();
+
+    if (!messageId) {
+      window.alert("还没有可重回的群聊回复。");
+      return;
+    }
+
+    openGroupRegenerateReplySheet(messageId);
+  }
+
+  async function regenerateGroupReplyFromMessage(messageId, requirement) {
     var group = activeGroupId ? getGroupById(activeGroupId) : null;
     var characters = group ? getGroupCharacters(group) : [];
     var messages;
@@ -1529,7 +1591,10 @@
 
     try {
       generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
-        ? window.AppExtras.buildChatGenerationContext("group", group.id)
+        ? window.AppExtras.buildChatGenerationContext("group", group.id, {
+          regenerateRequest: true,
+          regenerateInstruction: String(requirement || "").trim()
+        })
         : {};
       aiResult = normalizeGroupAiResult(await window.AIService.sendGroupChatRequest(
         group,
@@ -1912,12 +1977,23 @@
     });
   }
 
+  function setCompactReplyButton(button, label, busy) {
+    if (!button) {
+      return;
+    }
+
+    button.setAttribute("aria-label", label);
+    button.setAttribute("title", label);
+    button.textContent = busy ? "…" : (label === "推进" ? "▶" : "↩");
+  }
+
   function setGroupReplyState(sending) {
     var button = getElement("groupReplyButton");
     var isOffline = isInlineOfflineActive();
+    var label = sending ? (isOffline ? "推进中" : "回复中") : (isOffline ? "推进" : "回复");
     if (button) {
       button.disabled = sending;
-      button.textContent = sending ? (isOffline ? "推进中" : "回复中") : (isOffline ? "推进" : "回复");
+      setCompactReplyButton(button, label, sending);
     }
   }
 
@@ -1978,7 +2054,7 @@
     }
 
     if (replyButton && !replyButton.disabled) {
-      replyButton.textContent = active ? "推进" : "回复";
+      setCompactReplyButton(replyButton, active ? "推进" : "回复", false);
     }
 
     if (menuButton) {
@@ -2342,6 +2418,7 @@
     openActiveGroupSettings: openActiveGroupSettings,
     openActiveGroupMemory: openActiveGroupMemory,
     openActiveGroupBodyState: openActiveGroupBodyState,
+    openActiveGroupRegenerateReply: openActiveGroupRegenerateReply,
     saveGroupSettings: saveGroupSettings,
     openActiveGroupThoughts: openActiveGroupThoughts,
     openActiveGroupThoughtsDrawer: openActiveGroupThoughtsDrawer,

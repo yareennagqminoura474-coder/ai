@@ -1986,6 +1986,10 @@
       insertBracketIntoInput(getElement("chatInput"));
     });
 
+    addClick("chatComposerBodyStateBtn", function () {
+      window.CharacterManager.openActiveBodyState();
+    });
+
     Array.prototype.forEach.call(document.querySelectorAll("#chatToolPanel [data-message-type]"), function (button) {
       button.addEventListener("click", function (event) {
         event.stopPropagation();
@@ -1995,6 +1999,10 @@
 
     getElement("replyButton").addEventListener("click", function () {
       window.CharacterManager.requestCharacterReply();
+    });
+
+    addClick("chatRegenerateBtn", function () {
+      window.CharacterManager.openActiveRegenerateReply();
     });
 
     Array.prototype.forEach.call(document.querySelectorAll("[data-wechat-tab]"), function (button) {
@@ -2027,6 +2035,10 @@
       insertBracketIntoInput(getElement("groupChatInput"));
     });
 
+    addClick("groupComposerBodyStateBtn", function () {
+      window.GroupManager.openActiveGroupBodyState();
+    });
+
     Array.prototype.forEach.call(document.querySelectorAll("#groupToolPanel [data-message-type]"), function (button) {
       button.addEventListener("click", function (event) {
         event.stopPropagation();
@@ -2036,6 +2048,10 @@
 
     getElement("groupReplyButton").addEventListener("click", function () {
       window.GroupManager.requestGroupReply();
+    });
+
+    addClick("groupRegenerateBtn", function () {
+      window.GroupManager.openActiveGroupRegenerateReply();
     });
 
     getElement("offlineComposer").addEventListener("submit", function (event) {
@@ -2135,8 +2151,6 @@
 
     getElement("chatSettingsBtn").addEventListener("click", window.CharacterManager.openActivePrivateSettings);
     getElement("chatMemoryBtn").addEventListener("click", window.CharacterManager.openActiveChatMemory);
-    getElement("chatBodyStateBtn").addEventListener("click", window.CharacterManager.openActiveBodyState);
-    getElement("chatThoughtsBtn").addEventListener("click", window.CharacterManager.openActiveCharacterThoughtsDrawer);
     getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
     getElement("chatOfflineBtn").addEventListener("click", window.CharacterManager.openActiveCharacterOffline);
@@ -2169,8 +2183,6 @@
 
     getElement("groupSettingsBtn").addEventListener("click", window.GroupManager.openActiveGroupSettings);
     getElement("groupMemoryBtn").addEventListener("click", window.GroupManager.openActiveGroupMemory);
-    getElement("groupBodyStateBtn").addEventListener("click", window.GroupManager.openActiveGroupBodyState);
-    getElement("groupThoughtsBtn").addEventListener("click", window.GroupManager.openActiveGroupThoughtsDrawer);
     getElement("groupSearchBtn").addEventListener("click", window.GroupManager.openActiveGroupSearch);
     getElement("groupBatchMessageSelectBtn").addEventListener("click", window.GroupManager.openGroupMessageSelectionMode);
     getElement("groupOfflineBtn").addEventListener("click", window.GroupManager.openActiveGroupOffline);
@@ -2456,6 +2468,46 @@
       window.setTimeout(function () {
         input.focus();
       }, 50);
+    });
+  }
+
+  function openRegenerateReplySheet(options) {
+    var source = options || {};
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <span></span>',
+      "  <h3>重新生成回复</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<form id="regenerateReplyForm" class="wechat-sheet-form regenerate-reply-form" autocomplete="off">',
+      '  <label class="wechat-sheet-field"><span>重回要求（可选）</span><textarea id="regenerateRequirementInput" maxlength="300" placeholder="例如：语气更克制一点，别跳过刚才的问题"></textarea></label>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">确认重回</button></div>',
+      "</form>"
+    ].join(""), function (sheet) {
+      var form = sheet.querySelector("#regenerateReplyForm");
+      var input = sheet.querySelector("#regenerateRequirementInput");
+
+      bindSheetCloseButtons(sheet);
+
+      if (input) {
+        window.setTimeout(function () {
+          input.focus();
+        }, 50);
+      }
+
+      if (form) {
+        form.addEventListener("submit", function (event) {
+          var requirement = input ? input.value.trim() : "";
+
+          event.preventDefault();
+          closeWeChatSheet();
+
+          if (typeof source.onConfirm === "function") {
+            source.onConfirm(requirement);
+          }
+        });
+      }
     });
   }
 
@@ -5949,25 +6001,26 @@
     }, 2200);
   }
 
-  function buildChatGenerationContext(targetType, targetId) {
+  function buildChatGenerationContext(targetType, targetId, extras) {
+    var extraOptions = extras || {};
     var settings = window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
     var autoEnabled = settings.autoMemorySummaryEnabled !== false;
     var interval = Math.max(5, Math.min(50, Number(settings.autoMemorySummaryRounds) || 10));
     var currentRound = window.AppStorage.getChatRoundCounter ? window.AppStorage.getChatRoundCounter(targetType, targetId) : 0;
-    var nextRound = autoEnabled ? currentRound + 1 : currentRound;
+    var nextRound = autoEnabled && !extraOptions.regenerateRequest ? currentRound + 1 : currentRound;
     var bodyEnabled = settings.bodyStateEnabled !== false;
 
-    return {
+    return Object.assign({
       targetType: targetType,
       targetId: targetId,
       chatMemories: window.AppStorage.getChatMemories ? window.AppStorage.getChatMemories(targetType, targetId) : [],
       bodyStateEnabled: bodyEnabled,
       bodyState: bodyEnabled && window.AppStorage.getBodyState ? window.AppStorage.getBodyState(targetType, targetId) : null,
       autoMemorySummaryEnabled: autoEnabled,
-      memorySummaryDue: autoEnabled && nextRound >= interval,
+      memorySummaryDue: autoEnabled && !extraOptions.regenerateRequest && nextRound >= interval,
       memorySummaryRounds: interval,
       currentRound: nextRound
-    };
+    }, extraOptions);
   }
 
   function finalizeChatGenerationContext(context, result) {
@@ -6188,13 +6241,11 @@
         return [
           '<article class="body-part-card">',
           '  <div><strong>' + escapeHtml(partName) + '</strong><span>' + escapeHtml(part.status || "正常") + "</span></div>",
-          '  <p>酸痛 ' + escapeHtml(part.soreness || 0) + " · 疼痛 " + escapeHtml(part.pain || 0) + " · 泛红 " + escapeHtml(part.redness || 0) + "</p>",
-          part.notes ? '  <em>' + escapeHtml(part.notes) + "</em>" : "",
           "</article>"
         ].join("");
       }).join(""),
       "</section>",
-      '<section class="body-recovery-card"><strong>恢复建议</strong><p>' + escapeHtml(state.recoverySuggestion || "当前无明显异常。") + "</p></section>"
+      '<section class="body-recovery-card"><strong>恢复建议（参考）</strong><p>' + escapeHtml(state.recoverySuggestion || "当前无明显异常，可按剧情节奏和身体反馈调整。") + "</p></section>"
     ].join("");
   }
 
@@ -6330,6 +6381,7 @@
     finalizeChatGenerationContext: finalizeChatGenerationContext,
     openChatMemoryPanel: openChatMemoryPanel,
     openBodyStatePanel: openBodyStatePanel,
+    openRegenerateReplySheet: openRegenerateReplySheet,
     insertBracketIntoInput: insertBracketIntoInput,
     openCharacterSpaceScreen: openCharacterSpaceScreen,
     openDiaryScreen: openDiaryScreen,

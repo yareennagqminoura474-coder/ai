@@ -1710,6 +1710,8 @@ button {
 .outline-button:active,
 .send-button:active,
 .reply-button:active,
+.regenerate-button:active,
+.composer-mini-button:active,
 .nav-button:active,
 .nav-text-button:active {
   transform: scale(0.98);
@@ -2582,7 +2584,6 @@ textarea::placeholder {
 
 .memory-panel-card p,
 .body-state-summary p,
-.body-part-card p,
 .body-recovery-card p {
   margin: 0;
   color: var(--text);
@@ -2594,8 +2595,7 @@ textarea::placeholder {
 }
 
 .memory-panel-card small,
-.body-state-summary small,
-.body-part-card em {
+.body-state-summary small {
   color: var(--muted);
   font-size: 12px;
   line-height: 1.35;
@@ -4725,11 +4725,11 @@ textarea::placeholder {
   left: 0;
   right: 0;
   bottom: 0;
-  min-height: 76px;
+  min-height: 72px;
   padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
   display: grid;
-  grid-template-columns: 42px minmax(0, 1fr) 56px 56px;
-  gap: 6px;
+  grid-template-columns: 38px minmax(0, 1fr) 34px 34px 34px 46px;
+  gap: 5px;
   align-items: center;
   background: rgba(255, 255, 255, 0.96);
   border-top: 1px solid rgba(228, 232, 226, 0.9);
@@ -4737,8 +4737,8 @@ textarea::placeholder {
 }
 
 .composer-plus {
-  width: 42px;
-  height: 42px;
+  width: 38px;
+  height: 38px;
   border: 0;
   border-radius: 50%;
   background: var(--surface-soft);
@@ -4754,7 +4754,7 @@ textarea::placeholder {
 
 .chat-input-wrapper .chat-input {
   width: 100%;
-  height: 44px;
+  height: 40px;
   padding-right: 48px;
   border-radius: 12px;
 }
@@ -4776,12 +4776,12 @@ textarea::placeholder {
 }
 
 #chatInput {
-  height: 44px;
+  height: 40px;
   background: #f4f7f5;
 }
 
 #groupChatInput {
-  height: 44px;
+  height: 40px;
   background: #f4f7f5;
 }
 
@@ -4801,6 +4801,53 @@ textarea::placeholder {
 
 .reply-button {
   background: var(--blue);
+}
+
+.chat-composer .send-button,
+.chat-composer .reply-button,
+.chat-composer .composer-mini-button,
+.chat-composer .composer-text-button {
+  height: 34px;
+  min-width: 0;
+  border: 0;
+  display: grid;
+  place-items: center;
+  line-height: 1;
+  white-space: nowrap;
+  box-shadow: none;
+}
+
+.chat-composer .composer-icon-button,
+.chat-composer .composer-mini-button {
+  width: 34px;
+  border-radius: 50%;
+  font-size: 16px;
+  font-weight: 900;
+}
+
+.chat-composer .send-button {
+  background: var(--green);
+  color: #ffffff;
+}
+
+.chat-composer .reply-button {
+  background: var(--blue);
+  color: #ffffff;
+}
+
+.chat-composer .body-state-composer-button {
+  background: rgba(104, 190, 163, 0.13);
+  color: var(--green-dark);
+  font-size: 13px;
+}
+
+.chat-composer .composer-text-button {
+  width: 46px;
+  border-radius: 999px;
+  background: #eef5ff;
+  color: var(--blue);
+  font-size: 12px;
+  font-weight: 900;
 }
 
 .send-button:disabled,
@@ -5192,7 +5239,7 @@ textarea::placeholder {
 
 @media (max-width: 360px) {
   .chat-composer {
-    grid-template-columns: 38px minmax(0, 1fr) 50px 50px;
+    grid-template-columns: 34px minmax(0, 1fr) 30px 30px 30px 42px;
     gap: 5px;
     padding-left: 10px;
     padding-right: 10px;
@@ -5206,12 +5253,25 @@ textarea::placeholder {
   }
 
   .composer-plus {
-    width: 38px;
-    height: 38px;
+    width: 34px;
+    height: 34px;
   }
 
-  .send-button,
-  .reply-button {
+  .chat-composer .composer-icon-button,
+  .chat-composer .composer-mini-button {
+    width: 30px;
+    height: 30px;
+    font-size: 13px;
+  }
+
+  .chat-composer .composer-text-button {
+    width: 42px;
+    height: 30px;
+    font-size: 11px;
+  }
+
+  .offline-composer .send-button,
+  .offline-composer .reply-button {
     font-size: 12px;
   }
 }

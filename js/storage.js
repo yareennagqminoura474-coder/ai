@@ -503,7 +503,7 @@
       feverRisk: String(source.feverRisk || "低"),
       skinBreakage: String(source.skinBreakage || "无"),
       restNeeded: normalizeBoolean(source.restNeeded),
-      recoverySuggestion: String(source.recoverySuggestion || "保持休息、补水，若出现持续疼痛或发热请及时停止剧情并处理。"),
+      recoverySuggestion: String(source.recoverySuggestion || "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。"),
       parts: normalizedParts,
       updatedAt: Number(source.updatedAt) || Date.now()
     };
