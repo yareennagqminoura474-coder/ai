@@ -60,6 +60,7 @@
   var currentDesktopPage = 0;
   var desktopTouchStartX = 0;
   var desktopTouchDeltaX = 0;
+  var wechatChildReturnTab = "";
   var desktopApps = [
     { id: "wechat", name: "微信", icon: "微", className: "desktop-wechat", action: "wechat" },
     { id: "photo", name: "相册", icon: "相", className: "desktop-photo", action: "photo" },
@@ -1364,6 +1365,7 @@
 
   function handleMeAction(action) {
     if (action === "wallet") {
+      rememberWechatMeReturn();
       setActivePage("walletScreen");
       return;
     }
@@ -1379,11 +1381,13 @@
     }
 
     if (action === "diary") {
+      rememberWechatMeReturn();
       openDiaryScreen();
       return;
     }
 
     if (action === "layers") {
+      rememberWechatMeReturn();
       setActivePage("characterListScreen");
       return;
     }
@@ -1399,11 +1403,39 @@
     }
 
     if (action === "chat-settings") {
+      rememberWechatMeReturn();
       setActivePage("settingsScreen");
       return;
     }
 
     window.alert("这个入口已保留，后续可以继续扩展。");
+  }
+
+  function rememberWechatMeReturn() {
+    wechatChildReturnTab = "me";
+  }
+
+  function returnFromWechatChild(fallback) {
+    if (wechatChildReturnTab === "me") {
+      wechatChildReturnTab = "";
+      setWechatTab("me");
+      setActivePage("wechatScreen");
+      return;
+    }
+
+    if (fallback === "wechat") {
+      setWechatTab("wechat");
+      setActivePage("wechatScreen");
+      return;
+    }
+
+    if (fallback === "me") {
+      setWechatTab("me");
+      setActivePage("wechatScreen");
+      return;
+    }
+
+    goHome();
   }
 
   function openUserProfileSheet() {
@@ -1492,11 +1524,15 @@
       '<div class="persona-manager">',
       '  <section class="persona-list-section">',
       personas.length ? personas.map(function (persona) {
+        var isActive = profile.activePersonaId === persona.id;
         return [
-          '<article class="persona-item' + (profile.activePersonaId === persona.id ? " active" : "") + '">',
+          '<article class="persona-item' + (isActive ? " active" : "") + '">',
           renderProfileAvatar(persona),
-          '  <span><strong>' + escapeHtml(persona.name) + '</strong><em>' + escapeHtml(persona.identity || persona.personality || "未写身份") + "</em></span>",
-          '  <div><button type="button" data-persona-default="' + escapeHtml(persona.id) + '">默认</button><button type="button" data-persona-edit="' + escapeHtml(persona.id) + '">编辑</button><button type="button" data-persona-delete="' + escapeHtml(persona.id) + '">删除</button></div>',
+          '  <div class="persona-item-main">',
+          '    <div class="persona-item-title"><strong>' + escapeHtml(persona.name) + "</strong>" + (isActive ? "<b>默认</b>" : "") + "</div>",
+          '    <em>' + escapeHtml(persona.identity || persona.personality || "未写身份") + "</em>",
+          '    <div class="persona-item-actions"><button type="button" data-persona-default="' + escapeHtml(persona.id) + '">设为默认</button><button type="button" data-persona-edit="' + escapeHtml(persona.id) + '">编辑</button><button class="danger" type="button" data-persona-delete="' + escapeHtml(persona.id) + '">删除</button></div>',
+          "  </div>",
           "</article>"
         ].join("");
       }).join("") : '<div class="soft-empty">还没有我的预设，先创建一个。</div>',
@@ -1897,7 +1933,7 @@
 
   function bindNavigationActions() {
     getElement("characterListBack").addEventListener("click", function () {
-      setActivePage("wechatScreen");
+      returnFromWechatChild("wechat");
     });
     getElement("newCharacterBtn").addEventListener("click", window.CharacterManager.openCreateCharacterScreen);
     getElement("characterBatchSelectBtn").addEventListener("click", window.CharacterManager.toggleCharacterSelectionMode);
@@ -1926,8 +1962,7 @@
       toggleWechatAddMenu();
     });
     getElement("walletBackBtn").addEventListener("click", function () {
-      setWechatTab("me");
-      setActivePage("wechatScreen");
+      returnFromWechatChild("me");
     });
     getElement("walletBillBackBtn").addEventListener("click", function () {
       setActivePage("walletScreen");
@@ -1937,7 +1972,9 @@
     });
     getElement("shopBackBtn").addEventListener("click", goHome);
     getElement("newFamilyCardBtn").addEventListener("click", openFamilyCardEditor);
-    getElement("settingsBackBtn").addEventListener("click", goHome);
+    getElement("settingsBackBtn").addEventListener("click", function () {
+      returnFromWechatChild();
+    });
     getElement("privateChatSettingsBackBtn").addEventListener("click", function () {
       setActivePage("chatScreen");
     });
@@ -1945,7 +1982,9 @@
       setActivePage("groupChatScreen");
     });
     getElement("worldBookBackBtn").addEventListener("click", goHome);
-    getElement("diaryBackBtn").addEventListener("click", goHome);
+    getElement("diaryBackBtn").addEventListener("click", function () {
+      returnFromWechatChild();
+    });
     getElement("characterSpaceBackBtn").addEventListener("click", goHome);
     getElement("themeBackBtn").addEventListener("click", goHome);
     getElement("photoBackBtn").addEventListener("click", goHome);
@@ -1986,10 +2025,6 @@
       insertBracketIntoInput(getElement("chatInput"));
     });
 
-    addClick("chatComposerBodyStateBtn", function () {
-      window.CharacterManager.openActiveBodyState();
-    });
-
     Array.prototype.forEach.call(document.querySelectorAll("#chatToolPanel [data-message-type]"), function (button) {
       button.addEventListener("click", function (event) {
         event.stopPropagation();
@@ -1997,12 +2032,20 @@
       });
     });
 
-    getElement("replyButton").addEventListener("click", function () {
-      window.CharacterManager.requestCharacterReply();
+    Array.prototype.forEach.call(document.querySelectorAll("#chatToolPanel [data-tool-action]"), function (button) {
+      button.addEventListener("click", function (event) {
+        event.stopPropagation();
+        if (button.dataset.toolAction === "body-state") {
+          window.CharacterManager.openActiveBodyState();
+        }
+        if (button.dataset.toolAction === "regenerate") {
+          window.CharacterManager.openActiveRegenerateReply();
+        }
+      });
     });
 
-    addClick("chatRegenerateBtn", function () {
-      window.CharacterManager.openActiveRegenerateReply();
+    getElement("replyButton").addEventListener("click", function () {
+      window.CharacterManager.handleComposerAction();
     });
 
     Array.prototype.forEach.call(document.querySelectorAll("[data-wechat-tab]"), function (button) {
@@ -2035,10 +2078,6 @@
       insertBracketIntoInput(getElement("groupChatInput"));
     });
 
-    addClick("groupComposerBodyStateBtn", function () {
-      window.GroupManager.openActiveGroupBodyState();
-    });
-
     Array.prototype.forEach.call(document.querySelectorAll("#groupToolPanel [data-message-type]"), function (button) {
       button.addEventListener("click", function (event) {
         event.stopPropagation();
@@ -2046,12 +2085,20 @@
       });
     });
 
-    getElement("groupReplyButton").addEventListener("click", function () {
-      window.GroupManager.requestGroupReply();
+    Array.prototype.forEach.call(document.querySelectorAll("#groupToolPanel [data-tool-action]"), function (button) {
+      button.addEventListener("click", function (event) {
+        event.stopPropagation();
+        if (button.dataset.toolAction === "body-state") {
+          window.GroupManager.openActiveGroupBodyState();
+        }
+        if (button.dataset.toolAction === "regenerate") {
+          window.GroupManager.openActiveGroupRegenerateReply();
+        }
+      });
     });
 
-    addClick("groupRegenerateBtn", function () {
-      window.GroupManager.openActiveGroupRegenerateReply();
+    getElement("groupReplyButton").addEventListener("click", function () {
+      window.GroupManager.handleComposerAction();
     });
 
     getElement("offlineComposer").addEventListener("submit", function (event) {
@@ -2228,6 +2275,9 @@
       }
     });
     getElement("newWorldBookBtn").addEventListener("click", createWorldBook);
+    getElement("importWorldBookBtn").addEventListener("click", function () {
+      getElement("worldBookImportInput").click();
+    });
     getElement("importPhotoBtn").addEventListener("click", function () {
       getElement("photoImportInput").click();
     });
@@ -3130,7 +3180,7 @@
 
   function createWorldBook() {
     var now = Date.now();
-    window.AppStorage.addWorldBook({
+    var book = window.AppStorage.addWorldBook({
       id: String(now),
       name: "未命名世界书",
       description: "",
@@ -3142,6 +3192,7 @@
       updatedAt: now
     });
     renderWorldBookScreen();
+    renderWorldBookEditor(book.id);
   }
 
   function renderWorldBookScreen() {
@@ -3174,12 +3225,66 @@
   }
 
   function renderWorldBookCard(book) {
+    var scopeText = getWorldBookScopeLabel(book);
+
     return [
       '<article class="world-book-card" data-book-id="' + escapeHtml(book.id) + '">',
-      '  <div class="section-title-row">',
-      "    <h3>资料本</h3>",
-      '    <span>' + (book.enabled ? "已启用" : "已禁用") + "</span>",
+      '  <div class="world-book-card-head">',
+      "    <h3>" + escapeHtml(book.name || "未命名世界书") + "</h3>",
+      '    <span class="' + (book.enabled ? "enabled" : "disabled") + '">' + (book.enabled ? "启用" : "停用") + "</span>",
       "  </div>",
+      '  <p>' + escapeHtml(book.description || "暂无描述") + "</p>",
+      '  <div class="world-book-meta"><span>范围：' + escapeHtml(scopeText) + '</span><span>条目：' + escapeHtml((book.entries || []).length) + " 条</span></div>",
+      '  <div class="world-book-actions">',
+      '    <button class="outline-button" type="button" data-world-action="edit-book">编辑</button>',
+      '    <button class="outline-button danger" type="button" data-world-action="delete-book">删除</button>',
+      "  </div>",
+      "</article>"
+    ].join("");
+  }
+
+  function getWorldBookScopeLabel(book) {
+    var scope = book && book.scope || "global";
+    var targetCount = book && Array.isArray(book.targetIds) ? book.targetIds.length : 0;
+
+    if (scope === "private") {
+      return targetCount ? "指定私聊 " + targetCount + " 个" : "全部私聊";
+    }
+
+    if (scope === "group") {
+      return targetCount ? "指定群聊 " + targetCount + " 个" : "全部群聊";
+    }
+
+    return "全局";
+  }
+
+  function renderWorldBookEditor(bookId) {
+    var book = window.AppStorage.getWorldBooks().find(function (item) {
+      return item.id === bookId;
+    });
+
+    if (!book) {
+      return;
+    }
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <span></span>',
+      "  <h3>编辑世界书</h3>",
+      '  <button type="button" data-close-sheet>关闭</button>',
+      "</div>",
+      '<div class="wechat-sheet-form world-book-editor-sheet">',
+      renderWorldBookEditorCard(book),
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      bindWorldBookActions(sheet);
+    });
+  }
+
+  function renderWorldBookEditorCard(book) {
+    return [
+      '<article class="world-book-card world-book-editor-card" data-book-id="' + escapeHtml(book.id) + '">',
       '  <div class="field-group">',
       '    <label>名称</label>',
       '    <input data-book-field="name" type="text" value="' + escapeHtml(book.name) + '" maxlength="40">',
@@ -3203,7 +3308,6 @@
       '    <button class="outline-button" type="button" data-world-action="add-entry">新建条目</button>',
       '    <button class="outline-button" type="button" data-world-action="duplicate-book">复制世界书</button>',
       '    <button class="outline-button" type="button" data-world-action="export-book">导出 JSON</button>',
-      '    <button class="outline-button" type="button" data-world-action="import-book">导入 JSON</button>',
       '    <button class="outline-button" type="button" data-world-action="save-book">保存世界书</button>',
       '    <button class="outline-button danger" type="button" data-world-action="delete-book">删除</button>',
       "  </div>",
@@ -3269,8 +3373,14 @@
         return;
       }
 
+      if (button.dataset.worldAction === "edit-book") {
+        renderWorldBookEditor(bookId);
+        return;
+      }
+
       if (button.dataset.worldAction === "save-book") {
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book));
+        closeWeChatSheet();
         renderWorldBookScreen();
         return;
       }
@@ -3279,12 +3389,13 @@
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
           addEntry: true
         }));
-        renderWorldBookScreen();
+        renderWorldBookEditor(bookId);
         return;
       }
 
       if (button.dataset.worldAction === "duplicate-book") {
         duplicateWorldBook(card, book);
+        closeWeChatSheet();
         return;
       }
 
@@ -3293,16 +3404,11 @@
         return;
       }
 
-      if (button.dataset.worldAction === "import-book") {
-        getElement("worldBookImportInput").click();
-        return;
-      }
-
       if (button.dataset.worldAction === "duplicate-entry") {
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
           duplicateEntryId: button.closest(".world-entry-card").dataset.entryId
         }));
-        renderWorldBookScreen();
+        renderWorldBookEditor(bookId);
         return;
       }
 
@@ -3311,7 +3417,7 @@
           moveEntryId: button.closest(".world-entry-card").dataset.entryId,
           moveDirection: button.dataset.worldAction === "entry-up" ? -1 : 1
         }));
-        renderWorldBookScreen();
+        renderWorldBookEditor(bookId);
         return;
       }
 
@@ -3319,12 +3425,13 @@
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
           deleteEntryId: button.closest(".world-entry-card").dataset.entryId
         }));
-        renderWorldBookScreen();
+        renderWorldBookEditor(bookId);
         return;
       }
 
       if (button.dataset.worldAction === "delete-book" && window.confirm("确定删除这本世界书吗？")) {
         window.AppStorage.deleteWorldBook(bookId);
+        closeWeChatSheet();
         renderWorldBookScreen();
       }
     };

@@ -1509,6 +1509,21 @@
     renderCharacterList();
   }
 
+  async function handleComposerAction() {
+    var input = getElement("chatInput");
+
+    if (isInlineOfflineActive()) {
+      await requestCharacterReply();
+      return;
+    }
+
+    if (input && input.value.trim()) {
+      sendUserMessage();
+    }
+
+    await requestCharacterReply();
+  }
+
   function toggleToolPanel() {
     var panel = getElement("chatToolPanel");
 
@@ -2257,13 +2272,13 @@
 
     button.setAttribute("aria-label", label);
     button.setAttribute("title", label);
-    button.textContent = busy ? "…" : (label === "推进" ? "▶" : "↩");
+    button.textContent = busy ? "…" : (label === "推进" ? "▶" : "↑");
   }
 
   function setReplyState(sending) {
     var replyButton = getElement("replyButton");
     var isOffline = isInlineOfflineActive();
-    var label = sending ? (isOffline ? "推进中" : "回复中") : (isOffline ? "推进" : "回复");
+    var label = sending ? (isOffline ? "推进中" : "发送中") : (isOffline ? "推进" : "发送");
 
     if (!replyButton) {
       return;
@@ -2387,7 +2402,7 @@
     }
 
     if (replyButton && !replyButton.disabled) {
-      setCompactReplyButton(replyButton, active ? "推进" : "回复", false);
+      setCompactReplyButton(replyButton, active ? "推进" : "发送", false);
     }
 
     if (menuButton) {
@@ -2530,8 +2545,6 @@
       '<div class="section-title-row"><h3>记忆设置</h3><span>长期记忆</span></div>',
       '<label class="switch-row"><input data-private-field="memoryEnabled" type="checkbox"' + (settings.memoryEnabled !== false ? " checked" : "") + '>开启长期记忆</label>',
       '<button class="outline-button" type="button" data-private-action="view-memory">查看本私聊记忆</button>',
-      '<button class="outline-button" type="button" data-private-action="view-thoughts">查看该角色心声</button>',
-      '<button class="outline-button" type="button" data-private-action="view-body-state">查看身体状态</button>',
       '<button class="outline-button danger" type="button" data-private-action="clear-chat-memory">清空本私聊记忆</button>',
       '<button class="outline-button danger" type="button" data-private-action="clear-memory">清空该角色记忆</button>',
       "</section>"
@@ -2826,6 +2839,7 @@
     openChatScreen: openChatScreen,
     renderChatMessages: renderChatMessages,
     sendUserMessage: sendUserMessage,
+    handleComposerAction: handleComposerAction,
     toggleToolPanel: toggleToolPanel,
     closeToolPanel: closeToolPanel,
     sendToolMessage: sendToolMessage,

@@ -1257,6 +1257,21 @@
     renderGroupList();
   }
 
+  async function handleComposerAction() {
+    var input = getElement("groupChatInput");
+
+    if (isInlineOfflineActive()) {
+      await requestGroupReply();
+      return;
+    }
+
+    if (input && input.value.trim()) {
+      sendGroupUserMessage();
+    }
+
+    await requestGroupReply();
+  }
+
   function toggleToolPanel() {
     var panel = getElement("groupToolPanel");
 
@@ -1984,13 +1999,13 @@
 
     button.setAttribute("aria-label", label);
     button.setAttribute("title", label);
-    button.textContent = busy ? "…" : (label === "推进" ? "▶" : "↩");
+    button.textContent = busy ? "…" : (label === "推进" ? "▶" : "↑");
   }
 
   function setGroupReplyState(sending) {
     var button = getElement("groupReplyButton");
     var isOffline = isInlineOfflineActive();
-    var label = sending ? (isOffline ? "推进中" : "回复中") : (isOffline ? "推进" : "回复");
+    var label = sending ? (isOffline ? "推进中" : "发送中") : (isOffline ? "推进" : "发送");
     if (button) {
       button.disabled = sending;
       setCompactReplyButton(button, label, sending);
@@ -2054,7 +2069,7 @@
     }
 
     if (replyButton && !replyButton.disabled) {
-      setCompactReplyButton(replyButton, active ? "推进" : "回复", false);
+      setCompactReplyButton(replyButton, active ? "推进" : "发送", false);
     }
 
     if (menuButton) {
@@ -2181,8 +2196,6 @@
       '<div class="section-title-row"><h3>记忆设置</h3><span>Memory</span></div>',
       '<label class="switch-row"><input data-group-settings-field="memorySharingEnabled" type="checkbox"' + (settings.memorySharingEnabled !== false ? " checked" : "") + '>群聊记忆共享</label>',
       '<button class="outline-button" type="button" data-group-settings-action="view-memory">查看本群聊记忆</button>',
-      '<button class="outline-button" type="button" data-group-settings-action="view-thoughts">查看成员心声</button>',
-      '<button class="outline-button" type="button" data-group-settings-action="view-body-state">查看身体状态</button>',
       '<button class="outline-button danger" type="button" data-group-settings-action="clear-chat-memory">清空本群聊记忆</button>',
       '<button class="outline-button danger" type="button" data-group-settings-action="clear-group-memory">清空成员群聊记忆</button>',
       "</section>"
@@ -2406,6 +2419,7 @@
     openGroupChatScreen: openGroupChatScreen,
     renderGroupChatMessages: renderGroupChatMessages,
     sendGroupUserMessage: sendGroupUserMessage,
+    handleComposerAction: handleComposerAction,
     toggleToolPanel: toggleToolPanel,
     closeToolPanel: closeToolPanel,
     sendToolMessage: sendToolMessage,

@@ -220,26 +220,24 @@
         <div id="chatMessages" class="screen-content chat-messages"></div>
 
         <div id="chatToolPanel" class="chat-tool-panel hidden" aria-label="消息类型面板">
-          <button type="button" data-message-type="image">图片</button>
-          <button type="button" data-message-type="emoji">表情</button>
-          <button type="button" data-message-type="voice">语音</button>
-          <button type="button" data-message-type="location">位置</button>
-          <button type="button" data-message-type="pat">拍一拍</button>
-          <button type="button" data-message-type="transfer">转账</button>
-          <button type="button" data-message-type="redPacket">红包</button>
-          <button type="button" data-message-type="familyCardPay">亲属卡</button>
+          <button type="button" data-message-type="image"><i aria-hidden="true">图</i><span>图片</span></button>
+          <button type="button" data-message-type="voice"><i aria-hidden="true">语</i><span>语音</span></button>
+          <button type="button" data-message-type="redPacket"><i aria-hidden="true">包</i><span>红包</span></button>
+          <button type="button" data-message-type="transfer"><i aria-hidden="true">转</i><span>转账</span></button>
+          <button type="button" data-message-type="location"><i aria-hidden="true">位</i><span>位置</span></button>
+          <button type="button" data-message-type="emoji"><i aria-hidden="true">表</i><span>表情</span></button>
+          <button type="button" data-tool-action="body-state"><i aria-hidden="true">身</i><span>身体状态</span></button>
+          <button type="button" data-tool-action="regenerate"><i aria-hidden="true">回</i><span>重回</span></button>
+          <button type="button" data-message-type="familyCardPay"><i aria-hidden="true">亲</i><span>亲属卡</span></button>
         </div>
 
         <form id="chatComposer" class="chat-composer" autocomplete="off">
           <button id="chatPlusBtn" class="composer-plus" type="button" aria-label="添加">+</button>
           <div class="chat-input-wrapper">
             <input id="chatInput" class="chat-input" type="text" placeholder="输入消息" maxlength="500">
-            <button id="privateBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">（）</button>
+            <button id="privateBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">()</button>
           </div>
-          <button id="chatComposerBodyStateBtn" class="composer-mini-button body-state-composer-button" type="button" aria-label="身体状态" title="身体状态">身</button>
-          <button class="send-button composer-icon-button" type="submit" aria-label="发送" title="发送">↑</button>
-          <button id="replyButton" class="reply-button composer-icon-button" type="button" aria-label="回复" title="回复">↩</button>
-          <button id="chatRegenerateBtn" class="regenerate-button composer-text-button" type="button" aria-label="重回" title="重回">重回</button>
+          <button id="replyButton" class="send-button composer-icon-button" type="button" aria-label="发送" title="发送">↑</button>
         </form>
       </section>
 
@@ -312,25 +310,24 @@
         <div id="groupChatMessages" class="screen-content chat-messages group-chat-messages"></div>
 
         <div id="groupToolPanel" class="chat-tool-panel hidden" aria-label="群聊消息类型面板">
-          <button type="button" data-message-type="image">图片</button>
-          <button type="button" data-message-type="emoji">表情</button>
-          <button type="button" data-message-type="voice">语音</button>
-          <button type="button" data-message-type="location">位置</button>
-          <button type="button" data-message-type="pat">拍一拍</button>
-          <button type="button" data-message-type="transfer">转账</button>
-          <button type="button" data-message-type="redPacket">红包</button>
+          <button type="button" data-message-type="image"><i aria-hidden="true">图</i><span>图片</span></button>
+          <button type="button" data-message-type="voice"><i aria-hidden="true">语</i><span>语音</span></button>
+          <button type="button" data-message-type="redPacket"><i aria-hidden="true">包</i><span>红包</span></button>
+          <button type="button" data-message-type="transfer"><i aria-hidden="true">转</i><span>转账</span></button>
+          <button type="button" data-message-type="location"><i aria-hidden="true">位</i><span>位置</span></button>
+          <button type="button" data-message-type="emoji"><i aria-hidden="true">表</i><span>表情</span></button>
+          <button type="button" data-tool-action="body-state"><i aria-hidden="true">身</i><span>身体状态</span></button>
+          <button type="button" data-tool-action="regenerate"><i aria-hidden="true">回</i><span>重回</span></button>
+          <button type="button" data-message-type="pat"><i aria-hidden="true">拍</i><span>拍一拍</span></button>
         </div>
 
         <form id="groupChatComposer" class="chat-composer" autocomplete="off">
           <button id="groupPlusBtn" class="composer-plus" type="button" aria-label="添加">+</button>
           <div class="chat-input-wrapper">
             <input id="groupChatInput" class="chat-input" type="text" placeholder="输入群聊消息" maxlength="500">
-            <button id="groupBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">（）</button>
+            <button id="groupBracketBtn" class="input-inside-bracket-btn" type="button" aria-label="插入动作括号">()</button>
           </div>
-          <button id="groupComposerBodyStateBtn" class="composer-mini-button body-state-composer-button" type="button" aria-label="身体状态" title="身体状态">身</button>
-          <button class="send-button composer-icon-button" type="submit" aria-label="发送" title="发送">↑</button>
-          <button id="groupReplyButton" class="reply-button composer-icon-button" type="button" aria-label="回复" title="回复">↩</button>
-          <button id="groupRegenerateBtn" class="regenerate-button composer-text-button" type="button" aria-label="重回" title="重回">重回</button>
+          <button id="groupReplyButton" class="send-button composer-icon-button" type="button" aria-label="发送" title="发送">↑</button>
         </form>
       </section>
 
@@ -540,7 +537,10 @@
         <header class="nav-bar">
           <button id="worldBookBackBtn" class="nav-button" type="button" aria-label="返回">‹</button>
           <h2>世界书</h2>
-          <button id="newWorldBookBtn" class="nav-text-button" type="button">新建</button>
+          <div class="nav-actions">
+            <button id="importWorldBookBtn" class="nav-text-button slim" type="button">导入</button>
+            <button id="newWorldBookBtn" class="nav-text-button" type="button">新建</button>
+          </div>
         </header>
         <div id="worldBookContent" class="screen-content notebook-content"></div>
       </section>
