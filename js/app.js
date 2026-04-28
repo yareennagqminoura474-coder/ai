@@ -46,6 +46,7 @@
     characterIds: [],
     chatId: "",
     characterFilter: "all",
+    mode: "latest",
     open: false,
     origin: ""
   };
@@ -471,16 +472,9 @@
     var recentItems = getRecentChats();
 
     content.innerHTML = [
-      '<section class="wechat-quick-row" aria-label="聊天快捷入口">',
-      '  <button type="button" data-wechat-entry="private"><span class="wechat-entry-icon tile-chat">私</span><strong>私聊</strong></button>',
-      '  <button type="button" data-wechat-entry="group"><span class="wechat-entry-icon tile-group">群</span><strong>群聊</strong></button>',
-      '  <button type="button" data-wechat-entry="new-character"><span class="wechat-entry-icon tile-create">+</span><strong>角色</strong></button>',
-      '  <button type="button" data-wechat-entry="new-group"><span class="wechat-entry-icon tile-group">群</span><strong>建群</strong></button>',
-      "</section>",
-      '<section class="wechat-list-panel">',
-      '  <div class="section-title-row"><h3>最近聊天</h3><span id="wechatRecentCount">' + recentItems.length + " 条</span></div>",
+      '<section class="wechat-list-panel chat-list-only" aria-label="聊天列表">',
       '  <div id="wechatRecentList" class="recent-chat-list">',
-      recentItems.length ? recentItems.map(renderRecentChatItem).join("") : '<div class="soft-empty">暂无最近聊天，先发一句话，让角色出现在这里。</div>',
+      recentItems.length ? recentItems.map(renderRecentChatItem).join("") : '<div class="soft-empty">暂无聊天，先发一句话，让角色出现在这里。</div>',
       "  </div>",
       "</section>"
     ].join("");
@@ -511,6 +505,69 @@
         handleWechatEntryAction(button.dataset.wechatEntry);
       });
     });
+  }
+
+  function toggleWechatAddMenu() {
+    var menu = getElement("wechatAddMenu");
+
+    if (!menu) {
+      return;
+    }
+
+    menu.classList.toggle("hidden");
+  }
+
+  function closeWechatAddMenu() {
+    var menu = getElement("wechatAddMenu");
+
+    if (menu) {
+      menu.classList.add("hidden");
+    }
+  }
+
+  function bindWechatAddMenu() {
+    var menu = getElement("wechatAddMenu");
+
+    if (!menu) {
+      return;
+    }
+
+    menu.addEventListener("click", function (event) {
+      var button = event.target.closest("[data-wechat-add-action]");
+      event.stopPropagation();
+
+      if (!button) {
+        return;
+      }
+
+      handleWechatAddAction(button.dataset.wechatAddAction);
+      closeWechatAddMenu();
+    });
+  }
+
+  function handleWechatAddAction(action) {
+    if (action === "private") {
+      setActivePage("characterListScreen");
+      return;
+    }
+
+    if (action === "group") {
+      setActivePage("groupListScreen");
+      return;
+    }
+
+    if (action === "character") {
+      window.CharacterManager.openCreateCharacterScreen();
+      return;
+    }
+
+    if (action === "import-character") {
+      var input = getElement("characterImportInput");
+      if (input) {
+        input.value = "";
+        input.click();
+      }
+    }
   }
 
   function handleWechatEntryAction(action) {
@@ -561,14 +618,15 @@
 
   function renderWechatMomentsTab(content) {
     var profile = window.AppStorage.getUserProfile();
+    var momentAuthor = getDefaultUserPersonaForDisplay();
     var moments = window.AppStorage.getMoments ? window.AppStorage.getMoments() : [];
 
     content.innerHTML = [
       '<section class="moments-page">',
       '  <form id="momentsComposer" class="moments-composer" autocomplete="off">',
       '    <div class="moments-composer-head">',
-      renderProfileAvatar(profile),
-      '      <span><strong>' + escapeHtml(profile.name || "林澈") + '</strong><em>发布一条只属于心屿的近况</em></span>',
+      renderProfileAvatar(momentAuthor),
+      '      <span><strong>' + escapeHtml(momentAuthor.name || profile.name || "林澈") + '</strong><em>发布一条只属于心屿空间的近况</em></span>',
       "    </div>",
       '    <textarea id="momentsInput" maxlength="280" placeholder="写点此刻想留下的话"></textarea>',
       '    <div class="moments-composer-actions"><span id="momentsPublishTip"></span><button type="submit">发布</button></div>',
@@ -633,6 +691,8 @@
         if (window.AppStorage.addMoment) {
           window.AppStorage.addMoment({
             authorType: "user",
+            authorName: momentAuthor.name || profile.name || "林澈",
+            authorAvatar: momentAuthor.avatar || profile.avatar || "",
             content: text
           });
         }
@@ -684,10 +744,13 @@
   function renderWechatMeTab(content) {
     var profile = window.AppStorage.getUserProfile();
     var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : { balance: 0, ledger: [], familyCards: [] };
+    var personas = window.AppStorage.getUserPersonas ? window.AppStorage.getUserPersonas() : [];
     var listItems = [
+      ["我的头像", "avatar", "设置用户消息和朋友圈头像"],
+      ["我的人设", "persona", "管理 " + personas.length + " 个我的预设"],
+      ["聊天设置", "chat-settings", "接口、备份和全局设置"],
       ["联系人分组", "layers", "管理角色关系"],
       ["日记本", "diary", "我的日记和角色日记"],
-      ["多重人设", "persona", "聊天里的我"],
       ["表情包图库", "emoji", "导入与发送表情"]
     ];
 
@@ -696,7 +759,7 @@
       '  <div class="me-section-label">账户</div>',
       '  <button class="me-profile-card" type="button" data-me-action="profile">',
       renderProfileAvatar(profile),
-      '    <span class="me-profile-main"><strong>' + escapeHtml(profile.name || "林澈") + "</strong><em>微信号：" + escapeHtml(profile.wxid) + "</em></span>",
+      '    <span class="me-profile-main"><strong>' + escapeHtml(profile.name || "林澈") + "</strong><em>微信号：" + escapeHtml(profile.wxid) + " · 我的资料</em></span>",
       '    <span class="me-arrow">›</span>',
       "  </button>",
       '  <button class="me-wallet-entry" type="button" data-me-action="wallet"><span>▣</span><strong>钱包</strong><em>余额 ¥' + formatMoney(wallet.balance) + "</em><i>›</i></button>",
@@ -721,6 +784,16 @@
     return '<span class="me-avatar" aria-hidden="true">' + escapeHtml((profile.name || "我").slice(0, 1)) + "</span>";
   }
 
+  function getDefaultUserPersonaForDisplay() {
+    var profile = window.AppStorage.getUserProfile();
+
+    if (window.AppStorage.resolveUserPersona && profile.activePersonaId) {
+      return window.AppStorage.resolveUserPersona(profile.activePersonaId);
+    }
+
+    return profile;
+  }
+
   function bindMeActions(content) {
     Array.prototype.forEach.call(content.querySelectorAll("[data-me-action]"), function (button) {
       button.addEventListener("click", function () {
@@ -739,29 +812,18 @@
   }
 
   function handleMeAction(action) {
-    var profile;
-    var name;
-    var wxid;
-
     if (action === "wallet") {
       setActivePage("walletScreen");
       return;
     }
 
     if (action === "profile") {
-      profile = window.AppStorage.getUserProfile();
-      name = window.prompt("昵称", profile.name || "林澈");
-      if (name === null) {
-        return;
-      }
-      wxid = window.prompt("微信号", profile.wxid || "");
-      if (wxid === null) {
-        return;
-      }
-      profile.name = name.trim() || "林澈";
-      profile.wxid = wxid.trim() || profile.wxid;
-      window.AppStorage.saveUserProfile(profile);
-      renderWechatScreen();
+      openUserProfileSheet();
+      return;
+    }
+
+    if (action === "avatar") {
+      openUserAvatarSheet();
       return;
     }
 
@@ -781,11 +843,205 @@
     }
 
     if (action === "persona") {
+      openUserPersonaManagerSheet();
+      return;
+    }
+
+    if (action === "chat-settings") {
       setActivePage("settingsScreen");
       return;
     }
 
     window.alert("这个入口已保留，后续可以继续扩展。");
+  }
+
+  function openUserProfileSheet() {
+    var profile = window.AppStorage.getUserProfile();
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      "  <h3>我的资料</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<form id="userProfileForm" class="wechat-sheet-form" autocomplete="off">',
+      '  <label class="wechat-sheet-field"><span>昵称</span><input id="profileNameInput" type="text" maxlength="30" value="' + escapeHtml(profile.name || "") + '"></label>',
+      '  <label class="wechat-sheet-field"><span>微信号 / ID</span><input id="profileWxidInput" type="text" maxlength="40" value="' + escapeHtml(profile.wxid || "") + '"></label>',
+      '  <label class="wechat-sheet-field"><span>补充资料</span><textarea id="profilePersonaInput" maxlength="400">' + escapeHtml(profile.persona || "") + "</textarea></label>",
+      '  <p id="userProfileError" class="sheet-error" role="alert"></p>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">保存资料</button></div>',
+      "</form>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      sheet.querySelector("#userProfileForm").addEventListener("submit", function (event) {
+        var name = sheet.querySelector("#profileNameInput").value.trim();
+        var wxid = sheet.querySelector("#profileWxidInput").value.trim();
+        event.preventDefault();
+
+        if (!name) {
+          sheet.querySelector("#userProfileError").textContent = "昵称不能为空。";
+          return;
+        }
+
+        profile.name = name;
+        profile.wxid = wxid || profile.wxid;
+        profile.persona = sheet.querySelector("#profilePersonaInput").value.trim();
+        window.AppStorage.saveUserProfile(profile);
+        closeWeChatSheet();
+        renderWechatScreen();
+      });
+    });
+  }
+
+  function openUserAvatarSheet() {
+    var profile = window.AppStorage.getUserProfile();
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      "  <h3>我的头像</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<div class="wechat-sheet-form avatar-sheet-form">',
+      '  <div class="avatar-sheet-preview">' + renderProfileAvatar(profile) + "<span>当前头像会用于你的消息、朋友圈和钱包资料。</span></div>",
+      '  <input id="profileAvatarValue" type="hidden" value="' + escapeHtml(profile.avatar || "") + '">',
+      '  <input id="profileAvatarFile" type="file" accept="image/*">',
+      '  <label class="wechat-sheet-field"><span>或粘贴头像地址 / data URL</span><input id="profileAvatarInput" type="text" value="' + escapeHtml(profile.avatar || "") + '"></label>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button id="saveProfileAvatarBtn" type="button" class="full-button">保存头像</button></div>',
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      sheet.querySelector("#profileAvatarFile").addEventListener("change", function (event) {
+        var file = event.target.files && event.target.files[0];
+        if (!file) {
+          return;
+        }
+        readFileAsDataUrl(file).then(function (dataUrl) {
+          sheet.querySelector("#profileAvatarValue").value = dataUrl;
+          sheet.querySelector("#profileAvatarInput").value = dataUrl;
+        });
+      });
+      sheet.querySelector("#saveProfileAvatarBtn").addEventListener("click", function () {
+        profile.avatar = sheet.querySelector("#profileAvatarInput").value.trim() || sheet.querySelector("#profileAvatarValue").value.trim();
+        window.AppStorage.saveUserProfile(profile);
+        closeWeChatSheet();
+        renderWechatScreen();
+      });
+    });
+  }
+
+  function openUserPersonaManagerSheet(editPersonaId) {
+    var personas = window.AppStorage.getUserPersonas ? window.AppStorage.getUserPersonas() : [];
+    var profile = window.AppStorage.getUserProfile();
+    var editing = editPersonaId ? personas.find(function (persona) { return persona.id === editPersonaId; }) : null;
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      "  <h3>我的人设</h3>",
+      '  <button type="button" data-close-sheet>关闭</button>',
+      "</div>",
+      '<div class="persona-manager">',
+      '  <section class="persona-list-section">',
+      personas.length ? personas.map(function (persona) {
+        return [
+          '<article class="persona-item' + (profile.activePersonaId === persona.id ? " active" : "") + '">',
+          renderProfileAvatar(persona),
+          '  <span><strong>' + escapeHtml(persona.name) + '</strong><em>' + escapeHtml(persona.identity || persona.personality || "未写身份") + "</em></span>",
+          '  <div><button type="button" data-persona-default="' + escapeHtml(persona.id) + '">默认</button><button type="button" data-persona-edit="' + escapeHtml(persona.id) + '">编辑</button><button type="button" data-persona-delete="' + escapeHtml(persona.id) + '">删除</button></div>',
+          "</article>"
+        ].join("");
+      }).join("") : '<div class="soft-empty">还没有我的预设，先创建一个。</div>',
+      "  </section>",
+      '<form id="personaEditorForm" class="wechat-sheet-form persona-editor-form" autocomplete="off">',
+      '  <div class="section-title-row"><h3>' + (editing ? "编辑预设" : "新建预设") + '</h3><span>聊天里的我</span></div>',
+      '  <input id="personaIdInput" type="hidden" value="' + escapeHtml(editing && editing.id || "") + '">',
+      '  <label class="wechat-sheet-field"><span>名称</span><input id="personaNameInput" type="text" maxlength="30" value="' + escapeHtml(editing && editing.name || "") + '"></label>',
+      '  <label class="wechat-sheet-field"><span>头像</span><input id="personaAvatarInput" type="text" value="' + escapeHtml(editing && editing.avatar || "") + '" placeholder="可粘贴图片地址或 data URL"><input id="personaAvatarFile" type="file" accept="image/*"></label>',
+      '  <div class="settings-inline-grid"><label><span>性别</span><input id="personaGenderInput" type="text" maxlength="20" value="' + escapeHtml(editing && editing.gender || "") + '"></label><label><span>年龄</span><input id="personaAgeInput" type="text" maxlength="20" value="' + escapeHtml(editing && editing.age || "") + '"></label></div>',
+      '  <label class="wechat-sheet-field"><span>身份 / 关系</span><input id="personaIdentityInput" type="text" maxlength="60" value="' + escapeHtml(editing && editing.identity || "") + '"></label>',
+      '  <label class="wechat-sheet-field"><span>性格</span><textarea id="personaPersonalityInput" maxlength="500">' + escapeHtml(editing && editing.personality || "") + '</textarea></label>',
+      '  <label class="wechat-sheet-field"><span>说话风格</span><textarea id="personaSpeakingInput" maxlength="500">' + escapeHtml(editing && editing.speakingStyle || "") + '</textarea></label>',
+      '  <label class="wechat-sheet-field"><span>补充设定</span><textarea id="personaExtraInput" maxlength="800">' + escapeHtml(editing && editing.extra || "") + '</textarea></label>',
+      '  <p id="personaEditorError" class="sheet-error" role="alert"></p>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">' + (editing ? "保存预设" : "创建预设") + "</button></div>",
+      "</form>",
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      bindPersonaManagerActions(sheet);
+    });
+  }
+
+  function bindPersonaManagerActions(sheet) {
+    var form = sheet.querySelector("#personaEditorForm");
+    var fileInput = sheet.querySelector("#personaAvatarFile");
+
+    Array.prototype.forEach.call(sheet.querySelectorAll("[data-persona-edit]"), function (button) {
+      button.addEventListener("click", function () {
+        openUserPersonaManagerSheet(button.dataset.personaEdit);
+      });
+    });
+
+    Array.prototype.forEach.call(sheet.querySelectorAll("[data-persona-delete]"), function (button) {
+      button.addEventListener("click", function () {
+        if (window.confirm("确定删除这个我的预设吗？")) {
+          window.AppStorage.deleteUserPersona(button.dataset.personaDelete);
+          openUserPersonaManagerSheet();
+        }
+      });
+    });
+
+    Array.prototype.forEach.call(sheet.querySelectorAll("[data-persona-default]"), function (button) {
+      button.addEventListener("click", function () {
+        var profile = window.AppStorage.getUserProfile();
+        profile.activePersonaId = button.dataset.personaDefault;
+        window.AppStorage.saveUserProfile(profile);
+        openUserPersonaManagerSheet();
+      });
+    });
+
+    if (fileInput) {
+      fileInput.addEventListener("change", function (event) {
+        var file = event.target.files && event.target.files[0];
+        if (!file) {
+          return;
+        }
+        readFileAsDataUrl(file).then(function (dataUrl) {
+          sheet.querySelector("#personaAvatarInput").value = dataUrl;
+        });
+      });
+    }
+
+    if (form) {
+      form.addEventListener("submit", function (event) {
+        var id = sheet.querySelector("#personaIdInput").value.trim();
+        var name = sheet.querySelector("#personaNameInput").value.trim();
+        var payload;
+        event.preventDefault();
+
+        if (!name) {
+          sheet.querySelector("#personaEditorError").textContent = "预设名称不能为空。";
+          return;
+        }
+
+        payload = {
+          name: name,
+          avatar: sheet.querySelector("#personaAvatarInput").value.trim(),
+          gender: sheet.querySelector("#personaGenderInput").value.trim(),
+          age: sheet.querySelector("#personaAgeInput").value.trim(),
+          identity: sheet.querySelector("#personaIdentityInput").value.trim(),
+          personality: sheet.querySelector("#personaPersonalityInput").value.trim(),
+          speakingStyle: sheet.querySelector("#personaSpeakingInput").value.trim(),
+          extra: sheet.querySelector("#personaExtraInput").value.trim()
+        };
+
+        if (id) {
+          window.AppStorage.updateUserPersona(id, payload);
+        } else {
+          window.AppStorage.addUserPersona(payload);
+        }
+
+        openUserPersonaManagerSheet();
+      });
+    }
   }
 
   function renderWechatSpiritTab(content) {
@@ -798,14 +1054,14 @@
       '  <strong>' + groups.length + "</strong><span>个群聊</span>",
       "</section>",
       '<section class="wechat-list-panel">',
-      '  <div class="section-title-row"><h3>精灵空间</h3><span>角色管理</span></div>',
+      '  <div class="section-title-row"><h3>角色空间</h3><span>角色管理</span></div>',
       '  <div class="spirit-actions">',
       '    <button type="button" data-wechat-entry="space">角色空间</button>',
       '    <button type="button" data-wechat-entry="contacts">联系人</button>',
       '    <button type="button" data-wechat-entry="new-character">创建角色</button>',
       '    <button type="button" data-wechat-entry="new-group">创建群聊</button>',
       "  </div>",
-      characters.length ? characters.slice(0, 6).map(renderSpiritCharacter).join("") : '<div class="soft-empty">还没有角色，先创建一个精灵吧。</div>',
+      characters.length ? characters.slice(0, 6).map(renderSpiritCharacter).join("") : '<div class="soft-empty">还没有角色，先创建一个角色吧。</div>',
       "</section>"
     ].join("");
     bindWechatEntryActions(content);
@@ -965,7 +1221,7 @@
       return "[位置] " + (message.location && message.location.name ? message.location.name : message.content || "");
     }
     if (message.type === "offlineUserAction") {
-      return "[线下行动] " + (message.content || "");
+      return message.content || "";
     }
     if (message.type === "offlineAction") {
       return "[线下旁白] " + (message.content || "");
@@ -1099,8 +1355,9 @@
     });
     getElement("offlineBackBtn").addEventListener("click", window.OfflineManager.goBack);
     getElement("wechatBackBtn").addEventListener("click", goHome);
-    getElement("wechatAddBtn").addEventListener("click", function () {
-      window.CharacterManager.openCreateCharacterScreen();
+    getElement("wechatAddBtn").addEventListener("click", function (event) {
+      event.stopPropagation();
+      toggleWechatAddMenu();
     });
     getElement("walletBackBtn").addEventListener("click", function () {
       setWechatTab("me");
@@ -1294,6 +1551,7 @@
 
     getElement("chatMoreBtn").addEventListener("click", function (event) {
       event.stopPropagation();
+      closeWechatAddMenu();
       window.CharacterManager.toggleChatActionMenu();
     });
 
@@ -1308,7 +1566,6 @@
       });
     }
 
-    getElement("chatEditCharacterBtn").addEventListener("click", window.CharacterManager.editActiveCharacter);
     getElement("chatSettingsBtn").addEventListener("click", window.CharacterManager.openActivePrivateSettings);
     getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
@@ -1325,6 +1582,7 @@
 
     getElement("groupChatMoreBtn").addEventListener("click", function (event) {
       event.stopPropagation();
+      closeWechatAddMenu();
       window.GroupManager.toggleGroupActionMenu();
     });
 
@@ -1369,16 +1627,18 @@
       getElement("importDataInput").click();
     });
     getElement("importDataInput").addEventListener("change", importDataFromFile);
+    getElement("characterImportInput").addEventListener("change", importCharacterFromFile);
     getElement("clearAllDataBtn").addEventListener("click", clearAllData);
   }
 
   function bindGlobalActions() {
     document.addEventListener("click", function (event) {
-      if (!event.target.closest(".action-menu") && !event.target.closest(".card-more") && event.target.id !== "chatMoreBtn" && event.target.id !== "groupChatMoreBtn") {
+      if (!event.target.closest(".action-menu") && !event.target.closest(".card-more") && event.target.id !== "chatMoreBtn" && event.target.id !== "groupChatMoreBtn" && event.target.id !== "wechatAddBtn") {
         window.CharacterManager.closeAllMenus();
         if (window.GroupManager) {
           window.GroupManager.closeAllMenus();
         }
+        closeWechatAddMenu();
       }
     });
   }
@@ -3485,6 +3745,103 @@
     };
   }
 
+  function clampPercent(value) {
+    var number = Number(value);
+
+    if (!Number.isFinite(number)) {
+      number = 0;
+    }
+
+    return Math.max(0, Math.min(100, Math.round(number)));
+  }
+
+  function getThoughtTextBundle(thought) {
+    var source = thought || {};
+    return [
+      source.mood || "",
+      source.visibleSummary || "",
+      source.summary || "",
+      source.content || ""
+    ].join(" ");
+  }
+
+  function hasAnyKeyword(text, keywords) {
+    return keywords.some(function (keyword) {
+      return text.indexOf(keyword) !== -1;
+    });
+  }
+
+  function estimateConcernValue(thought) {
+    var text = getThoughtTextBundle(thought);
+    var value = 54;
+
+    if (hasAnyKeyword(text, ["在意", "喜欢", "想你", "心动", "担心", "牵挂", "靠近", "舍不得", "吃醋", "嫉妒"])) {
+      value += 22;
+    }
+
+    if (hasAnyKeyword(text, ["生气", "委屈", "不安", "紧张", "慌", "怕", "难过"])) {
+      value += 10;
+    }
+
+    if (hasAnyKeyword(text, ["平静", "冷静", "普通", "没事", "无所谓"])) {
+      value -= 16;
+    }
+
+    if (String(thought && thought.content || "").length > 48) {
+      value += 6;
+    }
+
+    return clampPercent(value);
+  }
+
+  function estimateMoodWaveValue(thought) {
+    var text = getThoughtTextBundle(thought);
+    var value = 42;
+
+    if (hasAnyKeyword(text, ["生气", "爆炸", "烦", "委屈", "难过", "慌", "不安", "焦虑", "紧张", "乱"])) {
+      value += 28;
+    }
+
+    if (hasAnyKeyword(text, ["开心", "高兴", "期待", "害羞", "心动", "甜"])) {
+      value += 14;
+    }
+
+    if (hasAnyKeyword(text, ["平静", "冷静", "安稳", "放松", "普通"])) {
+      value -= 18;
+    }
+
+    if (String(thought && thought.content || "").length > 80) {
+      value += 8;
+    }
+
+    return clampPercent(value);
+  }
+
+  function formatThoughtModalTime(timestamp) {
+    var date = new Date(timestamp || Date.now());
+    return (date.getMonth() + 1) + "/" + date.getDate() + " "
+      + String(date.getHours()).padStart(2, "0") + ":"
+      + String(date.getMinutes()).padStart(2, "0") + " 的内心独白";
+  }
+
+  function buildThoughtDisplayData(thought, character) {
+    var source = thought || {};
+    var speaker = character || {};
+    var currentMood = source.mood || source.visibleSummary || "嘴上不说，其实有点在意。";
+    var deletedDraft = source.deletedDraft || source.draft || source.visibleSummary || "刚刚差点发出去，又被他/她删掉了。";
+    var realThought = source.content || source.visibleSummary || "这条心声还没有写下完整内容。";
+
+    return {
+      title: (speaker.name || source.characterName || "角色") + "的心声",
+      timeText: formatThoughtModalTime(source.createdAt),
+      concernValue: estimateConcernValue(source),
+      moodWaveValue: estimateMoodWaveValue(source),
+      currentMood: currentMood,
+      deletedDraft: deletedDraft,
+      realThought: realThought
+    };
+  }
+
   function openThoughtsDrawer(options) {
     var source = options || {};
     var characterIds = Array.isArray(source.characterIds) ? source.characterIds.filter(Boolean) : [];
@@ -3496,6 +3853,7 @@
       characterIds: characterIds,
       chatId: chatId,
       characterFilter: source.characterFilter || "all",
+      mode: source.mode === "history" ? "history" : "latest",
       open: true,
       origin: source.origin || ""
     };
@@ -3504,6 +3862,7 @@
     renderThoughtsDrawer();
 
     if (mask) {
+      mask.classList.add("thought-modal-mask");
       mask.classList.remove("hidden");
     }
 
@@ -3516,6 +3875,7 @@
 
     thoughtsDrawerState.open = false;
     thoughtsDrawerState.origin = "";
+    thoughtsDrawerState.mode = "latest";
 
     if (mask) {
       mask.classList.add("hidden");
@@ -3523,6 +3883,7 @@
 
     if (drawer) {
       drawer.innerHTML = "";
+      drawer.className = "thoughts-drawer";
     }
 
     updateThoughtHeartButtons();
@@ -3539,16 +3900,78 @@
       return;
     }
 
-    drawer.innerHTML = [
-      '<div class="thoughts-drawer-handle" aria-hidden="true"></div>',
-      '<div class="thoughts-drawer-header">',
-      '  <div><span>心声</span><h3 id="thoughtsDrawerTitle">' + escapeHtml(thoughtsDrawerState.title || "心声") + "</h3></div>",
-      '  <button class="nav-button thoughts-drawer-close" type="button" data-thought-drawer-close aria-label="关闭">×</button>',
+    drawer.className = "thought-modal-card" + (thoughtsDrawerState.mode === "history" ? " thought-modal-history" : "");
+
+    if (thoughtsDrawerState.mode === "history") {
+      drawer.innerHTML = renderThoughtHistoryModal(items, visibleItems);
+      return;
+    }
+
+    drawer.innerHTML = renderLatestThoughtModal(items, visibleItems);
+  }
+
+  function renderLatestThoughtModal(items, visibleItems) {
+    var thought = visibleItems[0] || null;
+    var character = thought ? {
+      name: thought.characterName,
+      avatar: thought.characterAvatar
+    } : null;
+    var data = buildThoughtDisplayData(thought, character);
+
+    if (!thought) {
+      return [
+        '<div class="thought-modal-header">',
+        '  <div><div class="thought-modal-title" id="thoughtsDrawerTitle"><span aria-hidden="true">♥</span><strong>' + escapeHtml(thoughtsDrawerState.title || "心声") + '</strong></div><p class="thought-modal-subtitle">还没有新的心声</p></div>',
+        '  <button class="nav-button thoughts-drawer-close thought-modal-close" type="button" data-thought-drawer-close aria-label="关闭">×</button>',
+        "</div>",
+        renderThoughtDrawerTabs(items),
+        '<div class="thought-modal-empty">还没有新的心声</div>',
+        '<div class="thought-modal-footer"><button class="thought-record-button" type="button" data-thought-record>心声记录</button></div>'
+      ].join("");
+    }
+
+    return [
+      '<div class="thought-modal-header">',
+      '  <div><div class="thought-modal-title" id="thoughtsDrawerTitle"><span aria-hidden="true">♥</span><strong>' + escapeHtml(data.title) + '</strong></div><p class="thought-modal-subtitle">' + escapeHtml(data.timeText) + '</p></div>',
+      '  <button class="nav-button thoughts-drawer-close thought-modal-close" type="button" data-thought-drawer-close aria-label="关闭">×</button>',
       "</div>",
       renderThoughtDrawerTabs(items),
-      '<div class="thoughts-drawer-list">',
-      visibleItems.length ? visibleItems.map(renderThoughtDrawerCard).join("") : '<div class="thoughts-drawer-empty">还没有新的心声</div>',
+      '<div class="thought-modal-body">',
+      '  <section class="thought-status-card" aria-label="心声状态">',
+      renderThoughtMeterRow("💗", "在意值", data.concernValue),
+      renderThoughtMeterRow("🌙", "情绪波动", data.moodWaveValue),
+      "  </section>",
+      '  <section class="thought-current-card"><h4>当前心情</h4><p>' + escapeHtml(data.currentMood) + "</p></section>",
+      '  <section class="thought-draft-card"><h4>没说出口的话</h4><p>' + escapeHtml(data.deletedDraft) + "</p></section>",
+      '  <section class="thought-real-card"><h4>内心真实想法</h4><p>' + escapeHtml(data.realThought) + "</p></section>",
+      "</div>",
+      '<div class="thought-modal-footer"><button class="thought-record-button" type="button" data-thought-record>心声记录</button></div>'
+    ].join("");
+  }
+
+  function renderThoughtMeterRow(icon, label, value) {
+    var percent = clampPercent(value);
+
+    return [
+      '<div class="thought-meter-row">',
+      '  <span class="thought-meter-label"><i aria-hidden="true">' + icon + '</i><strong>' + escapeHtml(label) + "</strong></span>",
+      '  <div class="thought-meter-track" aria-hidden="true"><span class="thought-meter-fill" style="width: ' + percent + '%"></span></div>',
+      '  <b>' + percent + "%</b>",
       "</div>"
+    ].join("");
+  }
+
+  function renderThoughtHistoryModal(items, visibleItems) {
+    return [
+      '<div class="thought-modal-header">',
+      '  <div><div class="thought-modal-title" id="thoughtsDrawerTitle"><span aria-hidden="true">♥</span><strong>心声记录</strong></div><p class="thought-modal-subtitle">' + escapeHtml(thoughtsDrawerState.title || "心声") + " · " + items.length + ' 条</p></div>',
+      '  <button class="nav-button thoughts-drawer-close thought-modal-close" type="button" data-thought-drawer-close aria-label="关闭">×</button>',
+      "</div>",
+      renderThoughtDrawerTabs(items),
+      '<div class="thoughts-drawer-list thought-modal-record-list">',
+      visibleItems.length ? visibleItems.map(renderThoughtDrawerCard).join("") : '<div class="thoughts-drawer-empty">还没有新的心声</div>',
+      "</div>",
+      '<div class="thought-modal-footer"><button class="thought-record-button" type="button" data-thought-record>返回最新心声</button></div>'
     ].join("");
   }
 
@@ -3622,14 +4045,22 @@
 
     mask.addEventListener("click", function (event) {
       var filter = event.target.closest("[data-drawer-character]");
+      var recordButton = event.target.closest("[data-thought-record]");
 
       if (event.target === mask || event.target.closest("[data-thought-drawer-close]")) {
         closeThoughtsDrawer();
         return;
       }
 
+      if (recordButton) {
+        thoughtsDrawerState.mode = thoughtsDrawerState.mode === "history" ? "latest" : "history";
+        renderThoughtsDrawer();
+        return;
+      }
+
       if (filter) {
         thoughtsDrawerState.characterFilter = filter.dataset.drawerCharacter || "all";
+        thoughtsDrawerState.mode = "latest";
         renderThoughtsDrawer();
       }
     });
@@ -4196,6 +4627,60 @@
     reader.readAsText(file);
   }
 
+  function importCharacterFromFile(event) {
+    var input = event.target;
+    var file = input.files && input.files[0];
+    var reader;
+
+    if (!file) {
+      return;
+    }
+
+    reader = new FileReader();
+    reader.onload = function () {
+      try {
+        var data = JSON.parse(String(reader.result || ""));
+        var source = Array.isArray(data) ? data[0] : (data.character || data);
+        var now = Date.now();
+        var character;
+
+        if (!source || typeof source !== "object" || !String(source.name || "").trim()) {
+          throw new Error("没有找到可导入的角色名称。");
+        }
+
+        character = {
+          id: "character_" + now + "_" + Math.random().toString(36).slice(2, 8),
+          name: String(source.name || "").trim(),
+          avatar: String(source.avatar || ""),
+          gender: String(source.gender || "未设定"),
+          identity: String(source.identity || ""),
+          personality: String(source.personality || ""),
+          background: String(source.background || ""),
+          speakingStyle: String(source.speakingStyle || ""),
+          relationship: String(source.relationship || ""),
+          openingMessage: String(source.openingMessage || ""),
+          chatSettings: source.chatSettings && typeof source.chatSettings === "object" ? source.chatSettings : {},
+          createdAt: now
+        };
+
+        window.AppStorage.addCharacter(character);
+        window.CharacterManager.renderCharacterList();
+        renderWechatScreen();
+        refreshHomeSummary();
+        window.alert("已导入角色：" + character.name);
+      } catch (error) {
+        window.alert(error.message || "导入角色失败，请检查 JSON 文件。");
+      } finally {
+        input.value = "";
+      }
+    };
+    reader.onerror = function () {
+      window.alert("读取角色文件失败，请重新选择。");
+      input.value = "";
+    };
+    reader.readAsText(file);
+  }
+
   function clearAllData() {
     if (!window.confirm("确定要清空全部数据吗？")) {
       return;
@@ -4247,6 +4732,7 @@
     bindHomeActions();
     bindNavigationActions();
     bindForms();
+    bindWechatAddMenu();
     bindChatMenuActions();
     bindGroupMenuActions();
     bindDataManagementActions();
@@ -4290,6 +4776,7 @@
   window.AppExtras = {
     openThoughtsForCharacter: openThoughtsForCharacter,
     openThoughtsForGroup: openThoughtsForGroup,
+    buildThoughtDisplayData: buildThoughtDisplayData,
     openThoughtsDrawer: openThoughtsDrawer,
     closeThoughtsDrawer: closeThoughtsDrawer,
     renderThoughtsDrawer: renderThoughtsDrawer,

@@ -11,9 +11,11 @@
     thoughts: "myAiApp.thoughts",
     diaries: "myAiApp.diaries",
     userProfile: "myAiApp.userProfile",
+    userPersonas: "myAiApp.userPersonas",
     desktopState: "myAiApp.desktopState",
     wechatState: "myAiApp.wechatState",
     moments: "myAiApp.moments",
+    inlineOffline: "myAiApp.inlineOffline",
     wallet: "myAiApp.wallet",
     recentHidden: "myAiApp.recentHidden",
     theme: "myAiApp.theme",
@@ -669,6 +671,79 @@
     localStorage.setItem(STORAGE_KEYS.userProfile, JSON.stringify(normalizeUserProfile(profile || {})));
   }
 
+  function getUserPersonas() {
+    return normalizeUserPersonas(parseJson(localStorage.getItem(STORAGE_KEYS.userPersonas), []));
+  }
+
+  function saveUserPersonas(personas) {
+    localStorage.setItem(STORAGE_KEYS.userPersonas, JSON.stringify(normalizeUserPersonas(personas || [])));
+  }
+
+  function addUserPersona(persona) {
+    var personas = getUserPersonas();
+    var next = normalizeUserPersona(Object.assign({
+      id: createId("persona"),
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    }, persona || {}), personas.length);
+
+    personas.unshift(next);
+    saveUserPersonas(personas);
+    return next;
+  }
+
+  function updateUserPersona(personaId, nextPersona) {
+    var personas = getUserPersonas();
+    var index = personas.findIndex(function (persona) {
+      return persona.id === personaId;
+    });
+
+    if (index === -1) {
+      return null;
+    }
+
+    personas[index] = normalizeUserPersona(Object.assign({}, personas[index], nextPersona || {}, {
+      id: personaId,
+      createdAt: personas[index].createdAt || Date.now(),
+      updatedAt: Date.now()
+    }), index);
+    saveUserPersonas(personas);
+    return personas[index];
+  }
+
+  function deleteUserPersona(personaId) {
+    saveUserPersonas(getUserPersonas().filter(function (persona) {
+      return persona.id !== personaId;
+    }));
+  }
+
+  function getUserPersonaById(personaId) {
+    return getUserPersonas().find(function (persona) {
+      return persona.id === personaId;
+    }) || null;
+  }
+
+  function resolveUserPersona(personaId, override) {
+    var profile = getUserProfile();
+    var persona = personaId ? getUserPersonaById(personaId) : null;
+    var legacy = override && typeof override === "object" ? override : {};
+    var source = persona || {};
+
+    return normalizeUserPersona({
+      id: source.id || "",
+      name: source.name || legacy.name || profile.name || "我",
+      avatar: source.avatar || legacy.avatar || profile.avatar || "",
+      gender: source.gender || legacy.gender || "",
+      age: source.age || legacy.age || "",
+      identity: source.identity || legacy.identity || "",
+      personality: source.personality || legacy.personality || "",
+      speakingStyle: source.speakingStyle || legacy.speakingStyle || "",
+      extra: source.extra || legacy.extra || legacy.persona || profile.persona || "",
+      createdAt: source.createdAt || Date.now(),
+      updatedAt: source.updatedAt || Date.now()
+    }, 0);
+  }
+
   function getDesktopState() {
     return normalizeDesktopState(parseJson(localStorage.getItem(STORAGE_KEYS.desktopState), {}));
   }
@@ -719,6 +794,54 @@
     moments.unshift(next);
     saveMoments(moments.slice(0, 200));
     return next;
+  }
+
+  function getInlineOfflineStates() {
+    var states = parseJson(localStorage.getItem(STORAGE_KEYS.inlineOffline), {});
+    return states && typeof states === "object" && !Array.isArray(states) ? states : {};
+  }
+
+  function saveInlineOfflineStates(states) {
+    localStorage.setItem(STORAGE_KEYS.inlineOffline, JSON.stringify(states || {}));
+  }
+
+  function getInlineOfflineKey(targetType, targetId) {
+    return String(targetType || "") + ":" + String(targetId || "");
+  }
+
+  function getInlineOfflineState(targetType, targetId) {
+    var state = getInlineOfflineStates()[getInlineOfflineKey(targetType, targetId)];
+    if (!state || state.enabled === false) {
+      return null;
+    }
+    return {
+      targetType: String(state.targetType || targetType || ""),
+      targetId: String(state.targetId || targetId || ""),
+      scene: normalizeOfflineScene(state.scene || {}),
+      enabled: true,
+      updatedAt: Number(state.updatedAt) || Date.now()
+    };
+  }
+
+  function setInlineOfflineState(targetType, targetId, scene) {
+    var states = getInlineOfflineStates();
+    var key = getInlineOfflineKey(targetType, targetId);
+
+    states[key] = {
+      targetType: String(targetType || ""),
+      targetId: String(targetId || ""),
+      scene: normalizeOfflineScene(scene || {}),
+      enabled: true,
+      updatedAt: Date.now()
+    };
+    saveInlineOfflineStates(states);
+    return states[key];
+  }
+
+  function clearInlineOfflineState(targetType, targetId) {
+    var states = getInlineOfflineStates();
+    delete states[getInlineOfflineKey(targetType, targetId)];
+    saveInlineOfflineStates(states);
   }
 
   function getRecentHidden() {
@@ -1032,10 +1155,11 @@
       thoughts: getThoughtStore(),
       diaries: getDiaries(),
       userProfile: getUserProfile(),
-      userPersonas: getUserProfile(),
+      userPersonas: getUserPersonas(),
       desktopState: getDesktopState(),
       wechatState: getWechatState(),
       moments: getMoments(),
+      inlineOffline: getInlineOfflineStates(),
       wallet: getWallet(),
       themes: getTheme(),
       photos: getPhotos(),
@@ -1065,9 +1189,11 @@
     saveThoughtStore(normalized.thoughts);
     saveDiaries(normalized.diaries);
     saveUserProfile(normalized.userProfile);
+    saveUserPersonas(normalized.userPersonas);
     saveDesktopState(normalized.desktopState);
     saveWechatState(normalized.wechatState);
     saveMoments(normalized.moments);
+    saveInlineOfflineStates(normalized.inlineOffline);
     saveWallet(normalized.wallet);
     saveTheme(normalized.themes);
     savePhotos(normalized.photos);
@@ -1108,10 +1234,12 @@
       worldBooks: normalizeWorldBooks(data.worldBooks || []),
       thoughts: normalizeThoughts(data.thoughts || {}),
       diaries: normalizeDiaries(data.diaries || []),
-      userProfile: normalizeUserProfile(data.userProfile || data.userPersonas || {}),
+      userProfile: normalizeUserProfile(data.userProfile || {}),
+      userPersonas: normalizeUserPersonas(Array.isArray(data.userPersonas) ? data.userPersonas : []),
       desktopState: normalizeDesktopState(data.desktopState || data.desktop || {}),
       wechatState: normalizeWechatState(data.wechatState || data.wechat || {}),
       moments: normalizeMoments(data.moments || data.momentPosts || []),
+      inlineOffline: normalizeInlineOfflineStates(data.inlineOffline || data.inlineOfflineStates || {}),
       wallet: normalizeWallet(data.wallet || {}),
       themes: normalizeTheme(data.themes || data.theme || {}),
       photos: normalizePhotos(data.photos || []),
@@ -1168,10 +1296,17 @@
       patAction: String(source.patAction || ""),
       chatBackground: String(source.chatBackground || ""),
       familyCardId: String(source.familyCardId || ""),
+      userPersonaId: String(source.userPersonaId || ""),
       userPersonaOverride: {
         name: String(persona.name || ""),
         avatar: String(persona.avatar || ""),
-        persona: String(persona.persona || "")
+        gender: String(persona.gender || ""),
+        age: String(persona.age || ""),
+        identity: String(persona.identity || ""),
+        personality: String(persona.personality || ""),
+        speakingStyle: String(persona.speakingStyle || ""),
+        extra: String(persona.extra || persona.persona || ""),
+        persona: String(persona.persona || persona.extra || "")
       },
       memoryEnabled: source.memoryEnabled !== false
     };
@@ -1192,10 +1327,17 @@
       minParticipantCount: Math.max(1, Number(source.minParticipantCount) || 2),
       allowConsecutiveMessages: source.allowConsecutiveMessages !== false,
       allowSpecialMessages: source.allowSpecialMessages !== false,
+      userPersonaId: String(source.userPersonaId || ""),
       userPersonaOverride: {
         name: String(persona.name || ""),
         avatar: String(persona.avatar || ""),
-        persona: String(persona.persona || "")
+        gender: String(persona.gender || ""),
+        age: String(persona.age || ""),
+        identity: String(persona.identity || ""),
+        personality: String(persona.personality || ""),
+        speakingStyle: String(persona.speakingStyle || ""),
+        extra: String(persona.extra || persona.persona || ""),
+        persona: String(persona.persona || persona.extra || "")
       }
     };
   }
@@ -1412,7 +1554,33 @@
       avatar: String(source.avatar || ""),
       persona: String(source.persona || ""),
       wxid: wxid,
+      activePersonaId: String(source.activePersonaId || ""),
       momentsAutoReview: Boolean(source.momentsAutoReview)
+    };
+  }
+
+  function normalizeUserPersonas(personas) {
+    return Array.isArray(personas) ? personas.map(normalizeUserPersona).filter(function (persona) {
+      return persona.name;
+    }) : [];
+  }
+
+  function normalizeUserPersona(persona, index) {
+    var source = persona && typeof persona === "object" && !Array.isArray(persona) ? persona : {};
+    var now = Date.now();
+
+    return {
+      id: String(source.id || createId("persona") + "_" + (index || 0)),
+      name: String(source.name || "").trim(),
+      avatar: String(source.avatar || ""),
+      gender: String(source.gender || ""),
+      age: String(source.age || ""),
+      identity: String(source.identity || source.relationship || ""),
+      personality: String(source.personality || ""),
+      speakingStyle: String(source.speakingStyle || ""),
+      extra: String(source.extra || source.persona || source.background || ""),
+      createdAt: Number(source.createdAt) || now,
+      updatedAt: Number(source.updatedAt) || now
     };
   }
 
@@ -1475,6 +1643,34 @@
       }) : [],
       createdAt: Number(source.createdAt) || now
     };
+  }
+
+  function normalizeInlineOfflineStates(states) {
+    var normalized = {};
+
+    if (!states || typeof states !== "object" || Array.isArray(states)) {
+      return normalized;
+    }
+
+    Object.keys(states).forEach(function (key) {
+      var source = states[key] && typeof states[key] === "object" ? states[key] : {};
+      var targetType = source.targetType === "group" ? "group" : "private";
+      var targetId = String(source.targetId || "");
+
+      if (!targetId || source.enabled === false) {
+        return;
+      }
+
+      normalized[getInlineOfflineKey(targetType, targetId)] = {
+        targetType: targetType,
+        targetId: targetId,
+        scene: normalizeOfflineScene(source.scene || {}),
+        enabled: true,
+        updatedAt: Number(source.updatedAt) || Date.now()
+      };
+    });
+
+    return normalized;
   }
 
   function normalizeWallet(wallet) {
@@ -1601,9 +1797,11 @@
     localStorage.removeItem(STORAGE_KEYS.thoughts);
     localStorage.removeItem(STORAGE_KEYS.diaries);
     localStorage.removeItem(STORAGE_KEYS.userProfile);
+    localStorage.removeItem(STORAGE_KEYS.userPersonas);
     localStorage.removeItem(STORAGE_KEYS.desktopState);
     localStorage.removeItem(STORAGE_KEYS.wechatState);
     localStorage.removeItem(STORAGE_KEYS.moments);
+    localStorage.removeItem(STORAGE_KEYS.inlineOffline);
     localStorage.removeItem(STORAGE_KEYS.wallet);
     localStorage.removeItem(STORAGE_KEYS.recentHidden);
     localStorage.removeItem(STORAGE_KEYS.theme);
@@ -1685,6 +1883,13 @@
     getTodayDiary: getTodayDiary,
     getUserProfile: getUserProfile,
     saveUserProfile: saveUserProfile,
+    getUserPersonas: getUserPersonas,
+    saveUserPersonas: saveUserPersonas,
+    addUserPersona: addUserPersona,
+    updateUserPersona: updateUserPersona,
+    deleteUserPersona: deleteUserPersona,
+    getUserPersonaById: getUserPersonaById,
+    resolveUserPersona: resolveUserPersona,
     getDesktopState: getDesktopState,
     saveDesktopState: saveDesktopState,
     updateDesktopState: updateDesktopState,
@@ -1694,6 +1899,10 @@
     getMoments: getMoments,
     saveMoments: saveMoments,
     addMoment: addMoment,
+    getInlineOfflineState: getInlineOfflineState,
+    setInlineOfflineState: setInlineOfflineState,
+    clearInlineOfflineState: clearInlineOfflineState,
+    getInlineOfflineStates: getInlineOfflineStates,
     getRecentHidden: getRecentHidden,
     hideRecentChat: hideRecentChat,
     getRecentHiddenAt: getRecentHiddenAt,

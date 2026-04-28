@@ -66,6 +66,39 @@
     return '<span class="' + className + '" aria-hidden="true">' + escapeHtml(getAvatarText(character)) + "</span>";
   }
 
+  function renderUserAvatar(user, className) {
+    var source = user || {};
+
+    if (source.avatar) {
+      return '<img class="' + className + ' has-image user-message-avatar" src="' + escapeHtml(source.avatar) + '" alt="' + escapeHtml(source.name || "我") + '头像">';
+    }
+
+    return '<span class="' + className + ' user-message-avatar" aria-hidden="true">我</span>';
+  }
+
+  function getPrivateUserDisplay(character, settings) {
+    var chatSettings = settings || getPrivateChatSettings(character);
+    var profile = window.AppStorage.getUserProfile ? window.AppStorage.getUserProfile() : {};
+    var resolved = window.AppStorage.resolveUserPersona
+      ? window.AppStorage.resolveUserPersona(chatSettings.userPersonaId, chatSettings.userPersonaOverride)
+      : null;
+
+    return {
+      name: resolved && resolved.name || profile.name || "我",
+      avatar: resolved && resolved.avatar || profile.avatar || ""
+    };
+  }
+
+  function renderPrivateUserMessageAvatar(character, settings) {
+    var chatSettings = settings || getPrivateChatSettings(character);
+
+    if (chatSettings.hideUserAvatar) {
+      return "";
+    }
+
+    return renderUserAvatar(getPrivateUserDisplay(character, chatSettings), "message-avatar");
+  }
+
   function getCharacterSummary(character) {
     if (character.personality) {
       return character.personality;
@@ -324,7 +357,7 @@
       return "[位置] " + (message.location && message.location.name ? message.location.name : message.content || "");
     }
     if (message.type === "offlineUserAction") {
-      return "[线下行动] " + (message.content || "");
+      return message.content || "";
     }
     if (message.type === "offlineAction") {
       return "[线下旁白] " + (message.content || "");
@@ -775,14 +808,11 @@
 
   function renderPrivateMessage(message, character) {
     var messageId = escapeHtml(message.id || "");
+    var settings = getPrivateChatSettings(character);
     var roleClass = message.role === "user" ? "user" : "character";
-    var avatar = roleClass === "character" ? renderAvatar(character, "message-avatar") : "";
+    var avatar = roleClass === "character" ? renderAvatar(character, "message-avatar") : renderPrivateUserMessageAvatar(character, settings);
     var bubbleClass = "message-bubble";
     var selectCheck = renderPrivateMessageSelectCheck(message);
-
-    if (message.type === "offlineUserAction") {
-      return renderOfflineUserActionMessage(message, selectCheck);
-    }
 
     if (message.type === "offlineAction") {
       return renderOfflineActionMessage(message, selectCheck);
@@ -805,8 +835,7 @@
       return [
         '<div class="message-row ' + roleClass + ' message-action-target" data-message-id="' + messageId + '">',
         selectCheck,
-        avatar,
-        renderStandaloneMessage(message),
+        roleClass === "user" ? renderStandaloneMessage(message) + avatar : avatar + renderStandaloneMessage(message),
         "</div>"
       ].join("");
     }
@@ -818,8 +847,9 @@
     return [
       '<div class="message-row ' + roleClass + ' message-action-target" data-message-id="' + messageId + '">',
       selectCheck,
-      avatar,
-      '  <div class="' + bubbleClass + '">' + renderMessageContent(message) + "</div>",
+      roleClass === "user"
+        ? '  <div class="' + bubbleClass + '">' + renderMessageContent(message) + "</div>" + avatar
+        : avatar + '  <div class="' + bubbleClass + '">' + renderMessageContent(message) + "</div>",
       "</div>"
     ].join("");
   }
@@ -839,7 +869,7 @@
     return [
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="offline-user-action-card"><strong>你的行动</strong><span>' + escapeHtml(message.content) + "</span></div>",
+      '  <div class="message-bubble">' + escapeHtml(message.content) + "</div>",
       "</div>"
     ].join("");
   }
@@ -1582,7 +1612,7 @@
       return "语音：" + ((message.voice && message.voice.text) || message.content || "");
     }
     if (message.type === "offlineUserAction") {
-      return "线下行动：" + (message.content || "");
+      return message.content || "";
     }
     if (message.type === "offlineAction") {
       return "线下旁白：" + (message.content || "");
@@ -2100,6 +2130,7 @@
       patAction: "",
       chatBackground: "",
       familyCardId: "",
+      userPersonaId: "",
       userPersonaOverride: {
         name: "",
         avatar: "",
@@ -2120,6 +2151,17 @@
 
     renderPrivateChatSettings(character);
     window.setActivePage("privateChatSettingsScreen");
+  }
+
+  function renderUserPersonaOptions(selectedId) {
+    var personas = window.AppStorage.getUserPersonas ? window.AppStorage.getUserPersonas() : [];
+
+    return [
+      '<option value="">不绑定我的人设预设</option>',
+      personas.map(function (persona) {
+        return '<option value="' + escapeHtml(persona.id) + '"' + (selectedId === persona.id ? " selected" : "") + ">" + escapeHtml(persona.name || "未命名人设") + "</option>";
+      }).join("")
+    ].join("");
   }
 
   function renderPrivateChatSettings(character) {
@@ -2145,6 +2187,7 @@
       "</section>",
       '<section class="form-section">',
       '<div class="section-title-row"><h3>我在聊天中的身份</h3><span>专属</span></div>',
+      '<div class="field-group"><label>我在 TA 面前是谁</label><select data-private-field="userPersonaId">' + renderUserPersonaOptions(settings.userPersonaId || "") + '</select></div>',
       '<div class="field-group"><label>我的昵称</label><input data-private-field="userName" type="text" value="' + escapeHtml(persona.name || "") + '"></div>',
       '<div class="field-group"><label>我的头像</label><input data-private-field="userAvatar" type="text" value="' + escapeHtml(persona.avatar || "") + '"></div>',
       '<div class="field-group"><label>我的人设</label><textarea data-private-field="userPersona">' + escapeHtml(persona.persona || "") + '</textarea></div>',
@@ -2267,6 +2310,7 @@
         patAction: getPrivateField("patAction"),
         chatBackground: getPrivateField("chatBackground"),
         familyCardId: getPrivateField("familyCardId"),
+        userPersonaId: getPrivateField("userPersonaId"),
         userPersonaOverride: {
           name: getPrivateField("userName"),
           avatar: getPrivateField("userAvatar"),

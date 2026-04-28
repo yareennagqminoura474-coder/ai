@@ -83,6 +83,27 @@
     });
   }
 
+  function setCurrentInlineOfflineState(targetType, targetId, scene) {
+    inlineOfflineState = {
+      targetType: String(targetType || ""),
+      targetId: String(targetId || ""),
+      scene: normalizeScene(scene)
+    };
+  }
+
+  function activateStoredInlineOfflineState(targetType, targetId) {
+    var stored = window.AppStorage.getInlineOfflineState
+      ? window.AppStorage.getInlineOfflineState(targetType, targetId)
+      : null;
+
+    if (!stored || !stored.enabled) {
+      return false;
+    }
+
+    setCurrentInlineOfflineState(stored.targetType || targetType, stored.targetId || targetId, stored.scene);
+    return true;
+  }
+
   function ensureSession(base) {
     var existing = window.AppStorage.getOfflineSession(base.id);
     var now = Date.now();
@@ -411,11 +432,10 @@
       return;
     }
 
-    inlineOfflineState = {
-      targetType: "private",
-      targetId: characterId,
-      scene: normalizeScene(scene)
-    };
+    setCurrentInlineOfflineState("private", characterId, scene);
+    if (window.AppStorage.setInlineOfflineState) {
+      window.AppStorage.setInlineOfflineState("private", characterId, inlineOfflineState.scene);
+    }
     appendInlineSceneMessage("private", characterId, [getCharacterById(characterId)]);
     updateInlineOfflineUi();
   }
@@ -426,11 +446,10 @@
       return;
     }
 
-    inlineOfflineState = {
-      targetType: "group",
-      targetId: groupId,
-      scene: normalizeScene(scene)
-    };
+    setCurrentInlineOfflineState("group", groupId, scene);
+    if (window.AppStorage.setInlineOfflineState) {
+      window.AppStorage.setInlineOfflineState("group", groupId, inlineOfflineState.scene);
+    }
     appendInlineSceneMessage("group", groupId, getParticipants({ participantIds: group.memberIds || [] }));
     updateInlineOfflineUi();
   }
@@ -438,16 +457,12 @@
   function disableInlineOffline() {
     if (inlineOfflineState.targetType && inlineOfflineState.targetId) {
       appendInlineSystemMessage(inlineOfflineState.targetType, inlineOfflineState.targetId, "已退出线下模式");
+      if (window.AppStorage.clearInlineOfflineState) {
+        window.AppStorage.clearInlineOfflineState(inlineOfflineState.targetType, inlineOfflineState.targetId);
+      }
     }
 
-    inlineOfflineState = {
-      targetType: "",
-      targetId: "",
-      scene: {
-        name: "",
-        description: ""
-      }
-    };
+    setCurrentInlineOfflineState("", "", {});
     updateInlineOfflineUi();
   }
 
@@ -467,7 +482,7 @@
       type: "system",
       characterId: "",
       characterName: "",
-      content: "已进入线下模式",
+      content: "已进入线下模式：" + (scene.name || "当前场景") + (scene.description ? "，" + scene.description : ""),
       scene: scene,
       createdAt: Date.now()
     };
@@ -530,7 +545,11 @@
   }
 
   function isInlineOfflineActive(targetType, targetId) {
-    return inlineOfflineState.targetType === targetType && inlineOfflineState.targetId === targetId;
+    if (inlineOfflineState.targetType === targetType && inlineOfflineState.targetId === targetId) {
+      return true;
+    }
+
+    return activateStoredInlineOfflineState(targetType, targetId);
   }
 
   function updateInlineOfflineUi() {
@@ -546,6 +565,10 @@
   async function requestInlineOfflineAdvance(options) {
     var mode = options && options.mode || inlineOfflineState.targetType;
     var targetId = options && options.targetId || inlineOfflineState.targetId;
+
+    if (mode && targetId && !isInlineOfflineActive(mode, targetId)) {
+      return;
+    }
 
     if (mode === "private") {
       await advancePrivateInlineOffline(targetId);
@@ -588,6 +611,7 @@
         history: historyForRequest,
         userInput: getLatestInlineUserInput(historyForRequest),
         scene: inlineOfflineState.scene,
+        userSettings: character.chatSettings || {},
         memories: window.AppStorage.getMemoriesForCharacters([character.id])
       });
       messages = removeLoadingEvents(window.AppStorage.getChatHistory(character.id));
@@ -642,6 +666,7 @@
         history: historyForRequest,
         userInput: getLatestInlineUserInput(historyForRequest),
         scene: inlineOfflineState.scene,
+        userSettings: group.settings || {},
         memories: window.AppStorage.getMemoriesForCharacters(group.memberIds || [])
       });
       messages = removeLoadingEvents(window.AppStorage.getGroupChatHistory(group.id));

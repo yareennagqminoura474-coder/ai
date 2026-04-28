@@ -7,8 +7,8 @@
   <meta name="mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="default">
-  <meta name="apple-mobile-web-app-title" content="心屿">
-  <title>心屿</title>
+  <meta name="apple-mobile-web-app-title" content="心屿空间">
+  <title>心屿空间</title>
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="./assets/icons/icon.svg">
   <link rel="apple-touch-icon" href="./assets/icons/icon-192.png">
@@ -28,43 +28,9 @@
     <main class="app-body">
       <section id="homeScreen" class="screen home-screen desktop-home active" aria-label="首页">
         <div class="desktop-wallpaper">
-          <div class="desktop-widget">
-            <span id="homeCharacterCount">0 个角色 · 0 个群聊</span>
-            <strong>心屿空间</strong>
-            <small id="homeCharacterSummary">还没有角色，先创建你的第一个角色。</small>
-          </div>
-
-          <section class="desktop-music-card" aria-label="音乐卡片">
-            <div class="desktop-record" aria-hidden="true"><span></span></div>
-            <div class="desktop-music-copy">
-              <strong>时光不老，我们不散</strong>
-              <span>心屿电台 · 05:20 / 13:14</span>
-              <div class="desktop-progress"><i></i></div>
-            </div>
-          </section>
-
           <div id="desktopPagesViewport" class="desktop-pages-viewport" aria-label="桌面 App"></div>
           <div id="desktopPageDots" class="desktop-page-dots" aria-label="桌面页码"></div>
         </div>
-
-        <nav class="dock desktop-dock" aria-label="底部导航">
-          <button id="dockHome" class="dock-item active" type="button">
-            <span class="dock-icon" aria-hidden="true">微</span>
-            <span>微信</span>
-          </button>
-          <button id="dockChat" class="dock-item" type="button">
-            <span class="dock-icon" aria-hidden="true">屿</span>
-            <span>故事</span>
-          </button>
-          <button id="dockTheme" class="dock-item" type="button">
-            <span class="dock-icon" aria-hidden="true">相</span>
-            <span>相册</span>
-          </button>
-          <button id="dockSettings" class="dock-item" type="button">
-            <span class="dock-icon" aria-hidden="true">设</span>
-            <span>设置</span>
-          </button>
-        </nav>
       </section>
 
       <section id="wechatScreen" class="screen" aria-label="微信">
@@ -73,6 +39,12 @@
           <h2>微信</h2>
           <button id="wechatAddBtn" class="nav-button primary" type="button" aria-label="创建角色">+</button>
         </header>
+        <div id="wechatAddMenu" class="action-menu wechat-add-menu hidden" aria-label="微信创建菜单">
+          <button type="button" data-wechat-add-action="private">新建私聊</button>
+          <button type="button" data-wechat-add-action="group">新建群聊</button>
+          <button type="button" data-wechat-add-action="character">创建角色</button>
+          <button type="button" data-wechat-add-action="import-character">导入角色</button>
+        </div>
 
         <div id="wechatTabContent" class="screen-content wechat-content"></div>
 
@@ -199,7 +171,6 @@
         </header>
 
         <div id="chatActionMenu" class="action-menu chat-action-menu hidden" aria-label="聊天操作菜单">
-          <button id="chatEditCharacterBtn" type="button">编辑角色</button>
           <button id="chatSettingsBtn" type="button">聊天设置</button>
           <button id="chatSearchBtn" type="button">搜索聊天记录</button>
           <button id="chatBatchSelectBtn" type="button">多选消息</button>
@@ -533,6 +504,7 @@
     <input id="messageImageInput" class="visually-hidden" type="file" accept="image/*">
     <input id="photoImportInput" class="visually-hidden" type="file" accept="image/*" multiple>
     <input id="worldBookImportInput" class="visually-hidden" type="file" accept="application/json,.json">
+    <input id="characterImportInput" class="visually-hidden" type="file" accept="application/json,.json">
   </div>
 
   <script src="js/storage.js"></script>

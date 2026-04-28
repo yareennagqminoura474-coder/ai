@@ -1,6 +1,6 @@
 {
-  "name": "心屿",
-  "short_name": "心屿",
+  "name": "心屿空间",
+  "short_name": "心屿空间",
   "description": "一个本地保存数据的角色互动小手机",
   "start_url": "./index.html",
   "scope": "./",

@@ -52,6 +52,33 @@
     return '<span class="' + className + '" aria-hidden="true">' + escapeHtml(getAvatarText(character)) + "</span>";
   }
 
+  function renderUserAvatar(user, className) {
+    var source = user || {};
+
+    if (source.avatar) {
+      return '<img class="' + className + ' has-image user-message-avatar" src="' + escapeHtml(source.avatar) + '" alt="' + escapeHtml(source.name || "我") + '头像">';
+    }
+
+    return '<span class="' + className + ' user-message-avatar" aria-hidden="true">我</span>';
+  }
+
+  function getGroupUserDisplay(group, settings) {
+    var groupSettings = settings || getGroupSettings(group);
+    var profile = window.AppStorage.getUserProfile ? window.AppStorage.getUserProfile() : {};
+    var resolved = window.AppStorage.resolveUserPersona
+      ? window.AppStorage.resolveUserPersona(groupSettings.userPersonaId, groupSettings.userPersonaOverride)
+      : null;
+
+    return {
+      name: resolved && resolved.name || profile.name || "我",
+      avatar: resolved && resolved.avatar || profile.avatar || ""
+    };
+  }
+
+  function renderGroupUserMessageAvatar(group, settings) {
+    return renderUserAvatar(getGroupUserDisplay(group, settings), "message-avatar");
+  }
+
   function refreshHomeSummary() {
     if (window.AppNavigation && window.AppNavigation.refreshHomeSummary) {
       window.AppNavigation.refreshHomeSummary();
@@ -276,7 +303,7 @@
       return "[位置] " + (message.location && message.location.name ? message.location.name : message.content || "");
     }
     if (message.type === "offlineUserAction") {
-      return "[线下行动] " + (message.content || "");
+      return message.content || "";
     }
     if (message.type === "offlineAction") {
       return "[线下旁白] " + (message.content || "");
@@ -447,10 +474,7 @@
       wrap.innerHTML = renderGroupAnnouncement(group, settings) + renderGroupMessagesWithDates(messages, function (message) {
         var messageId = escapeHtml(message.id || "");
         var selectCheck = renderGroupMessageSelectCheck(message);
-
-        if (message.type === "offlineUserAction") {
-          return renderGroupOfflineUserActionMessage(message, selectCheck);
-        }
+        var userAvatar = renderGroupUserMessageAvatar(group, settings);
 
         if (message.type === "offlineAction") {
           return renderGroupOfflineActionMessage(message, selectCheck);
@@ -462,6 +486,7 @@
               '<div class="message-row user message-action-target" data-message-id="' + messageId + '">',
               selectCheck,
               renderStandaloneGroupMessage(message),
+              userAvatar,
               "</div>"
             ].join("");
           }
@@ -470,6 +495,7 @@
             '<div class="message-row user message-action-target" data-message-id="' + messageId + '">',
             selectCheck,
             '  <div class="message-bubble">' + renderGroupMessageContent(message) + "</div>",
+            userAvatar,
             "</div>"
           ].join("");
         }
@@ -641,7 +667,7 @@
     return [
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="offline-user-action-card"><strong>你的行动</strong><span>' + escapeHtml(message.content) + "</span></div>",
+      '  <div class="message-bubble">' + escapeHtml(message.content) + "</div>",
       "</div>"
     ].join("");
   }
@@ -1337,7 +1363,7 @@
       return "语音：" + ((message.voice && message.voice.text) || message.content || "");
     }
     if (message.type === "offlineUserAction") {
-      return "线下行动：" + (message.content || "");
+      return message.content || "";
     }
     if (message.type === "offlineAction") {
       return "线下旁白：" + (message.content || "");
@@ -1814,6 +1840,7 @@
       minParticipantCount: 2,
       allowConsecutiveMessages: true,
       allowSpecialMessages: true,
+      userPersonaId: "",
       userPersonaOverride: {
         name: "",
         avatar: "",
@@ -1833,6 +1860,17 @@
 
     renderGroupSettings(group);
     window.setActivePage("groupSettingsScreen");
+  }
+
+  function renderUserPersonaOptions(selectedId) {
+    var personas = window.AppStorage.getUserPersonas ? window.AppStorage.getUserPersonas() : [];
+
+    return [
+      '<option value="">不绑定我的人设预设</option>',
+      personas.map(function (persona) {
+        return '<option value="' + escapeHtml(persona.id) + '"' + (selectedId === persona.id ? " selected" : "") + ">" + escapeHtml(persona.name || "未命名人设") + "</option>";
+      }).join("")
+    ].join("");
   }
 
   function renderGroupSettings(group) {
@@ -1870,6 +1908,7 @@
       "</section>",
       '<section class="form-section">',
       '<div class="section-title-row"><h3>我在群里的身份</h3><span>专属</span></div>',
+      '<div class="field-group"><label>我在这个群里是谁</label><select data-group-settings-field="userPersonaId">' + renderUserPersonaOptions(settings.userPersonaId || "") + '</select></div>',
       '<div class="field-group"><label>我的群昵称</label><input data-group-settings-field="userName" type="text" value="' + escapeHtml(persona.name || "") + '"></div>',
       '<div class="field-group"><label>我的群头像</label><input data-group-settings-field="userAvatar" type="text" value="' + escapeHtml(persona.avatar || "") + '"></div>',
       '<div class="field-group"><label>我的群人设</label><textarea data-group-settings-field="userPersona">' + escapeHtml(persona.persona || "") + '</textarea></div>',
@@ -1972,6 +2011,7 @@
         minParticipantCount: Math.max(1, Number(getGroupSettingField("minParticipantCount")) || 2),
         allowConsecutiveMessages: getGroupSettingChecked("allowConsecutiveMessages"),
         allowSpecialMessages: getGroupSettingChecked("allowSpecialMessages"),
+        userPersonaId: getGroupSettingField("userPersonaId"),
         userPersonaOverride: {
           name: getGroupSettingField("userName"),
           avatar: getGroupSettingField("userAvatar"),

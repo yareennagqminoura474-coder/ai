@@ -36,10 +36,33 @@
     var settings = chatSettings || {};
     var personaOverride = settings.userPersonaOverride || {};
     var defaultUserProfile = window.AppStorage && window.AppStorage.getUserProfile ? window.AppStorage.getUserProfile() : {};
+    var resolvedPersona = window.AppStorage && window.AppStorage.resolveUserPersona
+      ? window.AppStorage.resolveUserPersona(settings.userPersonaId, personaOverride)
+      : null;
+    var personaParts = [];
+
+    if (resolvedPersona && resolvedPersona.gender) {
+      personaParts.push("性别：" + resolvedPersona.gender);
+    }
+    if (resolvedPersona && resolvedPersona.age) {
+      personaParts.push("年龄：" + resolvedPersona.age);
+    }
+    if (resolvedPersona && resolvedPersona.identity) {
+      personaParts.push("身份/关系：" + resolvedPersona.identity);
+    }
+    if (resolvedPersona && resolvedPersona.personality) {
+      personaParts.push("性格：" + resolvedPersona.personality);
+    }
+    if (resolvedPersona && resolvedPersona.speakingStyle) {
+      personaParts.push("说话风格：" + resolvedPersona.speakingStyle);
+    }
+    if (resolvedPersona && resolvedPersona.extra) {
+      personaParts.push("补充设定：" + resolvedPersona.extra);
+    }
 
     return {
-      name: personaOverride.name || defaultUserProfile.name || "用户",
-      persona: personaOverride.persona || defaultUserProfile.persona || "",
+      name: resolvedPersona && resolvedPersona.name || personaOverride.name || defaultUserProfile.name || "用户",
+      persona: personaParts.join("；") || personaOverride.persona || defaultUserProfile.persona || "",
       relationshipName: settings.userRelationshipName || ""
     };
   }
@@ -550,6 +573,7 @@
     var memories = context.memories || {};
     var historyText = formatInlineOfflineHistory(context.history);
     var scene = context.scene || {};
+    var userContext = buildUserContext(context.userSettings || {});
     var sceneText = [
       scene.name ? "场景：" + scene.name : "",
       scene.description ? "场景描述：" + scene.description : ""
@@ -583,6 +607,10 @@
           "设定优先级：世界书 > 角色核心设定 > 长期记忆 > 最近聊天 > 用户临时输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
           buildNaturalStyleRules(mode === "group" ? "group" : "private"),
           sceneText || "场景：未指定，请沿用当前聊天氛围。",
+          "",
+          "A. 用户信息",
+          "用户昵称：" + valueOrFallback(userContext.name),
+          "用户自定义资料：" + valueOrFallback(userContext.persona),
           "",
           "B/C. 参与角色信息",
           participantLines.join("\n"),
