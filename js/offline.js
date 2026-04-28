@@ -34,6 +34,25 @@
     return String(text || "").trim();
   }
 
+  function showEmptyAiReplyToast() {
+    if (window.AppExtras && window.AppExtras.showToast) {
+      window.AppExtras.showToast("这次没回出来，重试一下", true);
+    }
+  }
+
+  function normalizeOfflineEventsForDisplay(events) {
+    return (Array.isArray(events) ? events : []).map(function (event) {
+      var source = event && typeof event === "object" ? event : { content: event };
+      var content = normalizeDisplayText(source.content || "");
+      return Object.assign({}, source, {
+        type: source.type === "speech" ? "speech" : "action",
+        content: content
+      });
+    }).filter(function (event) {
+      return event.content;
+    });
+  }
+
   function getCharacterById(characterId) {
     return window.AppStorage.getCharacters().find(function (character) {
       return character.id === characterId;
@@ -317,11 +336,16 @@
         memorySummaryDue: generationContext.memorySummaryDue,
         memorySummaryRounds: generationContext.memorySummaryRounds
       });
-      events = Array.isArray(aiResult) ? aiResult : (aiResult && aiResult.events || []);
+      events = normalizeOfflineEventsForDisplay(Array.isArray(aiResult) ? aiResult : (aiResult && aiResult.events || []));
       session = getCurrentSession();
       session.history = removeLoadingEvents(session.history);
       window.AppStorage.saveOfflineSession(session);
       renderOfflineMessages();
+      if (!events.length) {
+        showEmptyAiReplyToast();
+        session = null;
+        return;
+      }
       persistOfflineAiExtras(session, aiResult);
       await streamOfflineEvents(session, events);
       if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
@@ -610,6 +634,7 @@
     var messages;
     var historyForRequest;
     var aiResult;
+    var events;
     var now;
     var generationContext;
 
@@ -653,8 +678,14 @@
       if (window.CharacterManager && window.CharacterManager.renderChatMessages) {
         window.CharacterManager.renderChatMessages(character.id);
       }
+      events = normalizeOfflineEventsForDisplay(aiResult && aiResult.events || []);
+      if (!events.length) {
+        showEmptyAiReplyToast();
+        messages = null;
+        return;
+      }
       persistInlineOfflineExtras("private", character.id, [character.id], aiResult);
-      await streamInlineOfflineEvents(messages, "private", character.id, [character], aiResult && aiResult.events || []);
+      await streamInlineOfflineEvents(messages, "private", character.id, [character], events);
       if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
         window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
       }
@@ -684,6 +715,7 @@
     var messages;
     var historyForRequest;
     var aiResult;
+    var events;
     var now;
     var generationContext;
 
@@ -727,8 +759,14 @@
       if (window.GroupManager && window.GroupManager.renderGroupChatMessages) {
         window.GroupManager.renderGroupChatMessages(group.id);
       }
+      events = normalizeOfflineEventsForDisplay(aiResult && aiResult.events || []);
+      if (!events.length) {
+        showEmptyAiReplyToast();
+        messages = null;
+        return;
+      }
       persistInlineOfflineExtras("group", group.id, group.memberIds || [], aiResult);
-      await streamInlineOfflineEvents(messages, "group", group.id, participants, aiResult && aiResult.events || []);
+      await streamInlineOfflineEvents(messages, "group", group.id, participants, events);
       if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
         window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
       }

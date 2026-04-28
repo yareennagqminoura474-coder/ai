@@ -5,6 +5,7 @@
     characters: "myAiApp.characters",
     settings: "myAiApp.settings",
     groups: "myAiApp.groups",
+    contactGroups: "myAiApp.contactGroups",
     memory: "myAiApp.memory",
     chatMemories: "myAiApp.chatMemories",
     chatRounds: "myAiApp.chatRounds",
@@ -108,6 +109,7 @@
     resetChatRoundCounter("private", characterId);
     clearCharacterThoughts(characterId);
     removeCharacterFromGroups(characterId);
+    removeCharacterFromContactGroups(characterId);
   }
 
   function removeCharacterFromGroups(characterId) {
@@ -197,6 +199,98 @@
     clearBodyState("group", groupId);
     resetChatRoundCounter("group", groupId);
     deleteOfflineSession("group-" + groupId);
+  }
+
+  function getContactGroups() {
+    return normalizeContactGroups(parseJson(localStorage.getItem(STORAGE_KEYS.contactGroups), []));
+  }
+
+  function saveContactGroups(groups) {
+    localStorage.setItem(STORAGE_KEYS.contactGroups, JSON.stringify(normalizeContactGroups(groups || [])));
+  }
+
+  function addContactGroup(group) {
+    var groups = getContactGroups();
+    var next = normalizeContactGroup(Object.assign({}, group || {}, {
+      id: group && group.id || createId("contact_group"),
+      createdAt: group && group.createdAt || Date.now(),
+      updatedAt: Date.now()
+    }), groups.length);
+
+    groups.unshift(next);
+    saveContactGroups(groups);
+    return next;
+  }
+
+  function updateContactGroup(groupId, nextGroup) {
+    var groups = getContactGroups();
+    var index = groups.findIndex(function (group) {
+      return group.id === groupId;
+    });
+
+    if (index === -1) {
+      return null;
+    }
+
+    groups[index] = normalizeContactGroup(Object.assign({}, groups[index], nextGroup || {}, {
+      id: groupId,
+      createdAt: groups[index].createdAt || nextGroup && nextGroup.createdAt || Date.now(),
+      updatedAt: Date.now()
+    }), index);
+    saveContactGroups(groups);
+    return groups[index];
+  }
+
+  function deleteContactGroup(groupId) {
+    saveContactGroups(getContactGroups().filter(function (group) {
+      return group.id !== groupId;
+    }));
+  }
+
+  function removeCharacterFromContactGroups(characterId) {
+    var changed = false;
+    var groups = getContactGroups().map(function (group) {
+      var memberIds = (group.memberIds || []).filter(function (memberId) {
+        return memberId !== characterId;
+      });
+
+      if (memberIds.length !== (group.memberIds || []).length) {
+        changed = true;
+        return Object.assign({}, group, {
+          memberIds: memberIds,
+          updatedAt: Date.now()
+        });
+      }
+
+      return group;
+    });
+
+    if (changed) {
+      saveContactGroups(groups);
+    }
+  }
+
+  function canCharactersInteractInMoments(authorId, commenterId) {
+    var firstId = String(authorId || "");
+    var secondId = String(commenterId || "");
+    var characterIds;
+
+    if (!firstId || !secondId || firstId === secondId) {
+      return true;
+    }
+
+    characterIds = getCharacters().map(function (character) {
+      return character.id;
+    });
+
+    if (characterIds.indexOf(firstId) === -1 || characterIds.indexOf(secondId) === -1) {
+      return true;
+    }
+
+    return getContactGroups().some(function (group) {
+      var members = group.memberIds || [];
+      return members.indexOf(firstId) !== -1 && members.indexOf(secondId) !== -1;
+    });
   }
 
   function getGroupChatHistory(groupId) {
@@ -1508,6 +1602,7 @@
       temperature: getSettings().temperature,
       chatHistory: getAllChatHistories(),
       groups: getGroups(),
+      contactGroups: getContactGroups(),
       groupChatHistory: getAllGroupChatHistories(),
       offlineSessions: getAllOfflineSessions(),
       memory: getMemoryStore(),
@@ -1556,6 +1651,7 @@
     saveCharacters(normalized.characters);
     saveSettings(normalized.settings);
     saveGroups(normalized.groups);
+    saveContactGroups(normalized.contactGroups);
     saveMemoryStore(normalized.memory);
     saveChatMemoryStore(normalized.chatMemories);
     saveChatRoundStore(normalized.chatRounds);
@@ -1613,6 +1709,7 @@
       })),
       chatHistory: normalizeMessageMap(data.chatHistory || data.privateChatHistories || data.privateChatHistory || {}),
       groups: Array.isArray(data.groups) ? data.groups.map(normalizeGroup) : [],
+      contactGroups: normalizeContactGroups(data.contactGroups || data.contactGroupList || []),
       groupChatHistory: normalizeMessageMap(data.groupChatHistory || data.groupChatHistories || {}),
       offlineSessions: normalizeOfflineSessions(data.offlineSessions || data.offline || {}),
       memory: normalizeMemory(data.memory || {}),
@@ -1762,6 +1859,32 @@
       memberIds: Array.isArray(source.memberIds) ? source.memberIds.map(String) : [],
       settings: normalizeGroupSettings(source.settings || {}),
       createdAt: Number(source.createdAt) || Date.now()
+    };
+  }
+
+  function normalizeContactGroups(groups) {
+    return Array.isArray(groups) ? groups.map(normalizeContactGroup).filter(function (group) {
+      return group.name;
+    }) : [];
+  }
+
+  function normalizeContactGroup(group, index) {
+    var source = group && typeof group === "object" ? group : {};
+    var now = Date.now();
+    var seen = {};
+
+    return {
+      id: source.id ? String(source.id) : createId("contact_group") + "_" + (index || 0),
+      name: String(source.name || "").trim(),
+      memberIds: (Array.isArray(source.memberIds) ? source.memberIds : []).map(String).filter(function (memberId) {
+        if (!memberId || seen[memberId]) {
+          return false;
+        }
+        seen[memberId] = true;
+        return true;
+      }),
+      createdAt: Number(source.createdAt) || now,
+      updatedAt: Number(source.updatedAt) || Number(source.createdAt) || now
     };
   }
 
@@ -2482,6 +2605,7 @@
     localStorage.removeItem(STORAGE_KEYS.characters);
     localStorage.removeItem(STORAGE_KEYS.settings);
     localStorage.removeItem(STORAGE_KEYS.groups);
+    localStorage.removeItem(STORAGE_KEYS.contactGroups);
     localStorage.removeItem(STORAGE_KEYS.memory);
     localStorage.removeItem(STORAGE_KEYS.chatMemories);
     localStorage.removeItem(STORAGE_KEYS.chatRounds);
@@ -2538,6 +2662,12 @@
     addGroup: addGroup,
     updateGroup: updateGroup,
     deleteGroup: deleteGroup,
+    getContactGroups: getContactGroups,
+    saveContactGroups: saveContactGroups,
+    addContactGroup: addContactGroup,
+    updateContactGroup: updateContactGroup,
+    deleteContactGroup: deleteContactGroup,
+    canCharactersInteractInMoments: canCharactersInteractInMoments,
     getGroupChatHistory: getGroupChatHistory,
     saveGroupChatHistory: saveGroupChatHistory,
     deleteGroupChatHistory: deleteGroupChatHistory,

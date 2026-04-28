@@ -996,7 +996,7 @@
       "</div>",
       '<div class="wechat-sheet-form moment-character-picker">',
       characters.length ? characters.map(function (character) {
-        return '<button type="button" data-character-moment="' + escapeHtml(character.id) + '">' + renderSmallAvatar(character, "moment-picker-avatar") + '<span><strong>' + escapeHtml(character.name || "角色") + '</strong><em>' + escapeHtml(character.identity || "允许主动发朋友圈") + "</em></span></button>";
+        return '<button type="button" data-character-moment="' + escapeHtml(character.id) + '">' + renderSmallAvatar(character, "moment-picker-avatar") + '<span><strong>' + escapeHtml(character.name || "角色") + '</strong><em>' + escapeHtml(buildCharacterPersonaText(character) || "允许主动发朋友圈") + "</em></span></button>";
       }).join("") : '<div class="soft-empty">还没有开启主动朋友圈的角色。</div>',
       '  <p id="characterMomentError" class="sheet-error" role="alert"></p>',
       "</div>"
@@ -1049,7 +1049,7 @@
     var groups = window.AppStorage.getGroups ? window.AppStorage.getGroups() : [];
     var author = authorCharacterId ? getCharacterById(authorCharacterId) : null;
     var relatedIds = {};
-    var authorText = author ? [author.name, author.relationship, author.personality, author.background].join(" ") : "";
+    var authorText = author ? [author.name, buildCharacterPersonaText(author)].join(" ") : "";
 
     if (!authorCharacterId) {
       return characters.slice(0, 8);
@@ -1067,7 +1067,7 @@
     });
 
     characters.forEach(function (character) {
-      var text = [character.name, character.relationship, character.personality, character.background].join(" ");
+      var text = [character.name, buildCharacterPersonaText(character)].join(" ");
       if (character.id !== authorCharacterId && author && (text.indexOf(author.name) !== -1 || authorText.indexOf(character.name) !== -1)) {
         relatedIds[character.id] = true;
       }
@@ -1292,9 +1292,7 @@
     var activePersona = window.AppStorage.resolveUserPersona && profile.activePersonaId ? window.AppStorage.resolveUserPersona(profile.activePersonaId) : null;
     var listItems = [
       ["我的人设", "persona", "管理 " + personas.length + " 个我的预设", activePersona],
-      ["聊天设置", "chat-settings", "接口、备份和全局设置"],
       ["联系人分组", "layers", "管理角色关系"],
-      ["日记本", "diary", "我的日记和角色日记"],
       ["表情包图库", "emoji", "导入与发送表情"]
     ];
 
@@ -1334,6 +1332,69 @@
     }
 
     return '<span class="me-avatar" aria-hidden="true">' + escapeHtml((profile.name || "我").slice(0, 1)) + "</span>";
+  }
+
+  function addUserPersonaPart(parts, seen, label, value) {
+    var text = String(value || "").trim();
+    var key;
+
+    if (!text) {
+      return;
+    }
+
+    key = text.toLowerCase();
+    if (seen[key]) {
+      return;
+    }
+
+    seen[key] = true;
+    parts.push(label ? label + "：" + text : text);
+  }
+
+  function buildUserPersonaText(persona) {
+    var source = persona || {};
+    var parts = [];
+    var seen = {};
+
+    addUserPersonaPart(parts, seen, "", source.personality || source.persona);
+    addUserPersonaPart(parts, seen, "身份/关系", source.identity || source.relationship);
+    addUserPersonaPart(parts, seen, "说话方式", source.speakingStyle);
+    addUserPersonaPart(parts, seen, "补充", source.extra || source.background);
+    addUserPersonaPart(parts, seen, "性别", source.gender);
+    addUserPersonaPart(parts, seen, "年龄", source.age);
+
+    return parts.join("\n\n");
+  }
+
+  function buildCharacterPersonaText(character) {
+    var source = character || {};
+    var parts = [];
+    var seen = {};
+
+    addUserPersonaPart(parts, seen, "", source.personality);
+    addUserPersonaPart(parts, seen, "身份", source.identity);
+    addUserPersonaPart(parts, seen, "关系", source.relationship);
+    addUserPersonaPart(parts, seen, "说话方式", source.speakingStyle);
+    addUserPersonaPart(parts, seen, "背景", source.background);
+    addUserPersonaPart(parts, seen, "性别", source.gender);
+
+    return parts.join("\n\n");
+  }
+
+  function renderAvatarCircleButton(source, buttonId, imageId, textId) {
+    var avatar = source && source.avatar || "";
+    var name = source && source.name || "我";
+
+    return [
+      '<div class="avatar-field persona-avatar-field">',
+      '  <button id="' + buttonId + '" class="avatar-picker round-avatar-picker persona-avatar-picker" type="button" aria-label="选择头像">',
+      '    <span class="avatar-preview" aria-hidden="true">',
+      avatar ? '      <img id="' + imageId + '" class="avatar-preview-img" src="' + escapeHtml(avatar) + '" alt="">' : '      <img id="' + imageId + '" class="avatar-preview-img hidden" src="" alt="">',
+      '      <span id="' + textId + '"' + (avatar ? ' class="hidden"' : "") + ">" + escapeHtml(name ? name.slice(0, 1) : "+") + "</span>",
+      "    </span>",
+      "  </button>",
+      "</div>"
+    ].join("");
   }
 
   function getDefaultUserPersonaForDisplay() {
@@ -1380,15 +1441,8 @@
       return;
     }
 
-    if (action === "diary") {
-      rememberWechatMeReturn();
-      openDiaryScreen();
-      return;
-    }
-
     if (action === "layers") {
-      rememberWechatMeReturn();
-      setActivePage("characterListScreen");
+      openContactGroupManagerSheet();
       return;
     }
 
@@ -1399,12 +1453,6 @@
 
     if (action === "persona") {
       openUserPersonaManagerSheet();
-      return;
-    }
-
-    if (action === "chat-settings") {
-      rememberWechatMeReturn();
-      setActivePage("settingsScreen");
       return;
     }
 
@@ -1484,26 +1532,35 @@
       '  <button type="button" data-close-sheet>取消</button>',
       "</div>",
       '<div class="wechat-sheet-form avatar-sheet-form">',
-      '  <div class="avatar-sheet-preview">' + renderProfileAvatar(profile) + "<span>未绑定人设时使用这个默认头像。</span></div>",
+      renderAvatarCircleButton(profile, "profileAvatarPicker", "profileAvatarPreviewImg", "profileAvatarPreviewText"),
       '  <input id="profileAvatarValue" type="hidden" value="' + escapeHtml(profile.avatar || "") + '">',
-      '  <input id="profileAvatarFile" type="file" accept="image/*">',
-      '  <label class="wechat-sheet-field"><span>或粘贴头像地址 / data URL</span><input id="profileAvatarInput" type="text" value="' + escapeHtml(profile.avatar || "") + '"></label>',
+      '  <input id="profileAvatarFile" class="visually-hidden" type="file" accept="image/*">',
       '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button id="saveProfileAvatarBtn" type="button" class="full-button">保存头像</button></div>',
       "</div>"
     ].join(""), function (sheet) {
       bindSheetCloseButtons(sheet);
+      sheet.querySelector("#profileAvatarPicker").addEventListener("click", function () {
+        sheet.querySelector("#profileAvatarFile").click();
+      });
       sheet.querySelector("#profileAvatarFile").addEventListener("change", function (event) {
         var file = event.target.files && event.target.files[0];
+        var image = sheet.querySelector("#profileAvatarPreviewImg");
+        var text = sheet.querySelector("#profileAvatarPreviewText");
         if (!file) {
           return;
         }
         readFileAsDataUrl(file).then(function (dataUrl) {
           sheet.querySelector("#profileAvatarValue").value = dataUrl;
-          sheet.querySelector("#profileAvatarInput").value = dataUrl;
+          if (image && text) {
+            image.src = dataUrl;
+            image.classList.remove("hidden");
+            text.classList.add("hidden");
+          }
+          event.target.value = "";
         });
       });
       sheet.querySelector("#saveProfileAvatarBtn").addEventListener("click", function () {
-        profile.avatar = sheet.querySelector("#profileAvatarInput").value.trim() || sheet.querySelector("#profileAvatarValue").value.trim();
+        profile.avatar = sheet.querySelector("#profileAvatarValue").value.trim();
         window.AppStorage.saveUserProfile(profile);
         closeWeChatSheet();
         renderWechatScreen();
@@ -1530,7 +1587,7 @@
           renderProfileAvatar(persona),
           '  <div class="persona-item-main">',
           '    <div class="persona-item-title"><strong>' + escapeHtml(persona.name) + "</strong>" + (isActive ? "<b>默认</b>" : "") + "</div>",
-          '    <em>' + escapeHtml(persona.identity || persona.personality || "未写身份") + "</em>",
+          '    <em>' + escapeHtml(buildUserPersonaText(persona) || "未写人设") + "</em>",
           '    <div class="persona-item-actions"><button type="button" data-persona-default="' + escapeHtml(persona.id) + '">设为默认</button><button type="button" data-persona-edit="' + escapeHtml(persona.id) + '">编辑</button><button class="danger" type="button" data-persona-delete="' + escapeHtml(persona.id) + '">删除</button></div>',
           "  </div>",
           "</article>"
@@ -1540,13 +1597,11 @@
       '<form id="personaEditorForm" class="wechat-sheet-form persona-editor-form" autocomplete="off">',
       '  <div class="section-title-row"><h3>' + (editing ? "编辑预设" : "新建预设") + '</h3><span>聊天里的我</span></div>',
       '  <input id="personaIdInput" type="hidden" value="' + escapeHtml(editing && editing.id || "") + '">',
+      renderAvatarCircleButton(editing || {}, "personaAvatarPicker", "personaAvatarPreviewImg", "personaAvatarPreviewText"),
+      '  <input id="personaAvatarInput" type="hidden" value="' + escapeHtml(editing && editing.avatar || "") + '">',
+      '  <input id="personaAvatarFile" class="visually-hidden" type="file" accept="image/*">',
       '  <label class="wechat-sheet-field"><span>名称</span><input id="personaNameInput" type="text" maxlength="30" value="' + escapeHtml(editing && editing.name || "") + '"></label>',
-      '  <label class="wechat-sheet-field"><span>头像</span><input id="personaAvatarInput" type="text" value="' + escapeHtml(editing && editing.avatar || "") + '" placeholder="可粘贴图片地址或 data URL"><input id="personaAvatarFile" type="file" accept="image/*"></label>',
-      '  <div class="settings-inline-grid"><label><span>性别</span><input id="personaGenderInput" type="text" maxlength="20" value="' + escapeHtml(editing && editing.gender || "") + '"></label><label><span>年龄</span><input id="personaAgeInput" type="text" maxlength="20" value="' + escapeHtml(editing && editing.age || "") + '"></label></div>',
-      '  <label class="wechat-sheet-field"><span>身份 / 关系</span><input id="personaIdentityInput" type="text" maxlength="60" value="' + escapeHtml(editing && editing.identity || "") + '"></label>',
-      '  <label class="wechat-sheet-field"><span>性格</span><textarea id="personaPersonalityInput" maxlength="500">' + escapeHtml(editing && editing.personality || "") + '</textarea></label>',
-      '  <label class="wechat-sheet-field"><span>说话风格</span><textarea id="personaSpeakingInput" maxlength="500">' + escapeHtml(editing && editing.speakingStyle || "") + '</textarea></label>',
-      '  <label class="wechat-sheet-field"><span>补充设定</span><textarea id="personaExtraInput" maxlength="800">' + escapeHtml(editing && editing.extra || "") + '</textarea></label>',
+      '  <label class="wechat-sheet-field"><span>人设</span><textarea id="personaPersonalityInput" class="persona-textarea" maxlength="1600">' + escapeHtml(buildUserPersonaText(editing)) + '</textarea></label>',
       '  <p id="personaEditorError" class="sheet-error" role="alert"></p>',
       '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">' + (editing ? "保存预设" : "创建预设") + "</button></div>",
       "</form>",
@@ -1560,6 +1615,31 @@
   function bindPersonaManagerActions(sheet) {
     var form = sheet.querySelector("#personaEditorForm");
     var fileInput = sheet.querySelector("#personaAvatarFile");
+    var avatarPicker = sheet.querySelector("#personaAvatarPicker");
+    var avatarInput = sheet.querySelector("#personaAvatarInput");
+
+    function updatePersonaAvatarPreview(value) {
+      var image = sheet.querySelector("#personaAvatarPreviewImg");
+      var text = sheet.querySelector("#personaAvatarPreviewText");
+      var nameInput = sheet.querySelector("#personaNameInput");
+      var name = nameInput && nameInput.value.trim() || "我";
+
+      if (!image || !text) {
+        return;
+      }
+
+      if (value) {
+        image.src = value;
+        image.classList.remove("hidden");
+        text.classList.add("hidden");
+        return;
+      }
+
+      image.removeAttribute("src");
+      image.classList.add("hidden");
+      text.textContent = name ? name.slice(0, 1) : "+";
+      text.classList.remove("hidden");
+    }
 
     Array.prototype.forEach.call(sheet.querySelectorAll("[data-persona-edit]"), function (button) {
       button.addEventListener("click", function () {
@@ -1585,14 +1665,22 @@
       });
     });
 
-    if (fileInput) {
+    if (avatarPicker && fileInput) {
+      avatarPicker.addEventListener("click", function () {
+        fileInput.click();
+      });
+    }
+
+    if (fileInput && avatarInput) {
       fileInput.addEventListener("change", function (event) {
         var file = event.target.files && event.target.files[0];
         if (!file) {
           return;
         }
         readFileAsDataUrl(file).then(function (dataUrl) {
-          sheet.querySelector("#personaAvatarInput").value = dataUrl;
+          avatarInput.value = dataUrl;
+          updatePersonaAvatarPreview(dataUrl);
+          fileInput.value = "";
         });
       });
     }
@@ -1612,12 +1700,12 @@
         payload = {
           name: name,
           avatar: sheet.querySelector("#personaAvatarInput").value.trim(),
-          gender: sheet.querySelector("#personaGenderInput").value.trim(),
-          age: sheet.querySelector("#personaAgeInput").value.trim(),
-          identity: sheet.querySelector("#personaIdentityInput").value.trim(),
           personality: sheet.querySelector("#personaPersonalityInput").value.trim(),
-          speakingStyle: sheet.querySelector("#personaSpeakingInput").value.trim(),
-          extra: sheet.querySelector("#personaExtraInput").value.trim()
+          gender: "",
+          age: "",
+          identity: "",
+          speakingStyle: "",
+          extra: ""
         };
 
         if (id) {
@@ -1629,6 +1717,148 @@
         openUserPersonaManagerSheet();
       });
     }
+  }
+
+  function openContactGroupManagerSheet(editGroupId) {
+    var groups = window.AppStorage.getContactGroups ? window.AppStorage.getContactGroups() : [];
+    var characters = window.AppStorage.getCharacters ? window.AppStorage.getCharacters() : [];
+    var editing = editGroupId ? groups.find(function (group) {
+      return group.id === editGroupId;
+    }) : null;
+    var memberIds = editing && editing.memberIds || [];
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <button type="button" data-contact-group-create>新建</button>',
+      "  <h3>联系人分组</h3>",
+      '  <button type="button" data-close-sheet>关闭</button>',
+      "</div>",
+      '<div class="contact-group-manager">',
+      '  <section class="contact-group-list">',
+      groups.length ? groups.map(function (group) {
+        return renderContactGroupCard(group, characters, editing && editing.id === group.id);
+      }).join("") : '<div class="soft-empty">还没有分组，先新建一个。</div>',
+      "  </section>",
+      '  <form id="contactGroupForm" class="wechat-sheet-form contact-group-editor" autocomplete="off">',
+      '    <div class="section-title-row"><h3>' + (editing ? "编辑分组" : "新建分组") + '</h3><span>' + characters.length + " 个角色</span></div>",
+      '    <input id="contactGroupIdInput" type="hidden" value="' + escapeHtml(editing && editing.id || "") + '">',
+      '    <label class="wechat-sheet-field"><span>分组名称</span><input id="contactGroupNameInput" type="text" maxlength="30" value="' + escapeHtml(editing && editing.name || "") + '" placeholder="例如：同学、家人、同事"></label>',
+      '    <div class="member-select-list contact-member-select">',
+      characters.length ? characters.map(function (character) {
+        return renderContactGroupMemberOption(character, memberIds);
+      }).join("") : '<div class="soft-empty">还没有角色。</div>',
+      "    </div>",
+      '    <p id="contactGroupError" class="sheet-error" role="alert"></p>',
+      '    <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">' + (editing ? "保存分组" : "创建分组") + "</button></div>",
+      "  </form>",
+      "</div>"
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+      bindContactGroupManagerActions(sheet);
+    });
+  }
+
+  function renderContactGroupCard(group, characters, active) {
+    var memberNames = (group.memberIds || []).map(function (memberId) {
+      var character = characters.find(function (item) {
+        return item.id === memberId;
+      });
+      return character && character.name || "";
+    }).filter(Boolean);
+
+    return [
+      '<article class="contact-group-card' + (active ? " active" : "") + '">',
+      '  <div class="contact-group-card-main">',
+      '    <strong>' + escapeHtml(group.name || "未命名分组") + "</strong>",
+      '    <em>' + escapeHtml(memberNames.length ? memberNames.join("、") : "暂无成员") + "</em>",
+      "  </div>",
+      '  <div class="contact-group-card-actions">',
+      '    <button type="button" data-contact-group-edit="' + escapeHtml(group.id) + '">编辑</button>',
+      '    <button class="danger" type="button" data-contact-group-delete="' + escapeHtml(group.id) + '">删除</button>',
+      "  </div>",
+      "</article>"
+    ].join("");
+  }
+
+  function renderContactGroupMemberOption(character, memberIds) {
+    var checked = memberIds.indexOf(character.id) !== -1;
+
+    return [
+      '<label class="member-option ' + (checked ? "active" : "") + '">',
+      '  <input class="visually-hidden" type="checkbox" data-contact-member-id="' + escapeHtml(character.id) + '"' + (checked ? " checked" : "") + ">",
+      renderSmallAvatar(character, "member-option-avatar"),
+      '  <span class="member-option-text"><strong>' + escapeHtml(character.name || "未命名角色") + '</strong><em>' + escapeHtml(buildCharacterPersonaText(character) || "未写人设") + "</em></span>",
+      '  <span class="member-check">✓</span>',
+      "</label>"
+    ].join("");
+  }
+
+  function bindContactGroupManagerActions(sheet) {
+    var form = sheet.querySelector("#contactGroupForm");
+
+    Array.prototype.forEach.call(sheet.querySelectorAll("[data-contact-group-edit]"), function (button) {
+      button.addEventListener("click", function () {
+        openContactGroupManagerSheet(button.dataset.contactGroupEdit);
+      });
+    });
+
+    Array.prototype.forEach.call(sheet.querySelectorAll("[data-contact-group-delete]"), function (button) {
+      button.addEventListener("click", function () {
+        if (window.confirm("删除这个联系人分组吗？")) {
+          window.AppStorage.deleteContactGroup(button.dataset.contactGroupDelete);
+          openContactGroupManagerSheet();
+        }
+      });
+    });
+
+    Array.prototype.forEach.call(sheet.querySelectorAll("[data-contact-group-create]"), function (button) {
+      button.addEventListener("click", function () {
+        openContactGroupManagerSheet();
+      });
+    });
+
+    Array.prototype.forEach.call(sheet.querySelectorAll("[data-contact-member-id]"), function (input) {
+      input.addEventListener("change", function () {
+        var option = input.closest(".member-option");
+        if (option) {
+          option.classList.toggle("active", input.checked);
+        }
+      });
+    });
+
+    if (!form) {
+      return;
+    }
+
+    form.addEventListener("submit", function (event) {
+      var id = sheet.querySelector("#contactGroupIdInput").value.trim();
+      var name = sheet.querySelector("#contactGroupNameInput").value.trim();
+      var memberIds = Array.prototype.map.call(sheet.querySelectorAll("[data-contact-member-id]:checked"), function (input) {
+        return input.dataset.contactMemberId;
+      });
+      var payload;
+
+      event.preventDefault();
+
+      if (!name) {
+        sheet.querySelector("#contactGroupError").textContent = "分组名称不能为空。";
+        return;
+      }
+
+      payload = {
+        name: name,
+        memberIds: memberIds
+      };
+
+      if (id) {
+        window.AppStorage.updateContactGroup(id, payload);
+      } else {
+        window.AppStorage.addContactGroup(payload);
+      }
+
+      showToast("分组已保存");
+      openContactGroupManagerSheet(id || "");
+    });
   }
 
   function renderWechatSpiritTab(content) {
@@ -1658,7 +1888,7 @@
     return [
       '<button class="spirit-character-row" type="button" data-character-space-id="' + escapeHtml(character.id) + '">',
       renderSmallAvatar(character, "spirit-avatar"),
-      '  <span><strong>' + escapeHtml(character.name || "未命名角色") + "</strong><em>" + escapeHtml(character.identity || character.relationship || "未设置身份") + "</em></span>",
+      '  <span><strong>' + escapeHtml(character.name || "未命名角色") + "</strong><em>" + escapeHtml(buildCharacterPersonaText(character) || "未写人设") + "</em></span>",
       "</button>"
     ].join("");
   }
@@ -3209,7 +3439,6 @@
         '  <div class="empty-visual" aria-hidden="true"><span class="empty-dot"></span></div>',
         "  <h3>世界书还是空的</h3>",
         "  <p>把世界观、地点、规则和长期设定整理成资料卡，角色回复时会按关键词引用。</p>",
-        '  <button class="full-button" type="button" data-world-action="create">新建世界书</button>',
         "</div>"
       ].join("");
       bindWorldBookActions(content);
@@ -3234,9 +3463,9 @@
       '    <span class="' + (book.enabled ? "enabled" : "disabled") + '">' + (book.enabled ? "启用" : "停用") + "</span>",
       "  </div>",
       '  <p>' + escapeHtml(book.description || "暂无描述") + "</p>",
-      '  <div class="world-book-meta"><span>范围：' + escapeHtml(scopeText) + '</span><span>条目：' + escapeHtml((book.entries || []).length) + " 条</span></div>",
+      '  <div class="world-book-meta"><span>范围：' + escapeHtml(scopeText) + "</span></div>",
       '  <div class="world-book-actions">',
-      '    <button class="outline-button" type="button" data-world-action="edit-book">编辑</button>',
+      '    <button class="outline-button" type="button" data-world-action="edit-book">展开/编辑</button>',
       '    <button class="outline-button danger" type="button" data-world-action="delete-book">删除</button>',
       "  </div>",
       "</article>"
@@ -3306,8 +3535,6 @@
       "  </div>",
       '  <div class="settings-action-row">',
       '    <button class="outline-button" type="button" data-world-action="add-entry">新建条目</button>',
-      '    <button class="outline-button" type="button" data-world-action="duplicate-book">复制世界书</button>',
-      '    <button class="outline-button" type="button" data-world-action="export-book">导出 JSON</button>',
       '    <button class="outline-button" type="button" data-world-action="save-book">保存世界书</button>',
       '    <button class="outline-button danger" type="button" data-world-action="delete-book">删除</button>',
       "  </div>",
@@ -3339,10 +3566,9 @@
       '    <label>内容</label>',
       '    <textarea data-entry-field="content">' + escapeHtml(entry.content) + "</textarea>",
       "  </div>",
-      '  <div class="settings-action-row compact-action-row">',
+      '  <div class="settings-action-row compact-action-row world-entry-actions">',
       '    <button class="outline-button" type="button" data-world-action="entry-up">上移</button>',
       '    <button class="outline-button" type="button" data-world-action="entry-down">下移</button>',
-      '    <button class="outline-button" type="button" data-world-action="duplicate-entry">复制</button>',
       '    <button class="outline-button danger" type="button" data-world-action="delete-entry">删除</button>',
       "  </div>",
       "</section>"
@@ -4272,12 +4498,10 @@
     return [
       '<article class="space-profile-card">',
       renderSmallAvatar(character, "space-avatar"),
-      '  <div><h3>' + escapeHtml(character.name) + "</h3><p>" + escapeHtml(character.identity || character.relationship || "未设置身份") + "</p></div>",
+      '  <div><h3>' + escapeHtml(character.name) + "</h3><p>" + escapeHtml(buildCharacterPersonaText(character) || "未写人设") + "</p></div>",
       "</article>",
       '<section class="form-section"><div class="section-title-row"><h3>角色资料</h3><span>Profile</span></div>',
-      '<p class="space-copy">' + escapeHtml(character.personality || "暂无性格设定") + "</p>",
-      '<p class="space-copy">' + escapeHtml(character.background || "暂无背景故事") + "</p>",
-      '<p class="space-copy">' + escapeHtml(character.speakingStyle || "暂无说话风格") + "</p>",
+      '<p class="space-copy">' + escapeHtml(buildCharacterPersonaText(character) || "暂无人设") + "</p>",
       '<div class="settings-action-row"><button class="outline-button" type="button" data-space-action="open-chat">和 TA 私聊</button><button class="outline-button" type="button" data-space-action="edit-character">编辑角色</button></div></section>',
       '<section class="form-section"><div class="section-title-row"><h3>角色记忆</h3><span>' + memories.length + " 条</span></div>" + renderSimpleList(memories.map(function (memory) { return memory.content; }), "暂无记忆") + '<button class="outline-button danger" type="button" data-space-action="clear-memory">清空记忆</button></section>',
       '<section class="form-section"><div class="section-title-row"><h3>角色心声</h3><span>' + thoughts.length + " 条</span></div>" + renderSimpleList(thoughts.slice(0, 5).map(function (thought) { return thought.visibleSummary || thought.content; }), "暂无心声") + '<div class="settings-action-row"><button class="outline-button" type="button" data-space-action="open-thoughts">查看全部心声</button><button class="outline-button danger" type="button" data-space-action="clear-thoughts">清空心声</button></div></section>',

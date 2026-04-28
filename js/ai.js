@@ -7,6 +7,53 @@
     return value ? String(value) : "未填写";
   }
 
+  function addPromptPart(parts, seen, label, value) {
+    var text = String(value || "").trim();
+    var key;
+
+    if (!text || text === "未设定") {
+      return;
+    }
+
+    key = text.toLowerCase();
+    if (seen[key]) {
+      return;
+    }
+
+    seen[key] = true;
+    parts.push(label ? label + "：" + text : text);
+  }
+
+  function buildMergedCharacterPersona(character) {
+    var source = character || {};
+    var parts = [];
+    var seen = {};
+
+    addPromptPart(parts, seen, "", source.personality);
+    addPromptPart(parts, seen, "身份", source.identity);
+    addPromptPart(parts, seen, "关系", source.relationship);
+    addPromptPart(parts, seen, "说话方式", source.speakingStyle);
+    addPromptPart(parts, seen, "背景", source.background);
+    addPromptPart(parts, seen, "性别", source.gender);
+
+    return parts.join("\n");
+  }
+
+  function buildMergedUserPersona(persona) {
+    var source = persona || {};
+    var parts = [];
+    var seen = {};
+
+    addPromptPart(parts, seen, "", source.personality || source.persona);
+    addPromptPart(parts, seen, "身份/关系", source.identity || source.relationship);
+    addPromptPart(parts, seen, "说话方式", source.speakingStyle);
+    addPromptPart(parts, seen, "补充", source.extra || source.background);
+    addPromptPart(parts, seen, "性别", source.gender);
+    addPromptPart(parts, seen, "年龄", source.age);
+
+    return parts.join("\n");
+  }
+
   function buildSystemPrompt(character, memories) {
     var profile = character || {};
     var chatSettings = profile.chatSettings || {};
@@ -16,13 +63,13 @@
     return [
       "身份规则：你不是 AI 助手、客服、系统或旁白工具，你就是角色本人：" + valueOrFallback(profile.name) + "。",
       "任何时候都不要说自己是 AI、语言模型、机器人、助手，也不要用服务型话术。",
-      "设定优先级：世界书 > 角色核心设定 > 长期记忆 > 最近聊天 > 用户临时输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
+      "设定吸收顺序：角色人设 > 世界书 > 聊天记忆/长期记忆 > 用户当前人设 > 最近上下文 > 用户本轮输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
       buildNaturalStyleRules("private"),
       "",
       "A. 用户信息",
       "用户昵称：" + valueOrFallback(userContext.name),
       "用户自定义资料：" + valueOrFallback(userContext.persona),
-      "关系称呼/备注：" + valueOrFallback(userContext.relationshipName || profile.relationship),
+      "关系称呼/备注：" + valueOrFallback(userContext.relationshipName),
       "",
       "B. 当前角色信息",
       formatCharacterProfile(profile, memoryText),
@@ -41,28 +88,19 @@
       : null;
     var personaParts = [];
 
-    if (resolvedPersona && resolvedPersona.gender) {
-      personaParts.push("性别：" + resolvedPersona.gender);
+    if (resolvedPersona) {
+      personaParts.push(buildMergedUserPersona(resolvedPersona));
     }
-    if (resolvedPersona && resolvedPersona.age) {
-      personaParts.push("年龄：" + resolvedPersona.age);
+    if (personaOverride && personaOverride.persona) {
+      personaParts.push(personaOverride.persona);
     }
-    if (resolvedPersona && resolvedPersona.identity) {
-      personaParts.push("身份/关系：" + resolvedPersona.identity);
-    }
-    if (resolvedPersona && resolvedPersona.personality) {
-      personaParts.push("性格：" + resolvedPersona.personality);
-    }
-    if (resolvedPersona && resolvedPersona.speakingStyle) {
-      personaParts.push("说话风格：" + resolvedPersona.speakingStyle);
-    }
-    if (resolvedPersona && resolvedPersona.extra) {
-      personaParts.push("补充设定：" + resolvedPersona.extra);
+    if (defaultUserProfile && defaultUserProfile.persona) {
+      personaParts.push(defaultUserProfile.persona);
     }
 
     return {
       name: resolvedPersona && resolvedPersona.name || personaOverride.name || defaultUserProfile.name || "用户",
-      persona: personaParts.join("；") || personaOverride.persona || defaultUserProfile.persona || "",
+      persona: personaParts.filter(Boolean).join("\n") || "",
       relationshipName: settings.userRelationshipName || ""
     };
   }
@@ -74,13 +112,8 @@
     return [
       "角色ID：" + valueOrFallback(profile.id),
       "角色名：" + valueOrFallback(profile.name),
-      "性别：" + valueOrFallback(profile.gender),
-      "身份：" + valueOrFallback(profile.identity),
-      "性格：" + valueOrFallback(profile.personality),
-      "背景：" + valueOrFallback(profile.background),
-      "说话习惯：" + valueOrFallback(profile.speakingStyle),
+      "角色人设：" + valueOrFallback(buildMergedCharacterPersona(profile)),
       "禁忌点：" + valueOrFallback(profile.taboo || chatSettings.taboo),
-      "与用户的关系：" + valueOrFallback(profile.relationship),
       "备注名：" + valueOrFallback(chatSettings.remarkName),
       "当前情绪：" + valueOrFallback(profile.currentMood || chatSettings.currentMood),
       "开场白：" + valueOrFallback(profile.openingMessage),
@@ -92,9 +125,15 @@
     return [
       "G. 输出风格要求",
       "参考 koko 的思路：把世界书、人设、关系、用户人设和统一时序记忆流当成角色正在经历的现实，不要像工具在汇总资料。",
+      "你不是助手，不负责解释规则、复述人设、总结记忆或引导用户继续输入；所有话都必须像角色本人在此刻自然反应。",
+      "回复前先判断最近上下文：如果用户明显冷场、沉默、敷衍、晚安、结束话题或不想继续，不要硬续话题，不要说教，也不要给选择题式引导；可以少回，甚至返回空数组。",
+      "统一时序记忆要当作连续关系来用：注意最近消息的时间和间隔，隔了很久要自然反应，但不要像报表一样说明时间线。",
       "回复要像真人在手机里当下发消息：自然、口语、有情绪波动，有停顿和短句，不要写成说明文、读后感或安慰模板。",
-      "禁止明显 AI/客服/助手口吻，尤其不要把这些话当成高频开头或模板：好的、当然可以、作为一个……、根据你提供的信息、我可以帮你、如果你需要、请告诉我更多、我理解你的感受、这取决于、我们可以一起、是否需要我。",
+      "禁止明显 AI/客服/助手口吻，尤其不要把这些话当成高频开头或模板：好的、当然、我理解你、根据你提供的信息、我们可以一起、请告诉我更多、你可以继续、作为 AI、我可以帮你、如果你需要、这取决于、是否需要我。",
       "不要总结用户，不要解释设定，不要把世界书或记忆原文复述出来；要把它们融进角色的反应、语气、选择、回避和下意识细节。",
+      "每次回复前先抓住角色此刻的亲疏、欲望、防备、委屈、占有欲或玩笑心，再决定说什么；不要从“回答问题”出发，要从“这个人会怎么接这句话”出发。",
+      "角色人设里写到的身份、关系、说话方式要直接影响用词和节奏：冷淡的人可以短，黏人的人可以追问，强势的人可以下判断，别把所有角色写成同一种温柔说明腔。",
+      "聊天记忆和用户当前人设只作为关系里的底色使用，别像档案检索一样搬出来；能用一个称呼、停顿、反问或小动作体现，就不要写成长解释。",
       "每条消息不必完整、正确、礼貌或圆满。真人聊天可以短句、停顿、反问、嘴硬、撒娇、生气、突然沉默，也可以只回一个很有态度的小句子。",
       "角色说话要受性格、关系远近、当下情绪、过往记忆和世界书共同牵引；熟人不要装客服，暧昧不要像通知，争执不要像心理咨询。",
       "允许角色拥有自己的好恶、偏见、口头禅、占有欲、顾虑和临时情绪，但不要油腻、不要模板化霸总腔。",
@@ -103,7 +142,7 @@
       mode === "group" ? "群聊里每个角色的语气、用词、节奏必须明显区分，不能像同一个人在轮流换名字。" : "私聊里要有关系感和临场感，熟悉就不要装陌生，冷淡/傲娇/黏人/强势等设定要能从语气里看出来。",
       mode === "group" ? "群聊可以插话、打断、偏题、拱火、帮腔或冷场，但每个人都要符合自己的人设和彼此关系。" : "私聊要接住最近一句的情绪和潜台词，不要总是解释原因，也不要每句都把话说满。",
       "线下模式里 action 和 speech 要自然交替：动作有画面但别长篇，发言像当面脱口而出。",
-      "一条回复可以拆成多条短气泡，像真人连续发消息；避免只回一条。"
+      "一条回复可以拆成多条短气泡，像真人连续发消息；每条必须有真实内容，不能只有标点、省略号或模板话。"
     ].join("\n");
   }
 
@@ -200,10 +239,88 @@
     return value.slice(0, limit - 1) + "…";
   }
 
+  function isPurePunctuationText(text) {
+    var value = String(text || "").trim();
+
+    if (!value) {
+      return true;
+    }
+
+    return !value.replace(/[\s.。．,，、;；:：!！?？~～…⋯·"'“”‘’\x60´()（）\[\]【】{}<>《》\-_*#|\/\\]+/g, "");
+  }
+
+  function hasBannedAssistantTone(text) {
+    var value = String(text || "").trim();
+    var patterns = [
+      /作为\s*(?:一个|一名)?\s*(?:AI|人工智能|语言模型|机器人|助手)/i,
+      /(?:我是|我只是|身为)\s*(?:AI|人工智能|语言模型|机器人|助手)/i,
+      /我(?:可以|能|会)?\s*帮你/,
+      /如果你(?:需要|想|愿意|有需要)/,
+      /你可以(?:继续)?(?:沉默|不说话)/,
+      /你可以(?:继续|选择|先|告诉我|说说|补充|提供)/,
+      /或者你(?:也)?可以/,
+      /你也可以(?:继续|选择|告诉我|说说)/,
+      /请(?:告诉|提供|说明|描述|继续)/,
+      /根据你提供的信息/,
+      /我们可以一起/,
+      /我理解你(?:的)?(?:感受|心情|意思)?/,
+      /请告诉我更多/,
+      /是否需要我/,
+      /需要我(?:帮忙|帮助|继续)?/
+    ];
+
+    if (/^(?:好的|当然|当然可以|我明白|明白了|理解了)(?:[，,。！!\s]|$)/.test(value)) {
+      return true;
+    }
+
+    return patterns.some(function (pattern) {
+      return pattern.test(value);
+    });
+  }
+
+  function isInvalidAiMessageText(text) {
+    var value = String(text || "").trim();
+
+    if (!value) {
+      return true;
+    }
+
+    if (/^(?:\s|\.|。|…|⋯|・|·)+$/.test(value) || isPurePunctuationText(value)) {
+      return true;
+    }
+
+    return hasBannedAssistantTone(value);
+  }
+
+  function filterAiMessageText(text) {
+    var value = String(text || "").trim();
+    var parts;
+
+    if (!value || /^(?:\s|\.|。|…|⋯|・|·)+$/.test(value) || isPurePunctuationText(value)) {
+      return "";
+    }
+
+    parts = value
+      .split(/(?:\n+|(?<=[\u3002\uFF01\uFF1F\uFF5E\u2026\uFF1B;.!?]))/g)
+      .map(function (part) {
+        return part.trim();
+      })
+      .filter(function (part) {
+        return !isInvalidAiMessageText(part);
+      });
+
+    return parts.join("\n").trim();
+  }
+
   function normalizeAiMessageText(text) {
     var value = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
     var paragraphs;
 
+    if (!value) {
+      return "";
+    }
+
+    value = filterAiMessageText(value);
     if (!value) {
       return "";
     }
@@ -240,6 +357,55 @@
     }).filter(Boolean);
 
     return paragraphs.join("\n\n").replace(/[ \t]{2,}/g, " ").trim();
+  }
+
+  function padDatePart(value) {
+    return String(value).padStart(2, "0");
+  }
+
+  function formatPromptDateTime(timestamp) {
+    var date = new Date(Number(timestamp) || Date.now());
+    return [
+      padDatePart(date.getMonth() + 1),
+      "-",
+      padDatePart(date.getDate()),
+      " ",
+      padDatePart(date.getHours()),
+      ":",
+      padDatePart(date.getMinutes())
+    ].join("");
+  }
+
+  function formatElapsedForPrompt(timestamp) {
+    var time = Number(timestamp);
+    var diff;
+
+    if (!time) {
+      return "时间未知";
+    }
+
+    diff = Math.max(0, Date.now() - time);
+    if (diff < 60 * 1000) {
+      return "刚刚";
+    }
+    if (diff < 60 * 60 * 1000) {
+      return Math.floor(diff / (60 * 1000)) + "分钟前";
+    }
+    if (diff < 24 * 60 * 60 * 1000) {
+      return Math.floor(diff / (60 * 60 * 1000)) + "小时前";
+    }
+    if (diff < 30 * 24 * 60 * 60 * 1000) {
+      return Math.floor(diff / (24 * 60 * 60 * 1000)) + "天前";
+    }
+    return "很久前";
+  }
+
+  function formatPromptTimePrefix(timestamp) {
+    if (!timestamp) {
+      return "";
+    }
+
+    return "[" + formatPromptDateTime(timestamp) + "，距今" + formatElapsedForPrompt(timestamp) + "] ";
   }
 
   function getChatMemoriesForPrompt(targetType, targetId, fallback) {
@@ -360,9 +526,10 @@
 
     return normalizeAiResult(rawContent, parsed, {
       replies: replies,
-      min: 10,
+      min: 0,
       max: 50,
-      defaultType: "text"
+      defaultType: "text",
+      allowRawFallback: !parsed
     });
   }
 
@@ -379,17 +546,13 @@
       })
       .slice(-24)
       .map(function (message) {
-        return (message.role === "user" ? userContext.name + "：" : (profile.name || "角色") + "：") + summarizeMessageForAI(message);
+        return formatPromptTimePrefix(message.createdAt) + (message.role === "user" ? userContext.name + "：" : (profile.name || "角色") + "：") + summarizeMessageForAI(message);
       }).join("\n");
     var contextText = [
       userContext.name,
       userContext.persona,
       profile.name,
-      profile.identity,
-      profile.personality,
-      profile.background,
-      profile.speakingStyle,
-      profile.relationship,
+      buildMergedCharacterPersona(profile),
       formatMemoryList(memories),
       formatChatMemoryList(chatMemories),
       requestOptions.bodyState ? JSON.stringify(requestOptions.bodyState) : "",
@@ -403,6 +566,8 @@
         content: [
           "你正在生成私聊回复。当前聊天模式：私聊。",
           buildSystemPrompt(profile, memories),
+          "",
+          "本轮信息优先级必须按顺序吸收：1. 角色人设；2. 世界书；3. 聊天记忆/长期记忆；4. 用户当前人设；5. 最近上下文。不要把这个顺序说给用户听。",
           "",
           worldBookContext || "暂无匹配世界书。",
           "",
@@ -420,7 +585,7 @@
           "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
           "",
           buildAuxiliaryReturnRule(requestOptions),
-          "messages 是显示给用户的手机聊天气泡，至少 10 条，安全上限 50 条；每条要短，多条之间自然衔接，不要写成一大段或只返回一条。",
+          "messages 是显示给用户的手机聊天气泡，按真实需要返回 0 到 12 条，安全上限 50 条；每条要短，多条之间自然衔接，不要为了凑数硬聊。",
           "你可以使用的消息类型：text 普通文字，voice 语音消息，emoji 表情，image 虚拟图片描述卡片，location 虚拟位置，redPacket 模拟红包，transfer 模拟转账。",
           "普通聊天以 text 为主，只有剧情/语境合适时才使用特殊消息。红包和转账只是模拟 UI，不涉及真实支付，金额不要夸张。",
           "发表情时优先使用默认 emoji 或用户已导入的图片表情；如果没有可用图片表情，就用文本 emoji。",
@@ -433,7 +598,7 @@
         role: "user",
         content: [
           "用户信息：" + userContext.name + "；" + (userContext.persona || "无补充资料"),
-          "请以 " + valueOrFallback(profile.name) + " 本人身份接住最近一句，连续发出至少 10 条自然气泡。",
+          "请以 " + valueOrFallback(profile.name) + " 本人身份接住最近一句；如果无话可接或对方明显结束，就少回或返回空数组。",
           "最近聊天：",
           history || "暂无历史消息"
         ].join("\n")
@@ -451,13 +616,8 @@
       return [
         "角色ID：" + character.id,
         "名称：" + valueOrFallback(character.name),
-        "身份：" + valueOrFallback(character.identity),
-        "性别：" + valueOrFallback(character.gender),
-        "性格：" + valueOrFallback(character.personality),
-        "背景：" + valueOrFallback(character.background),
-        "说话风格：" + valueOrFallback(character.speakingStyle),
+        "人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
         "禁忌点：" + valueOrFallback(character.taboo),
-        "关系：" + valueOrFallback(character.relationship),
         "相关记忆：" + (formatMemoryList(memories) || "暂无")
       ].join("；");
     });
@@ -465,7 +625,7 @@
     return [
       "你正在生成群聊回复。当前聊天模式：群聊。",
       "身份规则：你不是 AI 助手、客服、系统或旁白工具。你同时调度群里的真实角色，让他们以本人身份说话。",
-      "设定优先级：世界书 > 角色核心设定 > 长期记忆 > 最近聊天 > 用户临时输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
+      "设定吸收顺序：角色人设 > 世界书 > 聊天记忆/长期记忆 > 用户当前人设 > 最近上下文 > 用户本轮输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
       buildNaturalStyleRules("group"),
       "",
       "A. 用户信息",
@@ -486,8 +646,8 @@
       buildBodyStatePrompt(requestOptions),
       "",
       "群聊生成规则",
-      "一次性生成至少 10 条连续群聊消息，只调用一次 API。",
-      "消息必须按真实聊天顺序排列，后一条要接住上一条。至少 2 个角色参与；如果群成员超过 2 人，尽量让 3 个或更多角色参与。",
+      "一次性生成 0 到 12 条连续群聊消息，只调用一次 API；冷场、无人想接或话题结束时可以返回空数组。",
+      "消息必须按真实聊天顺序排列，后一条要接住上一条。有多人自然参与即可，不要为了凑人数强行发言。",
       "不要固定轮流，不要让同一个角色包揽全部消息。允许同一个角色连续说 1 到 3 条，但随后要有其他角色接话。",
       "可以只有部分角色发言，不一定所有角色都要说话；允许同一个角色连续说 1 到 3 条，但不要让同一个角色包揽所有消息。",
       "每个角色都必须保持自己的人设，不要混淆角色身份。",
@@ -498,7 +658,7 @@
       buildAuxiliaryReturnRule(requestOptions),
       buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"}],\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
       "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount(),
-      "如果后续旧规则提到 3 到 8 条，请忽略；本轮群聊回复以至少 10 条为准。"
+      "如果后续旧规则提到必须凑够条数，请忽略；本轮只保留有真实内容的自然消息。"
     ].join("\n");
   }
 
@@ -514,9 +674,10 @@
 
     result = normalizeAiResult(rawContent, parsed, {
       replies: replies,
-      min: Math.max(10, group && group.settings && group.settings.minReplyCount ? Number(group.settings.minReplyCount) : 10),
+      min: 0,
       max: group && group.settings && group.settings.maxReplyCount ? group.settings.maxReplyCount : 50,
-      defaultType: "text"
+      defaultType: "text",
+      allowRawFallback: !parsed
     });
 
     if (group && group.settings && group.settings.allowSpecialMessages === false) {
@@ -657,14 +818,14 @@
       .slice(-30)
       .map(function (message) {
         if (message.role === "user") {
-          return "用户：" + summarizeMessageForAI(message);
+          return formatPromptTimePrefix(message.createdAt) + "用户：" + summarizeMessageForAI(message);
         }
 
         if (message.role === "character") {
-          return (message.characterName || "角色") + "：" + summarizeMessageForAI(message);
+          return formatPromptTimePrefix(message.createdAt) + (message.characterName || "角色") + "：" + summarizeMessageForAI(message);
         }
 
-        return "系统：" + summarizeMessageForAI(message);
+        return formatPromptTimePrefix(message.createdAt) + "系统：" + summarizeMessageForAI(message);
       }).join("\n");
     contextText = [
       group && group.name,
@@ -672,11 +833,7 @@
       (characters || []).map(function (character) {
         return [
           character.name,
-          character.identity,
-          character.personality,
-          character.background,
-          character.speakingStyle,
-          character.relationship,
+          buildMergedCharacterPersona(character),
           formatMemoryList(sharedMemories && sharedMemories[character.id] || []),
           formatChatMemoryList(getChatMemoriesForPrompt("group", group && group.id, requestOptions.chatMemories)),
           requestOptions.bodyState ? JSON.stringify(requestOptions.bodyState) : ""
@@ -728,7 +885,7 @@
     var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(getThoughtPayload(parsed)), validIds);
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
-    if (!events.length && rawContent) {
+    if (!events.length && !parsed && rawContent) {
       events = [{ type: "action", characterId: "", content: rawContent }];
     }
 
@@ -736,7 +893,7 @@
       validIds: validIds,
       fallbackId: fallbackId,
       mode: context.mode,
-      min: 10,
+      min: 0,
       max: 50
     });
 
@@ -771,12 +928,7 @@
       return [
         "角色ID：" + character.id,
         "名称：" + valueOrFallback(character.name),
-        "性别：" + valueOrFallback(character.gender),
-        "身份：" + valueOrFallback(character.identity),
-        "性格：" + valueOrFallback(character.personality),
-        "背景：" + valueOrFallback(character.background),
-        "说话风格：" + valueOrFallback(character.speakingStyle),
-        "关系：" + valueOrFallback(character.relationship),
+        "人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
         "相关记忆：" + (formatMemoryList(memories[character.id] || []) || "暂无")
       ].join("；");
     });
@@ -787,7 +939,7 @@
         content: [
           "你正在生成线下模式推进。当前模式：" + (mode === "group" ? "群聊线下模式" : "私聊线下模式") + "。",
           "身份规则：你不是 AI 助手、客服、系统或旁白工具；你要让角色像本人一样当场反应。",
-          "设定优先级：世界书 > 角色核心设定 > 长期记忆 > 最近聊天 > 用户临时输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
+          "设定吸收顺序：角色人设 > 世界书 > 聊天记忆/长期记忆 > 用户当前人设 > 最近上下文 > 用户本轮输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
           buildNaturalStyleRules(mode === "group" ? "group" : "private"),
           sceneText || "场景：未指定，请沿用当前聊天氛围。",
           "",
@@ -805,7 +957,7 @@
           formatChatMemoryList(chatMemories) || "暂无",
           buildMemorySummaryPrompt(context),
           buildBodyStatePrompt(context),
-          "events 一次至少 10 条，安全上限 50 条。action 是旁白/动作描写，speech 是角色说话。",
+          "events 按真实需要返回 0 到 12 条，安全上限 50 条。action 是旁白/动作描写，speech 是角色说话；不要为了推进而硬凑。",
           "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":20,\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           "动作描写要短而有画面感；角色发言要像真实当面对话，不要写成长作文。",
@@ -844,21 +996,21 @@
       .slice(-30)
       .map(function (message) {
         if (message.type === "offlineAction") {
-          return "旁白：" + summarizeMessageForAI(message);
+          return formatPromptTimePrefix(message.createdAt) + "旁白：" + summarizeMessageForAI(message);
         }
         if (message.type === "offlineSpeech") {
-          return (message.characterName || "角色") + "：" + summarizeMessageForAI(message);
+          return formatPromptTimePrefix(message.createdAt) + (message.characterName || "角色") + "：" + summarizeMessageForAI(message);
         }
         if (message.type === "offlineUserAction") {
-          return "用户行动：" + summarizeMessageForAI(message);
+          return formatPromptTimePrefix(message.createdAt) + "用户行动：" + summarizeMessageForAI(message);
         }
         if (message.role === "user") {
-          return "用户：" + summarizeMessageForAI(message);
+          return formatPromptTimePrefix(message.createdAt) + "用户：" + summarizeMessageForAI(message);
         }
         if (message.role === "character") {
-          return (message.characterName || "角色") + "：" + summarizeMessageForAI(message);
+          return formatPromptTimePrefix(message.createdAt) + (message.characterName || "角色") + "：" + summarizeMessageForAI(message);
         }
-        return "系统：" + summarizeMessageForAI(message);
+        return formatPromptTimePrefix(message.createdAt) + "系统：" + summarizeMessageForAI(message);
       }).join("\n");
   }
 
@@ -876,7 +1028,7 @@
     var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(getThoughtPayload(parsed)), validIds);
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
-    if (!events.length && rawContent) {
+    if (!events.length && !parsed && rawContent) {
       events = [{ type: "action", characterId: "", content: rawContent }];
     }
 
@@ -884,7 +1036,7 @@
       validIds: validIds,
       fallbackId: fallbackId,
       mode: context.mode,
-      min: 10,
+      min: 0,
       max: 50
     });
 
@@ -905,12 +1057,7 @@
       return [
         "角色ID：" + character.id,
         "名称：" + valueOrFallback(character.name),
-        "性别：" + valueOrFallback(character.gender),
-        "身份：" + valueOrFallback(character.identity),
-        "性格：" + valueOrFallback(character.personality),
-        "背景：" + valueOrFallback(character.background),
-        "说话风格：" + valueOrFallback(character.speakingStyle),
-        "关系：" + valueOrFallback(character.relationship),
+        "人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
         "记忆：" + (formatMemoryList(sharedMemories[character.id] || []) || "暂无")
       ].join("；");
     });
@@ -921,14 +1068,14 @@
       .slice(-30)
       .map(function (event) {
         if (event.role === "user" || event.type === "user") {
-          return "用户：" + summarizeMessageForAI(event);
+          return formatPromptTimePrefix(event.createdAt) + "用户：" + summarizeMessageForAI(event);
         }
 
         if (event.type === "speech") {
-          return (event.characterName || "角色") + "说：" + summarizeMessageForAI(event);
+          return formatPromptTimePrefix(event.createdAt) + (event.characterName || "角色") + "说：" + summarizeMessageForAI(event);
         }
 
-        return "旁白：" + summarizeMessageForAI(event);
+        return formatPromptTimePrefix(event.createdAt) + "旁白：" + summarizeMessageForAI(event);
       }).join("\n");
     var worldBookContext = buildWorldBookContext(
       [context.userInput || "", history].join("\n"),
@@ -942,13 +1089,13 @@
         content: [
           "你正在生成线下互动 / 剧情互动推进。当前模式：" + (context.mode === "group" ? "群聊线下模式" : "私聊线下模式") + "。",
           "身份规则：你不是 AI 助手、客服、系统或旁白工具；你要让角色像本人一样在现场说话、停顿、行动。",
-          "设定优先级：世界书 > 角色核心设定 > 长期记忆 > 最近聊天 > 用户临时输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
+          "设定吸收顺序：角色人设 > 世界书 > 聊天记忆/长期记忆 > 用户当前人设 > 最近上下文 > 用户本轮输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
           buildNaturalStyleRules(context.mode === "group" ? "group" : "private"),
           "",
           "B/C. 参与角色信息",
           participantLines.join("\n"),
           "",
-          "每次推进至少生成 10 条 events，安全上限 50 条；形成一小段完整剧情。",
+          "每次推进按真实需要生成 0 到 12 条 events，安全上限 50 条；形成一小段自然剧情，不要硬凑。",
           "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":20,\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
           "角色说话不要太长，动作描写像小说旁白但不要冗长。",
@@ -1049,10 +1196,7 @@
       return [
         "角色ID：" + character.id,
         "名称：" + valueOrFallback(character.name),
-        "身份：" + valueOrFallback(character.identity),
-        "性格：" + valueOrFallback(character.personality),
-        "关系：" + valueOrFallback(character.relationship),
-        "说话风格：" + valueOrFallback(character.speakingStyle),
+        "人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
         "相关记忆：" + (formatMemoryList(memories[character.id] || []) || "暂无")
       ].join("；");
     });
@@ -1067,7 +1211,7 @@
           "所有内容都要贴合角色人设、关系、记忆、世界书和当前用户人设。",
           "用户信息：" + valueOrFallback(userContext.name) + "；" + valueOrFallback(userContext.persona),
           "发布者：" + valueOrFallback(author.name) + "（" + (author.authorType === "user" ? "用户" : "角色") + "）",
-          "发布者设定：" + valueOrFallback(author.personality || author.extra || ""),
+          "发布者设定：" + valueOrFallback(author.authorType === "user" ? buildMergedUserPersona(author) : buildMergedCharacterPersona(author)),
           "认识的人：",
           relatedLines.join("\n") || "暂无",
           "世界书：",
@@ -1087,10 +1231,11 @@
     ]);
     var parsed = parseJsonFromText(rawContent) || {};
     var moment = parsed.moment && typeof parsed.moment === "object" ? parsed.moment : {};
+    var momentContent = normalizeAiMessageText(moment.content || (!parsed.moment ? rawContent : ""));
 
     return {
       moment: {
-        content: String(moment.content || rawContent || "").trim(),
+        content: momentContent,
         images: Array.isArray(moment.images) ? moment.images.map(function (image) {
           if (image && typeof image === "object") {
             return {
@@ -1107,7 +1252,7 @@
         var item = comment && typeof comment === "object" ? comment : {};
         return {
           characterId: String(item.characterId || ""),
-          content: String(item.content || "").trim()
+          content: normalizeAiMessageText(item.content || "")
         };
       }).filter(function (comment) {
         return comment.characterId && comment.content;
@@ -1488,7 +1633,8 @@
       replies: [],
       min: 1,
       max: 50,
-      defaultType: "text"
+      defaultType: "text",
+      allowRawFallback: true
     }, options || {});
 
     return {
@@ -1729,10 +1875,6 @@
       });
     }
 
-    while (normalized.length > 0 && normalized.length < settings.min) {
-      normalized.push(createContinuationEvent(normalized, validIds, settings));
-    }
-
     return normalized.filter(function (event) {
       return event.content && (event.type === "action" || event.characterId);
     }).slice(0, settings.max);
@@ -1750,22 +1892,12 @@
     return fallbackId || validIds[0];
   }
 
-  function createContinuationEvent(existing, validIds, settings) {
-    var index = existing.length;
-    var useSpeech = validIds.length && index % 2 === 1;
-
-    return {
-      type: useSpeech ? "speech" : "action",
-      characterId: useSpeech ? pickOfflineSpeaker(validIds, settings.fallbackId, settings.mode, index) : "",
-      content: useSpeech ? "我接着刚才的话慢慢说下去。" : "气氛继续往前推进了一点。"
-    };
-  }
-
   function normalizeReplyList(rawContent, parsedReplies, options) {
     var settings = Object.assign({
       min: 1,
       max: 50,
-      defaultType: "text"
+      defaultType: "text",
+      allowRawFallback: true
     }, options || {});
     var replies = [];
 
@@ -1775,7 +1907,7 @@
       });
     }
 
-    if (!replies.length && rawContent) {
+    if (!replies.length && rawContent && settings.allowRawFallback !== false) {
       replies = splitTextToReplyItems(rawContent, settings);
     }
 
@@ -1783,34 +1915,9 @@
       replies = splitReplyContent(replies[0], settings);
     }
 
-    while (replies.length > 0 && replies.length < settings.min) {
-      replies.push(createContinuationReply(replies, settings));
-    }
-
     return replies.filter(function (reply) {
       return reply && reply.content;
     }).slice(0, settings.max);
-  }
-
-  function createContinuationReply(replies, options) {
-    var fallbackLines = [
-      "……",
-      "我刚刚停了一下。",
-      "其实心里还有点乱。",
-      "这话我没想装得很轻松。",
-      "你先别急着笑我。",
-      "我是真的在意这件事。",
-      "嗯，我还没说完。",
-      "说出来好像有点别扭。",
-      "但我还是想讲。",
-      "就这样。"
-    ];
-    var index = replies.length % fallbackLines.length;
-
-    return {
-      type: options.defaultType || "text",
-      content: fallbackLines[index]
-    };
   }
 
   function normalizeReplyItem(reply, options) {
@@ -1962,7 +2069,7 @@
         return part && part.length > 0;
       });
 
-    return parts.length ? parts : [cleaned];
+    return parts.length || isInvalidAiMessageText(cleaned) ? parts : [cleaned];
   }
 
   function summarizeMessageForAI(message) {

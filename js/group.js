@@ -32,6 +32,32 @@
     return String(text || "").trim();
   }
 
+  function showEmptyAiReplyToast() {
+    if (window.AppExtras && window.AppExtras.showToast) {
+      window.AppExtras.showToast("这次没回出来，重试一下", true);
+    }
+  }
+
+  function normalizeReplyItemsForDisplay(replies) {
+    if (window.AIService && window.AIService.normalizeReplyList) {
+      return window.AIService.normalizeReplyList("", replies, {
+        min: 0,
+        max: 50,
+        defaultType: "text",
+        allowRawFallback: false
+      });
+    }
+
+    return (Array.isArray(replies) ? replies : []).map(function (reply) {
+      var source = reply && typeof reply === "object" ? reply : { content: reply };
+      return Object.assign({}, source, {
+        content: normalizeDisplayText(source.content || "")
+      });
+    }).filter(function (reply) {
+      return reply.content;
+    });
+  }
+
   function getBubbleTextClass(text) {
     var value = normalizeDisplayText(text);
 
@@ -57,6 +83,38 @@
   function getAvatarText(character) {
     var name = character && character.name ? character.name.trim() : "";
     return name ? name.slice(0, 1) : "心";
+  }
+
+  function addPersonaPart(parts, seen, label, value) {
+    var text = String(value || "").trim();
+    var key;
+
+    if (!text || text === "未设定") {
+      return;
+    }
+
+    key = text.toLowerCase();
+    if (seen[key]) {
+      return;
+    }
+
+    seen[key] = true;
+    parts.push(label ? label + "：" + text : text);
+  }
+
+  function getCharacterPersonaPreview(character) {
+    var source = character || {};
+    var parts = [];
+    var seen = {};
+
+    addPersonaPart(parts, seen, "", source.personality);
+    addPersonaPart(parts, seen, "身份", source.identity);
+    addPersonaPart(parts, seen, "关系", source.relationship);
+    addPersonaPart(parts, seen, "说话方式", source.speakingStyle);
+    addPersonaPart(parts, seen, "背景", source.background);
+    addPersonaPart(parts, seen, "性别", source.gender);
+
+    return parts.join("\n\n");
   }
 
   function renderAvatar(character, className) {
@@ -379,7 +437,7 @@
         renderAvatar(character, "member-option-avatar"),
         '  <span class="member-option-text">',
         "    <strong>" + escapeHtml(character.name) + "</strong>",
-        "    <em>" + escapeHtml(character.identity || character.gender || "未设定") + "</em>",
+        "    <em>" + escapeHtml(getCharacterPersonaPreview(character) || "未写人设") + "</em>",
         "  </span>",
         '  <span class="member-check" aria-hidden="true">' + (active ? "✓" : "") + "</span>",
         "</button>"
@@ -1618,8 +1676,13 @@
         window.AppStorage.getMemoriesForCharacters(group.memberIds),
         generationContext
       ));
-      persistGroupAiExtras(group, aiResult);
       replies = aiResult.replies;
+      if (!replies.length) {
+        messages = before.concat(after);
+        showEmptyAiReplyToast();
+        return;
+      }
+      persistGroupAiExtras(group, aiResult);
       await streamGroupReplies(before.slice(), group, characters, replies, after);
       if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
         window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
@@ -1720,12 +1783,12 @@
 
   function normalizeGroupAiResult(result) {
     if (Array.isArray(result)) {
-      return { replies: result, actions: [], thoughts: [], memories: [], memorySummary: null, bodyState: null };
+      return { replies: normalizeReplyItemsForDisplay(result), actions: [], thoughts: [], memories: [], memorySummary: null, bodyState: null };
     }
 
     result = result && typeof result === "object" ? result : {};
     return {
-      replies: Array.isArray(result.replies) ? result.replies : [],
+      replies: normalizeReplyItemsForDisplay(Array.isArray(result.replies) ? result.replies : []),
       actions: Array.isArray(result.actions) ? result.actions : [],
       thoughts: Array.isArray(result.thoughts) ? result.thoughts : [],
       memories: Array.isArray(result.memories) ? result.memories : [],
@@ -1904,7 +1967,7 @@
     if (!messages.some(function (message) {
       return message.role === "user";
     })) {
-      addGroupSystemMessage(group.id, "先发一句话，群成员再回复你。");
+      showEmptyAiReplyToast();
       return;
     }
 
@@ -1942,6 +2005,11 @@
       window.AppStorage.saveGroupChatHistory(group.id, messages);
       if (activeGroupId === group.id) {
         renderGroupChatMessages(group.id);
+      }
+      if (!replies.length) {
+        showEmptyAiReplyToast();
+        messages = null;
+        return;
       }
       persistGroupAiExtras(group, aiResult);
       await streamGroupReplies(messages, group, characters, replies, []);
@@ -2169,7 +2237,7 @@
           '<label class="member-option ' + (checked ? "active" : "") + '">',
           '<input class="visually-hidden" data-group-member-id="' + escapeHtml(character.id) + '" type="checkbox"' + (checked ? " checked" : "") + '>',
           renderAvatar(character, "member-option-avatar"),
-          '<span class="member-option-text"><strong>' + escapeHtml(character.name) + '</strong><em>' + escapeHtml(character.identity || character.gender || "未设定") + '</em></span>',
+          '<span class="member-option-text"><strong>' + escapeHtml(character.name) + '</strong><em>' + escapeHtml(getCharacterPersonaPreview(character) || "未写人设") + '</em></span>',
           '<span class="member-check" aria-hidden="true">' + (checked ? "✓" : "") + '</span>',
           "</label>"
         ].join("");

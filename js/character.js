@@ -41,6 +41,32 @@
     return String(text || "").trim();
   }
 
+  function showEmptyAiReplyToast() {
+    if (window.AppExtras && window.AppExtras.showToast) {
+      window.AppExtras.showToast("这次没回出来，重试一下", true);
+    }
+  }
+
+  function normalizeReplyItemsForDisplay(replies) {
+    if (window.AIService && window.AIService.normalizeReplyList) {
+      return window.AIService.normalizeReplyList("", replies, {
+        min: 0,
+        max: 50,
+        defaultType: "text",
+        allowRawFallback: false
+      });
+    }
+
+    return (Array.isArray(replies) ? replies : []).map(function (reply) {
+      var source = reply && typeof reply === "object" ? reply : { content: reply };
+      return Object.assign({}, source, {
+        content: normalizeDisplayText(source.content || "")
+      });
+    }).filter(function (reply) {
+      return reply.content;
+    });
+  }
+
   function getBubbleTextClass(text) {
     var value = normalizeDisplayText(text);
 
@@ -114,13 +140,44 @@
   }
 
   function getCharacterSummary(character) {
-    if (character.personality) {
-      return character.personality;
-    }
-    if (character.background) {
-      return character.background;
+    var persona = buildCharacterPersonaText(character);
+
+    if (persona) {
+      return persona;
     }
     return "这个角色还没有补充详细人设。";
+  }
+
+  function addPersonaPart(parts, seen, label, value) {
+    var text = String(value || "").trim();
+    var key;
+
+    if (!text || text === "未设定") {
+      return;
+    }
+
+    key = text.toLowerCase();
+    if (seen[key]) {
+      return;
+    }
+
+    seen[key] = true;
+    parts.push(label ? label + "：" + text : text);
+  }
+
+  function buildCharacterPersonaText(character) {
+    var source = character || {};
+    var parts = [];
+    var seen = {};
+
+    addPersonaPart(parts, seen, "", source.personality);
+    addPersonaPart(parts, seen, "身份", source.identity);
+    addPersonaPart(parts, seen, "关系", source.relationship);
+    addPersonaPart(parts, seen, "说话方式", source.speakingStyle);
+    addPersonaPart(parts, seen, "背景", source.background);
+    addPersonaPart(parts, seen, "性别", source.gender);
+
+    return parts.join("\n\n");
   }
 
   function renderCharacterList() {
@@ -162,7 +219,6 @@
     listContent.innerHTML = [
       '<div class="character-list">',
       characters.map(function (character) {
-        var identity = character.identity || character.gender || "未设定";
         var lastMessage = getLastMessagePreview(character.id);
         var selected = selectedCharacterIds.indexOf(character.id) !== -1;
 
@@ -174,7 +230,6 @@
           '    <span class="character-info">',
           '      <span class="character-title-row">',
           "        <h3>" + escapeHtml(character.name) + "</h3>",
-          '        <span class="character-badge">' + escapeHtml(identity) + "</span>",
           "      </span>",
           '      <span class="character-desc">' + escapeHtml(getCharacterSummary(character)) + "</span>",
           '      <span class="character-last">' + escapeHtml(lastMessage) + "</span>",
@@ -454,12 +509,7 @@
     var diarySettings = getCharacterDiarySettings(character);
 
     setFieldValue("characterName", character.name);
-    setFieldValue("characterGender", character.gender || "未设定");
-    setFieldValue("characterIdentity", character.identity);
-    setFieldValue("characterPersonality", character.personality);
-    setFieldValue("characterBackground", character.background);
-    setFieldValue("characterSpeakingStyle", character.speakingStyle);
-    setFieldValue("characterRelationship", character.relationship);
+    setFieldValue("characterPersonality", buildCharacterPersonaText(character));
     setFieldValue("characterOpeningMessage", character.openingMessage);
     setCheckedValue("characterMomentAutoPost", momentSettings.autoPostEnabled);
     setFieldValue("characterMomentFrequency", momentSettings.frequency);
@@ -527,12 +577,12 @@
       id: existing ? existing.id : String(now),
       name: name,
       avatar: selectedAvatar || "",
-      gender: getFieldValue("characterGender"),
-      identity: getFieldValue("characterIdentity"),
+      gender: "",
+      identity: "",
       personality: getFieldValue("characterPersonality"),
-      background: getFieldValue("characterBackground"),
-      speakingStyle: getFieldValue("characterSpeakingStyle"),
-      relationship: getFieldValue("characterRelationship"),
+      background: "",
+      speakingStyle: "",
+      relationship: "",
       openingMessage: getFieldValue("characterOpeningMessage"),
       chatSettings: existing && existing.chatSettings ? existing.chatSettings : undefined,
       momentSettings: {
@@ -1917,6 +1967,12 @@
         replies = aiResult.replies;
       }
 
+      if (!replies.length) {
+        messages = before.concat(after);
+        showEmptyAiReplyToast();
+        return;
+      }
+
       persistPrivateAiExtras(requestCharacterId, aiResult, "private");
       await streamPrivateReplies(before.slice(), requestCharacterId, replies, after);
       if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
@@ -2019,12 +2075,12 @@
 
   function normalizePrivateAiResult(result) {
     if (Array.isArray(result)) {
-      return { replies: result, actions: [], thoughts: [], memories: [], memorySummary: null, bodyState: null };
+      return { replies: normalizeReplyItemsForDisplay(result), actions: [], thoughts: [], memories: [], memorySummary: null, bodyState: null };
     }
 
     result = result && typeof result === "object" ? result : {};
     return {
-      replies: Array.isArray(result.replies) ? result.replies : [],
+      replies: normalizeReplyItemsForDisplay(Array.isArray(result.replies) ? result.replies : []),
       actions: Array.isArray(result.actions) ? result.actions : [],
       thoughts: Array.isArray(result.thoughts) ? result.thoughts : [],
       memories: Array.isArray(result.memories) ? result.memories : [],
@@ -2173,15 +2229,7 @@
     if (!messages.some(function (message) {
       return message.role === "user";
     })) {
-      messages.push({
-        id: String(Date.now()),
-        role: "character",
-        content: "先发一句话，我再回复你。",
-        createdAt: Date.now()
-      });
-      window.AppStorage.saveChatHistory(requestCharacterId, messages);
-      renderChatMessages(requestCharacterId);
-      renderCharacterList();
+      showEmptyAiReplyToast();
       return;
     }
 
@@ -2224,6 +2272,11 @@
       window.AppStorage.saveChatHistory(requestCharacterId, messages);
       if (activeCharacterId === requestCharacterId) {
         renderChatMessages(requestCharacterId);
+      }
+      if (!replies.length) {
+        showEmptyAiReplyToast();
+        messages = null;
+        return;
       }
       persistPrivateAiExtras(requestCharacterId, aiResult, "private");
       await streamPrivateReplies(messages, requestCharacterId, replies, []);
@@ -2495,11 +2548,7 @@
       '<div class="section-title-row"><h3>基础信息</h3><span>角色</span></div>',
       '<div class="field-group"><label>角色昵称</label><input data-private-field="name" type="text" value="' + escapeHtml(character.name) + '"></div>',
       '<div class="field-group"><label>备注名</label><input data-private-field="remarkName" type="text" value="' + escapeHtml(settings.remarkName) + '"></div>',
-      '<div class="field-group"><label>角色头像</label><input data-private-field="avatar" type="text" value="' + escapeHtml(character.avatar || "") + '" placeholder="可粘贴图片 data URL 或地址"></div>',
-      '<div class="field-group"><label>角色身份</label><input data-private-field="identity" type="text" value="' + escapeHtml(character.identity || "") + '"></div>',
-      '<div class="field-group"><label>角色人设</label><textarea data-private-field="personality">' + escapeHtml(character.personality || "") + '</textarea></div>',
-      '<div class="field-group"><label>说话风格</label><textarea data-private-field="speakingStyle">' + escapeHtml(character.speakingStyle || "") + '</textarea></div>',
-      '<div class="field-group"><label>关系设定</label><input data-private-field="relationship" type="text" value="' + escapeHtml(character.relationship || "") + '"></div>',
+      '<div class="field-group"><label>角色人设</label><textarea class="persona-textarea" data-private-field="personality">' + escapeHtml(buildCharacterPersonaText(character)) + '</textarea></div>',
       "</section>",
       '<section class="form-section">',
       '<div class="section-title-row"><h3>朋友圈设置</h3><span>动态</span></div>',
@@ -2518,7 +2567,6 @@
       '<div class="section-title-row"><h3>我在聊天中的身份</h3><span>专属</span></div>',
       '<div class="field-group"><label>我在 TA 面前是谁</label><select data-private-field="userPersonaId">' + renderUserPersonaOptions(settings.userPersonaId || "") + '</select></div>',
       '<div class="field-group"><label>我的昵称</label><input data-private-field="userName" type="text" value="' + escapeHtml(persona.name || "") + '"></div>',
-      '<div class="field-group"><label>我的头像</label><input data-private-field="userAvatar" type="text" value="' + escapeHtml(persona.avatar || "") + '"></div>',
       '<div class="field-group"><label>我的人设</label><textarea data-private-field="userPersona">' + escapeHtml(persona.persona || "") + '</textarea></div>',
       "</section>",
       '<section class="form-section">',
@@ -2646,19 +2694,24 @@
   function savePrivateChatSettings() {
     var character = activeCharacterId ? getCharacterById(activeCharacterId) : null;
     var form = getElement("privateChatSettingsForm");
+    var userPersonaOverride;
     var next;
 
     if (!character || !form) {
       return;
     }
 
+    userPersonaOverride = character.chatSettings && character.chatSettings.userPersonaOverride || {};
+
     next = {
       name: getPrivateField("name") || character.name,
-      avatar: getPrivateField("avatar"),
-      identity: getPrivateField("identity"),
-      personality: getPrivateField("personality"),
-      speakingStyle: getPrivateField("speakingStyle"),
-      relationship: getPrivateField("relationship"),
+      avatar: character.avatar || "",
+      gender: "",
+      identity: "",
+      personality: getPrivateField("personality") || buildCharacterPersonaText(character),
+      background: "",
+      speakingStyle: "",
+      relationship: "",
       momentSettings: {
         autoPostEnabled: getPrivateChecked("momentAutoPostEnabled"),
         frequency: getPrivateField("momentFrequency") || "normal",
@@ -2687,7 +2740,7 @@
         userPersonaId: getPrivateField("userPersonaId"),
         userPersonaOverride: {
           name: getPrivateField("userName"),
-          avatar: getPrivateField("userAvatar"),
+          avatar: userPersonaOverride.avatar || "",
           persona: getPrivateField("userPersona")
         },
         memoryEnabled: getPrivateChecked("memoryEnabled")

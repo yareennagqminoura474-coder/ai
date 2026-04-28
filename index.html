@@ -86,64 +86,25 @@
         <form id="createCharacterForm" class="screen-content form-content" autocomplete="off">
           <div id="formError" class="form-error" role="alert" aria-live="polite"></div>
 
-          <section class="form-section" aria-label="基础信息">
-            <div class="field-group">
-              <label for="characterName">角色名称</label>
-              <input id="characterName" name="characterName" type="text" placeholder="请输入角色名称" maxlength="30">
-            </div>
-
-            <div class="field-group">
-              <span class="field-label">头像</span>
-              <button id="avatarPicker" class="avatar-picker" type="button">
+          <section class="form-section character-core-section" aria-label="基础信息">
+            <div class="avatar-field">
+              <button id="avatarPicker" class="avatar-picker round-avatar-picker" type="button" aria-label="选择头像">
                 <span class="avatar-preview" aria-hidden="true">
                   <img id="avatarImagePreview" class="avatar-preview-img hidden" src="" alt="">
                   <span id="avatarTextPreview">+</span>
-                </span>
-                <span class="avatar-picker-text">
-                  <strong>选择本地图片</strong>
-                  <small>保存后会作为角色头像显示</small>
                 </span>
               </button>
               <input id="avatarInput" class="visually-hidden" type="file" accept="image/*">
             </div>
 
             <div class="field-group">
-              <label for="characterGender">性别</label>
-              <select id="characterGender" name="characterGender">
-                <option value="未设定">未设定</option>
-                <option value="男">男</option>
-                <option value="女">女</option>
-                <option value="其他">其他</option>
-              </select>
+              <label for="characterName">名称</label>
+              <input id="characterName" name="characterName" type="text" placeholder="请输入角色名称" maxlength="30">
             </div>
 
             <div class="field-group">
-              <label for="characterIdentity">角色身份</label>
-              <input id="characterIdentity" name="characterIdentity" type="text" placeholder="同学、朋友、恋人、老师、虚拟偶像等" maxlength="40">
-            </div>
-          </section>
-
-          <section class="form-section" aria-label="角色设定">
-            <div class="field-group">
-              <label for="characterPersonality">性格设定</label>
-              <textarea id="characterPersonality" name="characterPersonality" placeholder="例如温柔、理性、慢热、喜欢开玩笑"></textarea>
-            </div>
-
-            <div class="field-group">
-              <label for="characterBackground">背景故事</label>
-              <textarea id="characterBackground" name="characterBackground" placeholder="写下角色的经历、世界观或关键记忆"></textarea>
-            </div>
-
-            <div class="field-group">
-              <label for="characterSpeakingStyle">说话风格</label>
-              <textarea id="characterSpeakingStyle" name="characterSpeakingStyle" placeholder="例如简短直接、轻松幽默、古风、像朋友聊天"></textarea>
-            </div>
-          </section>
-
-          <section class="form-section" aria-label="互动信息">
-            <div class="field-group">
-              <label for="characterRelationship">和我的关系</label>
-              <input id="characterRelationship" name="characterRelationship" type="text" placeholder="例如邻居、搭档、同桌、旧友" maxlength="40">
+              <label for="characterPersonality">人设</label>
+              <textarea id="characterPersonality" class="persona-textarea" name="characterPersonality" placeholder="把性格、身份、关系、说话方式都写在这里。"></textarea>
             </div>
 
             <div class="field-group">
