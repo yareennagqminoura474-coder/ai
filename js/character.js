@@ -34,6 +34,10 @@
   }
 
   function normalizeMoneyAmount(value) {
+    if (window.AppStorage && window.AppStorage.normalizeMoneyAmount) {
+      return window.AppStorage.normalizeMoneyAmount(value);
+    }
+
     var text = String(value === undefined || value === null ? "" : value).trim();
     var amount;
 
@@ -49,8 +53,21 @@
     return amount.toFixed(2);
   }
 
+  function normalizeMoneyMessage(message) {
+    if (window.AppStorage && window.AppStorage.normalizeMoneyMessage) {
+      return window.AppStorage.normalizeMoneyMessage(message);
+    }
+
+    if (!message || (message.type !== "redPacket" && message.type !== "transfer")) {
+      return message;
+    }
+
+    message.amount = normalizeMoneyAmount(message.amount);
+    return message.amount ? message : null;
+  }
+
   function hasValidMoneyAmount(message) {
-    return Boolean(message && normalizeMoneyAmount(message.amount));
+    return Boolean(normalizeMoneyMessage(message));
   }
 
   function normalizeDisplayText(text) {
@@ -1173,8 +1190,10 @@
   }
 
   function renderRedPacketMessage(message) {
-    if (!hasValidMoneyAmount(message)) {
-      return escapeHtml(normalizeDisplayText(message.content || ""));
+    var source = message || {};
+    message = normalizeMoneyMessage(message);
+    if (!message) {
+      return escapeHtml(normalizeDisplayText(source.content || source.note || ""));
     }
 
     var canOperate = canOperateIncomingMoneyMessage(message);
@@ -1192,9 +1211,11 @@
   }
 
   function renderTransferMessage(message) {
-    var amount = normalizeMoneyAmount(message.amount);
+    var source = message || {};
+    message = normalizeMoneyMessage(message);
+    var amount = message ? message.amount : "";
     if (!amount) {
-      return escapeHtml(normalizeDisplayText(message.content || message.note || ""));
+      return escapeHtml(normalizeDisplayText(source.content || source.note || ""));
     }
 
     var canOperate = canOperateIncomingMoneyMessage(message);
@@ -1226,7 +1247,7 @@
   }
 
   function canOperateIncomingMoneyMessage(message) {
-    return Boolean(message && message.role === "character" && !isMoneyMessageClosed(message));
+    return Boolean(message && message.role === "character" && hasValidMoneyAmount(message) && !isMoneyMessageClosed(message));
   }
 
   function isMoneyMessageClosed(message) {
@@ -1826,8 +1847,8 @@
       return;
     }
 
-    amount = Number(amount);
-    if (!amount || amount <= 0) {
+    amount = normalizeMoneyAmount(amount);
+    if (!amount) {
       window.alert("请输入有效金额。");
       return;
     }
@@ -1836,7 +1857,7 @@
     appendPrivateToolMessage(characterId, {
       type: "transfer",
       content: "亲属卡支付",
-      amount: amount.toFixed(2),
+      amount: amount,
       note: note,
       status: "paid",
       paymentMethod: "familyCard",
@@ -1866,7 +1887,7 @@
       return "红包：" + (message.content || "恭喜发财，大吉大利");
     }
     if (message.type === "transfer") {
-      return "转账：" + (message.amount || "");
+      return "转账：" + (normalizeMoneyAmount(message.amount) || "");
     }
     if (message.type === "location") {
       return "位置：" + (message.location && message.location.name ? message.location.name : message.content || "") + "，" + getSafeLocationAddress(message.location);
@@ -2348,8 +2369,15 @@
     }
 
     if (type === "redPacket") {
-      message.amount = normalizeMoneyAmount(source.amount);
-      if (!message.amount) {
+      message.note = source.note || "";
+      message = normalizeMoneyMessage(message);
+      if (!message) {
+        message = Object.assign({}, source, {
+          id: String(createdAt + Math.random()),
+          role: "character",
+          type: "text",
+          createdAt: createdAt
+        });
         message.type = "text";
         message.status = "";
         message.content = source.content || "";
@@ -2360,14 +2388,20 @@
     }
 
     if (type === "transfer") {
-      message.amount = normalizeMoneyAmount(source.amount);
-      if (!message.amount) {
+      message.note = source.note || "";
+      message = normalizeMoneyMessage(message);
+      if (!message) {
+        message = Object.assign({}, source, {
+          id: String(createdAt + Math.random()),
+          role: "character",
+          type: "text",
+          createdAt: createdAt
+        });
         message.type = "text";
         message.note = "";
         message.status = "";
         message.content = source.content || source.note || "";
       } else {
-        message.note = source.note || "";
         message.status = source.status || "pending";
         message.content = source.content || "转账";
       }

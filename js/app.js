@@ -2044,7 +2044,8 @@
       return "[红包] " + (message.content || "恭喜发财，大吉大利");
     }
     if (message.type === "transfer") {
-      return "[转账] " + (message.amount ? "¥" + message.amount : "");
+      var transferAmount = normalizeMoneyAmount(message.amount);
+      return "[转账] " + (transferAmount ? "¥" + transferAmount : "");
     }
     if (message.type === "location") {
       return "[位置] " + (message.location && message.location.name ? message.location.name : message.content || "");
@@ -2090,6 +2091,10 @@
   }
 
   function normalizeMoneyAmount(value) {
+    if (window.AppStorage && window.AppStorage.normalizeMoneyAmount) {
+      return window.AppStorage.normalizeMoneyAmount(value);
+    }
+
     var text = String(value === undefined || value === null ? "" : value).trim();
     var amount;
 

@@ -1,4 +1,4 @@
-const CACHE_NAME = "ai-phone-cache-v20260428-9";
+const CACHE_NAME = "ai-phone-cache-v20260428-12";
 
 const APP_SHELL = [
   "./index.html",

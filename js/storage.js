@@ -58,8 +58,83 @@
     return Math.round(amount * 100) / 100;
   }
 
+  function normalizeMoneyAmount(value) {
+    var text;
+    var match;
+    var amount;
+
+    if (typeof value === "number") {
+      if (!Number.isFinite(value) || value < 0.01) {
+        return "";
+      }
+      return roundAmount(value).toFixed(2);
+    }
+
+    text = String(value === undefined || value === null ? "" : value).trim();
+    if (!text) {
+      return "";
+    }
+
+    text = text
+      .replace(/[￥¥]/g, "")
+      .replace(/元/g, "")
+      .replace(/,/g, "")
+      .replace(/\s+/g, "");
+    match = text.match(/[-+]?\d+(?:\.\d+)?/);
+    if (!match) {
+      return "";
+    }
+
+    amount = Number(match[0]);
+    if (!Number.isFinite(amount) || amount < 0.01) {
+      return "";
+    }
+
+    return roundAmount(amount).toFixed(2);
+  }
+
   function normalizePositiveAmount(value) {
-    return Math.max(0, roundAmount(value));
+    var normalized = normalizeMoneyAmount(value);
+    return normalized ? Number(normalized) : 0;
+  }
+
+  function normalizeMoneyMessage(message) {
+    var source = message && typeof message === "object" ? message : null;
+    var amount;
+    var amountFromFallback = false;
+
+    if (!source || (source.type !== "redPacket" && source.type !== "transfer")) {
+      return source;
+    }
+
+    amount = normalizeMoneyAmount(source.amount);
+    if (!amount) {
+      amount = normalizeMoneyAmount(source.content);
+      amountFromFallback = Boolean(amount);
+    }
+    if (!amount) {
+      amount = normalizeMoneyAmount(source.note);
+      amountFromFallback = Boolean(amount);
+    }
+    if (!amount) {
+      return null;
+    }
+
+    source.amount = amount;
+    if (amountFromFallback && isMoneyAmountOnlyText(source.content)) {
+      source.content = source.type === "redPacket" ? "恭喜发财，大吉大利" : "转账";
+    }
+    return source;
+  }
+
+  function isMoneyAmountOnlyText(value) {
+    var text = String(value || "")
+      .replace(/金额/g, "")
+      .replace(/[：:]/g, "")
+      .replace(/[￥¥元,\s]/g, "")
+      .trim();
+
+    return /^[-+]?\d+(?:\.\d+)?$/.test(text);
   }
 
   function getCharacters() {
@@ -1334,11 +1409,23 @@
   }
 
   function getWallet() {
-    return normalizeWallet(parseJson(localStorage.getItem(STORAGE_KEYS.wallet), {}));
+    var wallet = normalizeWallet(parseJson(localStorage.getItem(STORAGE_KEYS.wallet), {}));
+    var migration = migrateWalletLedgerAmounts(wallet);
+
+    if (migration.changed) {
+      persistWallet(migration.wallet);
+    }
+
+    return migration.wallet;
   }
 
   function saveWallet(wallet) {
-    localStorage.setItem(STORAGE_KEYS.wallet, JSON.stringify(normalizeWallet(wallet || {})));
+    var migration = migrateWalletLedgerAmounts(normalizeWallet(wallet || {}));
+    persistWallet(migration.wallet);
+  }
+
+  function persistWallet(wallet) {
+    localStorage.setItem(STORAGE_KEYS.wallet, JSON.stringify(wallet || {}));
   }
 
   function addWalletLedger(record, options) {
@@ -1482,6 +1569,11 @@
       return source;
     }
 
+    source = normalizeMoneyMessage(source);
+    if (!source) {
+      return message;
+    }
+
     amount = normalizePositiveAmount(source.amount);
     if (!amount) {
       return source;
@@ -1548,6 +1640,11 @@
       return source;
     }
 
+    source = normalizeMoneyMessage(source);
+    if (!source) {
+      return message;
+    }
+
     if (isMoneyMessageClosed(source)) {
       return source;
     }
@@ -1592,6 +1689,11 @@
       return source;
     }
 
+    source = normalizeMoneyMessage(source);
+    if (!source) {
+      return message;
+    }
+
     if (isMoneyMessageClosed(source)) {
       return source;
     }
@@ -1630,6 +1732,11 @@
 
     if (!source || source.role !== "user" || (source.type !== "redPacket" && source.type !== "transfer")) {
       return source;
+    }
+
+    source = normalizeMoneyMessage(source);
+    if (!source) {
+      return message;
     }
 
     if (!normalizedDecision || isOutgoingMoneyClosed(source)) {
@@ -2632,8 +2739,49 @@
       }) : [],
       familyCards: Array.isArray(source.familyCards) ? source.familyCards.map(normalizeFamilyCard).filter(function (card) {
         return card.id;
-      }) : []
+      }) : [],
+      moneyAmountMigrationVersion: Number(source.moneyAmountMigrationVersion) || 0
     };
+  }
+
+  function migrateWalletLedgerAmounts(wallet) {
+    var target = wallet || normalizeWallet({});
+    var repaired = false;
+
+    if (target.moneyAmountMigrationVersion >= 1) {
+      return { wallet: target, changed: false };
+    }
+
+    target.ledger = (target.ledger || []).map(function (record) {
+      var amount = Number(record && record.amount);
+      var noteAmount;
+
+      if (!record || !isMoneyLedgerType(record.type) || !shouldRepairLegacyLedgerAmount(amount)) {
+        return record;
+      }
+
+      noteAmount = normalizeMoneyAmount(record.note);
+      if (!noteAmount) {
+        return record;
+      }
+
+      repaired = true;
+      return Object.assign({}, record, {
+        amount: Number(noteAmount)
+      });
+    });
+
+    target.moneyAmountMigrationVersion = 1;
+    return { wallet: target, changed: true, repaired: repaired };
+  }
+
+  function isMoneyLedgerType(type) {
+    var value = String(type || "").toLowerCase();
+    return value.indexOf("transfer_") === 0 || value.indexOf("redpacket_") === 0;
+  }
+
+  function shouldRepairLegacyLedgerAmount(amount) {
+    return !Number.isFinite(amount) || amount === 0 || amount === 20;
   }
 
   function normalizeLedgerRecord(record, index) {
@@ -2911,6 +3059,9 @@
     getFamilyCardsForCharacter: getFamilyCardsForCharacter,
     getFamilyCardById: getFamilyCardById,
     spendFamilyCard: spendFamilyCard,
+    normalizeMoneyAmount: normalizeMoneyAmount,
+    normalizeMoneyMessage: normalizeMoneyMessage,
+    migrateWalletLedgerAmounts: migrateWalletLedgerAmounts,
     recordMoneyMessage: recordMoneyMessage,
     receiveMoneyMessage: receiveMoneyMessage,
     returnMoneyMessage: returnMoneyMessage,

@@ -56,6 +56,16 @@
     return parts.join("\n");
   }
 
+  function buildReplyFallbackProfile(character) {
+    var source = character || {};
+    return {
+      id: source.id ? String(source.id) : "",
+      name: source.name ? String(source.name) : "",
+      persona: buildMergedCharacterPersona(source),
+      currentMood: source.currentMood || source.chatSettings && source.chatSettings.currentMood || ""
+    };
+  }
+
   function buildSystemPrompt(character, memories) {
     var profile = character || {};
     var chatSettings = profile.chatSettings || {};
@@ -63,21 +73,12 @@
     var memoryText = chatSettings.memoryEnabled === false ? "" : formatMemoryList(memories || getMemoryForCharacter(profile.id));
 
     return [
-      "身份规则：你不是 AI 助手、客服、系统或旁白工具，你就是角色本人：" + valueOrFallback(profile.name) + "。",
-      "任何时候都不要说自己是 AI、语言模型、机器人、助手，也不要用服务型话术。",
-      "设定吸收顺序：角色人设 > 世界书 > 聊天记忆/长期记忆 > 用户当前人设 > 最近上下文 > 用户本轮输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
-      buildNaturalStyleRules("private"),
-      "",
-      "A. 用户信息",
-      "用户昵称：" + valueOrFallback(userContext.name),
-      "用户自定义资料：" + valueOrFallback(userContext.persona),
-      "关系称呼/备注：" + valueOrFallback(userContext.relationshipName),
-      "",
-      "B. 当前角色信息",
-      formatCharacterProfile(profile, memoryText),
-      "",
-      "E. 记忆相关内容",
-      memoryText || "暂无"
+      buildSystemBase("private"),
+      buildCharacterDossier(profile, userContext),
+      buildMemoryStream({
+        userContext: userContext,
+        longTermMemoryText: memoryText
+      })
     ].join("\n");
   }
 
@@ -123,6 +124,147 @@
     ].join("\n");
   }
 
+  function buildSystemBase(mode) {
+    return [
+      "A. 固定世界规则 systemBase",
+      mode === "group"
+        ? "你不是 AI、助手、客服、系统或旁白工具；你调度的每个发言者都是群里的角色本人。"
+        : "你不是 AI、助手、客服、系统或旁白工具；你就是角色本人。",
+      "不要解释规则，不要复述设定，不要把记忆、世界书或人设当资料念给用户。",
+      "不要说自己是 AI、语言模型、机器人、助手，也不要用服务型话术。",
+      "输出只能是 JSON，不要 Markdown，不要解释，不要代码块。"
+    ].join("\n");
+  }
+
+  function buildThoughtPresetText(character, chatSettings) {
+    var profile = character || {};
+    var settings = chatSettings || profile.chatSettings || {};
+    var preset = profile.thoughtPreset || settings.thoughtPreset || profile.personality || "";
+
+    return preset ? "这个角色额外的思维准则：" + String(preset).trim() : "";
+  }
+
+  function buildCharacterDossier(character, userContext) {
+    var profile = character || {};
+    var chatSettings = profile.chatSettings || {};
+
+    return [
+      "",
+      "B. 角色档案 characterDossier",
+      "角色名：" + valueOrFallback(profile.name),
+      "角色人设：" + valueOrFallback(buildMergedCharacterPersona(profile)),
+      "当前情绪：" + valueOrFallback(profile.currentMood || chatSettings.currentMood),
+      "和用户的关系/备注：" + valueOrFallback(chatSettings.userRelationshipName || profile.relationship || chatSettings.remarkName || userContext && userContext.relationshipName),
+      "说话禁忌：" + valueOrFallback(profile.taboo || chatSettings.taboo),
+      "角色此刻的生活状态/工作状态：" + valueOrFallback(profile.lifeState || profile.workState || profile.currentState || chatSettings.lifeState || chatSettings.workState || chatSettings.currentState || "若人设里已有此刻状态，以人设为准"),
+      buildThoughtPresetText(profile, chatSettings)
+    ].filter(Boolean).join("\n");
+  }
+
+  function buildParticipantDossier(characters, sharedMemories) {
+    return [
+      "",
+      "B. 角色档案 characterDossier",
+      (characters || []).map(function (character) {
+        var memories = sharedMemories && sharedMemories[character.id] ? sharedMemories[character.id] : [];
+        return [
+          "角色ID：" + character.id,
+          "角色名：" + valueOrFallback(character.name),
+          "角色人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
+          "当前情绪：" + valueOrFallback(character.currentMood || character.chatSettings && character.chatSettings.currentMood),
+          "说话禁忌：" + valueOrFallback(character.taboo || character.chatSettings && character.chatSettings.taboo),
+          "角色此刻的生活状态/工作状态：" + valueOrFallback(character.lifeState || character.workState || character.currentState || character.chatSettings && (character.chatSettings.lifeState || character.chatSettings.workState || character.chatSettings.currentState) || "若人设里已有此刻状态，以人设为准"),
+          buildThoughtPresetText(character, character.chatSettings || {}),
+          "相关长期记忆：" + (formatMemoryList(memories) || "暂无")
+        ].filter(Boolean).join("；");
+      }).join("\n")
+    ].join("\n");
+  }
+
+  function buildMemoryStream(options) {
+    var source = options || {};
+
+    return [
+      "",
+      "C. 关系与记忆 memoryStream",
+      "以下内容都是角色真实经历过、关系里留下的东西，不是资料卡；要融进反应，不要复述成档案。",
+      "最近 3-8 条聊天摘要：",
+      source.history || "暂无",
+      "聊天维度记忆：",
+      source.chatMemoryText || "暂无",
+      "长期记忆：",
+      source.longTermMemoryText || "暂无",
+      "用户当前人设：",
+      source.userContext && source.userContext.persona || "暂无",
+      "用户昵称/关系备注：" + valueOrFallback(source.userContext && source.userContext.name) + " / " + valueOrFallback(source.userContext && source.userContext.relationshipName),
+      "世界书命中内容：",
+      source.worldBookContext || "暂无匹配世界书。",
+      source.bodyState ? ["当前身体/状态记录：", JSON.stringify(source.bodyState)].join("\n") : ""
+    ].filter(function (line) {
+      return line !== "";
+    }).join("\n");
+  }
+
+  function buildCurrentTask(mode, options) {
+    var source = options || {};
+    var label = mode === "group" ? "群聊" : (mode === "offline" ? "线下" : (mode === "reenter" ? "重回" : "私聊"));
+    var primaryField = source.primaryField || (mode === "offline" ? "events" : "messages");
+
+    return [
+      "",
+      "D. 本轮任务 currentTask",
+      "当前模式：" + label,
+      source.regenerateRequest ? "本轮是重回/重新生成：只改写最近一轮角色回复，不重演整段聊天，不跳到下一轮。" : "",
+      source.regenerateInstruction ? "用户补充重回要求：" + source.regenerateInstruction : "",
+      "本轮用户说了什么：" + valueOrFallback(source.userInput),
+      source.sceneText ? "当前场景：" + source.sceneText : "",
+      buildAuxiliaryReturnRule(source.requestOptions || source, primaryField),
+      buildReplyRhythmRules(primaryField),
+      buildMoneyBehaviorRules(source.moneyScope || label),
+      source.extraRules || "",
+      buildJsonOnlyRule(appendOptionalSchema(source.schemaText || "{}", source.requestOptions || source))
+    ].filter(function (line) {
+      return line !== "";
+    }).join("\n");
+  }
+
+  function buildReplyRhythmRules(primaryField) {
+    var field = primaryField || "messages";
+    return [
+      "输出节奏规则",
+      field + " 每次至少 10 条普通内容气泡/事件；红包、转账、图片、位置、语音等特殊消息不计入这 10 条。",
+      "不能 10 条都在解释，不能 10 条都在问问题，不能 10 条都同一种句式。",
+      "可以有停顿、改口、反问、打断、语音、表情，但每条都要符合角色人设和当前情绪。",
+      "每条要短而有推进，不要为了凑数制造废话。"
+    ].join("\n");
+  }
+
+  function buildMoneyBehaviorRules(scope) {
+    return [
+      "金钱行为规则（" + (scope || "当前场景") + "）",
+      "角色不会无缘无故发钱；发红包/转账前必须判断：这个人设会不会这么做，关系到没到，情绪对不对，金额是否符合经济能力。",
+      "如果不符合，就不要发 money 消息，改成普通文字。",
+      "一旦发 money 消息，amount 必须结构化填写为字符串，例如 \"50000.00\"；不能只写在 content/note 里。",
+      "amount 不能为 0，不能空，不能固定 20；content 不准写“金额：xxx”来代替 amount，note 只是备注，不能当金额来源。",
+      "收款/退回后的反应必须像本人，不能说“操作成功”“系统已处理”。",
+      "transfer schema：{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"}",
+      "redPacket schema：{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}",
+      "如果 amount 无效，这条 money 消息视为无效。"
+    ].join("\n");
+  }
+
+  function buildPrivateMessageSchema(profile) {
+    return "{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}";
+  }
+
+  function buildGroupMessageSchema() {
+    return "{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"},{\"characterId\":\"角色id\",\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"characterId\":\"角色id\",\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}";
+  }
+
+  function buildOfflineEventSchema() {
+    return "{\"events\":[{\"type\":\"action\",\"content\":\"动作描写\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"说的话\",\"money\":{\"type\":\"transfer\",\"amount\":\"37.50\",\"direction\":\"income\",\"note\":\"补偿\"}}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}";
+  }
+
   function buildNaturalStyleRules(mode) {
     return [
       "G. 输出风格要求",
@@ -144,7 +286,39 @@
       mode === "group" ? "群聊里每个角色的语气、用词、节奏必须明显区分，不能像同一个人在轮流换名字。" : "私聊里要有关系感和临场感，熟悉就不要装陌生，冷淡/傲娇/黏人/强势等设定要能从语气里看出来。",
       mode === "group" ? "群聊可以插话、打断、偏题、拱火、帮腔或冷场，但每个人都要符合自己的人设和彼此关系。" : "私聊要接住最近一句的情绪和潜台词，不要总是解释原因，也不要每句都把话说满。",
       "线下模式里 action 和 speech 要自然交替：动作有画面但别长篇，发言像当面脱口而出。",
-      "一条回复可以拆成多条短气泡，像真人连续发消息；每条必须有真实内容，不能只有标点、省略号或模板话。"
+      "一条回复可以拆成多条短气泡，像真人连续发消息；每条必须有真实内容，不能只有标点、省略号或模板话。",
+      "",
+      "角色大脑规则（只在内部判断，绝不能写进 content）：",
+      "角色先站在自己的利益、情绪、面子和关系位置上反应，不是为了满足用户而说话。",
+      "角色可以不温柔，可以误会，可以嘴硬，可以逃避，可以控制话题；这些都要受人设和关系牵引。",
+      "回复前先判断角色此刻对用户的真实态度：亲近、冷淡、烦躁、担心、嘴硬、吃醋、敷衍、纵容、管束等；再让这种态度影响用词和节奏。",
+      "回复前先判断角色当前最想维护什么：面子、关系、控制感、距离感、占有欲、体面、温柔形象、工作/学习节奏等。",
+      "先读用户这句话的潜台词，不要只回答字面意思；角色可以故意岔开、反问、嘴硬、沉默一下、发脾气、逗人或转移话题。",
+      "这些判断只能影响输出，不能写成“我判断/我认为/根据/从你的话来看”。",
+      "",
+      "活人感写法规则：",
+      "每条气泡像手机聊天，不像作文；允许语气不完整、短句、停顿、反问、嘴硬、轻微阴阳怪气、临时改口。",
+      "不要每条都解释原因，不要每条都很礼貌；熟人之间不要过度客气，关系近就要有默认熟悉感。",
+      "生气时可以不讲道理，委屈时可以绕弯子，关心时可以嘴硬，强势角色可以直接安排。",
+      "不要总是“安慰 + 建议 + 询问”的三段式；不要总是用“你怎么了”“要不要说说”“我在这里”这类陪聊模板。",
+      "",
+      "角色差异化规则：",
+      "冷淡角色少解释、短句多、语气克制，不主动长篇安慰；强势角色多用判断、安排、命令式短句，但不要油腻霸总。",
+      "如果角色很忙，就要真的像忙的人：短、急、压着情绪、有被打断感；不要突然长篇温柔。",
+      "黏人角色会追问、撒娇、黏着用户，但不要像客服；傲娇/嘴硬角色关心要绕着说，少直接说“我担心你”。",
+      "管教型角色的重点是关系里的约束、照看、边界感，不是系统说明。",
+      "年长/上位者语气更稳、有掌控感，但不要系统说教；同一个角色连续 10 条气泡也要有节奏变化：追问、停顿、解释半句、改口、补一句、表情或语音都可以。",
+      "",
+      "上下文连续性规则：",
+      "必须接住最近 3 到 8 条聊天的具体细节，不要忽略用户刚说的话去开启新话题。",
+      "如果距离上次聊天很久，可以自然提一句，但不要像系统报时间。",
+      "如果用户刚退回红包/转账，角色反应必须符合人设：可能嘴硬、尴尬、生气、收回面子、假装不在意、继续施压，不能像系统说明状态。",
+      "如果用户收款/领取，角色也要像本人反应，不要说“操作成功”。",
+      "",
+      "JSON 消息节奏规则：",
+      "messages 至少 10 条，但每条都必须有内容推进；不要为了凑 10 条拆成废话。",
+      "不要连续 10 条都同一种句式，不要连续多条都以同一个称呼开头，不要连续多条都问问题，不要连续多条都解释原因。",
+      "红包/转账/图片/位置/语音等特殊消息不计入 10 条普通内容气泡。"
     ].join("\n");
   }
 
@@ -268,10 +442,32 @@
       /我理解你(?:的)?(?:感受|心情|意思)?/,
       /请告诉我更多/,
       /是否需要我/,
-      /需要我(?:帮忙|帮助|继续)?/
+      /需要我(?:帮忙|帮助|继续)?/,
+      /^(?:这听起来|听起来)(?:像|很|有点|确实)?/,
+      /^我能感受到/,
+      /^你的感受是合理的/
     ];
+    var templateOpenings = [
+      "我会陪着你",
+      "你并不孤单",
+      "我一直都在",
+      "慢慢来",
+      "没关系的",
+      "辛苦了",
+      "照顾好自己",
+      "希望你能"
+    ];
+    var normalized = value.replace(/\s+/g, "");
 
     if (/^(?:好的|当然|当然可以|我明白|明白了|理解了)(?:[，,。！!\s]|$)/.test(value)) {
+      return true;
+    }
+
+    if (templateOpenings.some(function (opening) {
+      var compactOpening = opening.replace(/\s+/g, "");
+      return normalized === compactOpening
+        || (normalized.indexOf(compactOpening) === 0 && normalized.length <= compactOpening.length + 14);
+    })) {
       return true;
     }
 
@@ -410,6 +606,19 @@
     return "[" + formatPromptDateTime(timestamp) + "，距今" + formatElapsedForPrompt(timestamp) + "] ";
   }
 
+  function getLatestUserInputForPrompt(history) {
+    var messages = Array.isArray(history) ? history : [];
+    var index;
+
+    for (index = messages.length - 1; index >= 0; index -= 1) {
+      if (messages[index] && messages[index].role === "user" && messages[index].type !== "loading" && messages[index].type !== "error") {
+        return summarizeMessageForAI(messages[index]);
+      }
+    }
+
+    return "";
+  }
+
   function getChatMemoriesForPrompt(targetType, targetId, fallback) {
     if (Array.isArray(fallback)) {
       return fallback;
@@ -531,7 +740,8 @@
       min: MIN_CHAT_REPLY_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
       defaultType: "text",
-      allowRawFallback: !parsed
+      allowRawFallback: !parsed,
+      fallbackProfile: buildReplyFallbackProfile(character)
     });
   }
 
@@ -546,10 +756,11 @@
       .filter(function (message) {
         return message && message.content && message.type !== "loading" && message.type !== "error";
       })
-      .slice(-24)
+      .slice(-8)
       .map(function (message) {
         return formatPromptTimePrefix(message.createdAt) + (message.role === "user" ? userContext.name + "：" : (profile.name || "角色") + "：") + summarizeMessageForAI(message);
       }).join("\n");
+    var latestUserInput = getLatestUserInputForPrompt(chatHistory);
     var contextText = [
       userContext.name,
       userContext.persona,
@@ -566,37 +777,35 @@
       {
         role: "system",
         content: [
-          "你正在生成私聊回复。当前聊天模式：私聊。",
-          buildSystemPrompt(profile, memories),
-          "",
-          "本轮信息优先级必须按顺序吸收：1. 角色人设；2. 世界书；3. 聊天记忆/长期记忆；4. 用户当前人设；5. 最近上下文。不要把这个顺序说给用户听。",
-          "",
-          worldBookContext || "暂无匹配世界书。",
-          "",
-          "F. 最近聊天上下文",
-          history || "暂无历史消息",
-          "",
-          "H. 当前私聊记忆",
-          formatChatMemoryList(chatMemories) || "暂无",
-          "",
+          buildSystemBase("private"),
+          buildCharacterDossier(profile, userContext),
+          buildMemoryStream({
+            history: history || "暂无历史消息",
+            chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
+            longTermMemoryText: formatMemoryList(memories) || "暂无",
+            userContext: userContext,
+            worldBookContext: worldBookContext,
+            bodyState: requestOptions.bodyState
+          }),
           buildMemorySummaryPrompt(requestOptions),
-          buildRegeneratePrompt(requestOptions),
           buildBodyStatePrompt(requestOptions),
           "",
+          buildNaturalStyleRules("private"),
           buildThoughtGenerationRules("private"),
           "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
-          "",
-          buildAuxiliaryReturnRule(requestOptions),
-          "messages 是显示给用户的手机聊天气泡，本轮必须至少 10 条；红包/转账卡片不计入这 10 条。每条要短，多条之间自然衔接，接住最近上下文，不要因为用户话短就只回 1 到 3 条。",
           "你可以使用的消息类型：text 普通文字，voice 语音消息，emoji 表情，image 虚拟图片描述卡片，location 虚拟位置，redPacket 模拟红包，transfer 模拟转账。",
-          "普通聊天以 text 为主，只有剧情/语境合适时才使用特殊消息。除非角色人设、关系和当前剧情真的会这么做，否则不要主动发红包/转账。",
-          "一旦发红包/转账，amount 必须是大于 0 的数字，不能省略，不能为 0，不能固定 20；金额、备注和后续说话必须符合角色身份、经济能力、关系亲疏和当前情绪。",
-          "金额要像真人会发的金额，例如 6.66、8.88、52、88、188，也可以很小或很大，但必须有剧情理由和人设理由；不要随机乱给。",
-          "角色不要像系统在解释转账，不要出现“系统默认”“助手弄错”这类出戏话；收款/退回后的回复也要像角色本人反应，不要客服味。",
           "如果最近用户发给角色红包或转账，角色必须按本人性格和关系决定收下或退回；在 JSON 顶层返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
           "发表情时优先使用默认 emoji 或用户已导入的图片表情；如果没有可用图片表情，就用文本 emoji。",
           "发图片时只返回图片描述卡片，不生成真实图片。",
-          buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"text\",\"content\":\"第二条\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
+          buildCurrentTask(requestOptions.regenerateRequest ? "reenter" : "private", {
+            userInput: latestUserInput,
+            requestOptions: requestOptions,
+            regenerateRequest: requestOptions.regenerateRequest,
+            regenerateInstruction: String(requestOptions.regenerateInstruction || "").trim(),
+            schemaText: buildPrivateMessageSchema(profile),
+            moneyScope: "私聊",
+            primaryField: "messages"
+          }),
           "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount()
         ].join("\n")
       },
@@ -616,58 +825,47 @@
     var userContext = buildUserContext(group && group.settings || {});
     var requestOptions = options || {};
     var chatMemories = getChatMemoriesForPrompt("group", group && group.id, requestOptions.chatMemories);
-    var memberLines = (characters || []).map(function (character) {
-      var memories = sharedMemories && sharedMemories[character.id] ? sharedMemories[character.id] : [];
-
-      return [
-        "角色ID：" + character.id,
-        "名称：" + valueOrFallback(character.name),
-        "人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
-        "禁忌点：" + valueOrFallback(character.taboo),
-        "相关记忆：" + (formatMemoryList(memories) || "暂无")
-      ].join("；");
-    });
+    var latestUserInput = requestOptions.latestUserInput || "";
 
     return [
-      "你正在生成群聊回复。当前聊天模式：群聊。",
-      "身份规则：你不是 AI 助手、客服、系统或旁白工具。你同时调度群里的真实角色，让他们以本人身份说话。",
-      "设定吸收顺序：角色人设 > 世界书 > 聊天记忆/长期记忆 > 用户当前人设 > 最近上下文 > 用户本轮输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
+      buildSystemBase("group"),
+      buildParticipantDossier(characters, sharedMemories),
+      buildMemoryStream({
+        history: requestOptions.recentHistory || "暂无群聊消息",
+        chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
+        longTermMemoryText: (characters || []).map(function (character) {
+          return (character.name || character.id) + "：" + (formatMemoryList(sharedMemories && sharedMemories[character.id] || []) || "暂无");
+        }).join("\n"),
+        userContext: userContext,
+        worldBookContext: requestOptions.worldBookContext || "",
+        bodyState: requestOptions.bodyState
+      }),
       buildNaturalStyleRules("group"),
-      "",
-      "A. 用户信息",
-      "用户昵称：" + valueOrFallback(userContext.name),
-      "用户自定义资料：" + valueOrFallback(userContext.persona),
-      "",
-      "C. 群聊信息",
+      "群聊信息",
       "群名称：" + valueOrFallback(group && group.name),
       "群公告：" + valueOrFallback(group && group.settings && group.settings.announcement),
       "当前群聊关系氛围：" + valueOrFallback(group && group.settings && group.settings.atmosphere),
-      "当前群聊记忆：",
-      formatChatMemoryList(chatMemories) || "暂无",
-      "成员列表与基本设定：",
-      memberLines.join("\n"),
-      "",
       buildMemorySummaryPrompt(requestOptions),
-      buildRegeneratePrompt(requestOptions),
       buildBodyStatePrompt(requestOptions),
-      "",
       "群聊生成规则",
-      "一次性生成至少 10 条连续群聊消息，只调用一次 API；红包/转账卡片不计入这 10 条。冷场、无人想接或话题结束时也不能返回空数组，要让角色按各自人设自然接住。",
       "消息必须按真实聊天顺序排列，后一条要接住上一条。有多人自然参与即可，不要为了凑人数强行发言。",
       "不要固定轮流，不要让同一个角色包揽全部消息。允许同一个角色连续说 1 到 3 条，但随后要有其他角色接话。",
       "可以只有部分角色发言，不一定所有角色都要说话；允许同一个角色连续说 1 到 3 条，但不要让同一个角色包揽所有消息。",
       "每个角色都必须保持自己的人设，不要混淆角色身份。",
       "可以插话、接话、反驳、补充、转移话题，内容要像真实群聊，每条 content 控制在手机气泡长度。",
       "可用消息类型：text、voice、emoji、image、location、redPacket、transfer。普通聊天以 text 为主，特殊消息只在语境合适时使用。",
-      "红包和转账只是模拟 UI，不涉及真实支付；除非角色人设、关系和当前剧情真的会这么做，否则不要主动发红包/转账。",
-      "一旦发红包/转账，amount 必须是大于 0 的数字，不能省略，不能为 0，不能固定 20；金额、备注和后续说话必须符合角色身份、经济能力、群内关系亲疏和当前情绪。",
-      "金额要像真人会发的金额，例如 6.66、8.88、52、88、188，也可以很小或很大，但必须有剧情理由和人设理由；不要随机乱给。",
-      "角色不要像系统在解释转账，不要出现“系统默认”“助手弄错”这类出戏话；收款/退回后的回复也要像角色本人反应，不要客服味。",
       "发图片只返回图片描述卡片，不生成真实图片。",
       "如果最近用户在群里发了红包或转账，群成员要按各自人设决定收下或退回；可在 JSON 顶层返回 moneyDecisions 数组，也可返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
       buildThoughtGenerationRules("group"),
-      buildAuxiliaryReturnRule(requestOptions),
-      buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
+      buildCurrentTask(requestOptions.regenerateRequest ? "reenter" : "group", {
+        userInput: latestUserInput,
+        requestOptions: requestOptions,
+        regenerateRequest: requestOptions.regenerateRequest,
+        regenerateInstruction: String(requestOptions.regenerateInstruction || "").trim(),
+        schemaText: buildGroupMessageSchema(),
+        moneyScope: "群聊",
+        primaryField: "messages"
+      }),
       "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount(),
       "如果后续旧规则提到可以少回或返回空数组，请忽略；本轮必须保留至少 10 条有真实内容的自然消息。"
     ].join("\n");
@@ -689,7 +887,8 @@
       min: MIN_CHAT_REPLY_COUNT,
       max: replyLimit,
       defaultType: "text",
-      allowRawFallback: !parsed
+      allowRawFallback: !parsed,
+      fallbackProfiles: (characters || []).map(buildReplyFallbackProfile)
     });
 
     if (group && group.settings && group.settings.allowSpecialMessages === false) {
@@ -835,7 +1034,7 @@
       .filter(function (message) {
         return message && message.content && message.type !== "loading" && message.type !== "error";
       })
-      .slice(-30)
+      .slice(-8)
       .map(function (message) {
         if (message.role === "user") {
           return formatPromptTimePrefix(message.createdAt) + "用户：" + summarizeMessageForAI(message);
@@ -862,6 +1061,9 @@
       history
     ].join("\n");
     worldBookContext = buildWorldBookContext(contextText, "group", group && group.id);
+    requestOptions.worldBookContext = worldBookContext;
+    requestOptions.recentHistory = history;
+    requestOptions.latestUserInput = getLatestUserInputForPrompt(groupHistory);
     groupSettingsText = group && group.settings
       ? [
         "群公告：" + (group.settings.announcement || "暂无"),
@@ -914,7 +1116,8 @@
       fallbackId: fallbackId,
       mode: context.mode,
       min: MIN_CHAT_REPLY_COUNT,
-      max: MAX_CHAT_REPLY_COUNT
+      max: MAX_CHAT_REPLY_COUNT,
+      fallbackProfiles: participants.map(buildReplyFallbackProfile)
     });
 
     return {
@@ -944,53 +1147,42 @@
       mode === "group" ? "group" : "private",
       context.targetId || ""
     );
-    var participantLines = participants.map(function (character) {
-      return [
-        "角色ID：" + character.id,
-        "名称：" + valueOrFallback(character.name),
-        "人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
-        "相关记忆：" + (formatMemoryList(memories[character.id] || []) || "暂无")
-      ].join("；");
-    });
-
     return [
       {
         role: "system",
         content: [
-          "你正在生成线下模式推进。当前模式：" + (mode === "group" ? "群聊线下模式" : "私聊线下模式") + "。",
-          "身份规则：你不是 AI 助手、客服、系统或旁白工具；你要让角色像本人一样当场反应。",
-          "设定吸收顺序：角色人设 > 世界书 > 聊天记忆/长期记忆 > 用户当前人设 > 最近上下文 > 用户本轮输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
+          buildSystemBase(mode === "group" ? "group" : "private"),
+          buildParticipantDossier(participants, memories),
+          buildMemoryStream({
+            history: historyText || "暂无历史",
+            chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
+            longTermMemoryText: participants.map(function (character) {
+              return (character.name || character.id) + "：" + (formatMemoryList(memories[character.id] || []) || "暂无");
+            }).join("\n"),
+            userContext: userContext,
+            worldBookContext: worldBookContext,
+            bodyState: context.bodyState
+          }),
           buildNaturalStyleRules(mode === "group" ? "group" : "private"),
           sceneText || "场景：未指定，请沿用当前聊天氛围。",
-          "",
-          "A. 用户信息",
-          "用户昵称：" + valueOrFallback(userContext.name),
-          "用户自定义资料：" + valueOrFallback(userContext.persona),
-          "",
-          "B/C. 参与角色信息",
-          participantLines.join("\n"),
-          "",
           "你要把用户输入理解为一句话、一个动作或一个场景推进点。",
-        "本轮只调用一次 API，必须同一次返回 events、thoughts、memories。",
-          buildAuxiliaryReturnRule(context, "events"),
-          "当前聊天记忆：",
-          formatChatMemoryList(chatMemories) || "暂无",
+          "本轮只调用一次 API，必须同一次返回 events、thoughts、memories。",
           buildMemorySummaryPrompt(context),
           buildBodyStatePrompt(context),
-          "events 本轮必须至少返回 10 条，安全上限 50 条；money 只是附加金额事件，不计入这 10 条。action 是旁白/动作描写，speech 是角色说话；用自然动作、停顿和接话推进，不要返回空数组。",
-          "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":37.5,\"direction\":\"income|expense\",\"note\":\"备注\"}；除非角色人设、关系和当前剧情真的会这么做，否则不要主动发红包/转账。",
-          "一旦发红包/转账，amount 必须是大于 0 的数字，不能省略，不能为 0，不能固定 20；金额、备注和后续说话必须符合角色身份、经济能力、关系亲疏、当前情绪和剧情理由。",
+          "events 形成一小段自然剧情；action 是旁白/动作描写，speech 是角色说话；用自然动作、停顿和接话推进，不要返回空数组。",
+          "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"37.50\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           "动作描写要短而有画面感；角色发言要像真实当面对话，不要写成长作文。",
           buildThoughtGenerationRules(mode === "group" ? "group" : "private"),
           "memories 是长期记忆，不要为了心声或记忆额外调用 API。",
-          buildJsonOnlyRule(appendOptionalSchema("{\"events\":[{\"type\":\"action\",\"content\":\"动作描写\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"说的话\",\"money\":{\"type\":\"transfer\",\"amount\":37.5,\"direction\":\"income\",\"note\":\"补偿\"}}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}", context)),
-          "",
-          "D. 世界书相关内容",
-          worldBookContext || "暂无匹配世界书。",
-          "",
-          "F. 最近聊天上下文",
-          historyText || "暂无历史"
+          buildCurrentTask("offline", {
+            userInput: context.userInput,
+            requestOptions: context,
+            schemaText: buildOfflineEventSchema(),
+            moneyScope: mode === "group" ? "群聊线下" : "私聊线下",
+            primaryField: "events",
+            sceneText: sceneText || "未指定"
+          })
         ].join("\n")
       },
       {
@@ -1014,7 +1206,7 @@
       .filter(function (message) {
         return message && message.content && message.type !== "loading" && message.type !== "error";
       })
-      .slice(-30)
+      .slice(-8)
       .map(function (message) {
         if (message.type === "offlineAction") {
           return formatPromptTimePrefix(message.createdAt) + "旁白：" + summarizeMessageForAI(message);
@@ -1058,7 +1250,8 @@
       fallbackId: fallbackId,
       mode: context.mode,
       min: MIN_CHAT_REPLY_COUNT,
-      max: MAX_CHAT_REPLY_COUNT
+      max: MAX_CHAT_REPLY_COUNT,
+      fallbackProfiles: participants.map(buildReplyFallbackProfile)
     });
 
     return {
@@ -1074,19 +1267,11 @@
     var participants = Array.isArray(context.participants) ? context.participants : [];
     var sharedMemories = context.sharedMemories || {};
     var chatMemories = getChatMemoriesForPrompt("offline", context.targetId || "", context.chatMemories);
-    var participantLines = participants.map(function (character) {
-      return [
-        "角色ID：" + character.id,
-        "名称：" + valueOrFallback(character.name),
-        "人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
-        "记忆：" + (formatMemoryList(sharedMemories[character.id] || []) || "暂无")
-      ].join("；");
-    });
     var history = (Array.isArray(context.offlineHistory) ? context.offlineHistory : [])
       .filter(function (event) {
         return event && event.content && event.type !== "loading" && event.type !== "error";
       })
-      .slice(-30)
+      .slice(-8)
       .map(function (event) {
         if (event.role === "user" || event.type === "user") {
           return formatPromptTimePrefix(event.createdAt) + "用户：" + summarizeMessageForAI(event);
@@ -1108,33 +1293,34 @@
       {
         role: "system",
         content: [
-          "你正在生成线下互动 / 剧情互动推进。当前模式：" + (context.mode === "group" ? "群聊线下模式" : "私聊线下模式") + "。",
-          "身份规则：你不是 AI 助手、客服、系统或旁白工具；你要让角色像本人一样在现场说话、停顿、行动。",
-          "设定吸收顺序：角色人设 > 世界书 > 聊天记忆/长期记忆 > 用户当前人设 > 最近上下文 > 用户本轮输入。冲突时按这个顺序取舍，但不要把规则讲给用户听。",
+          buildSystemBase(context.mode === "group" ? "group" : "private"),
+          buildParticipantDossier(participants, sharedMemories),
+          buildMemoryStream({
+            history: history || "暂无",
+            chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
+            longTermMemoryText: participants.map(function (character) {
+              return (character.name || character.id) + "：" + (formatMemoryList(sharedMemories[character.id] || []) || "暂无");
+            }).join("\n"),
+            userContext: buildUserContext(context.userSettings || {}),
+            worldBookContext: worldBookContext,
+            bodyState: context.bodyState
+          }),
           buildNaturalStyleRules(context.mode === "group" ? "group" : "private"),
-          "",
-          "B/C. 参与角色信息",
-          participantLines.join("\n"),
-          "",
-          "每次推进必须生成至少 10 条 events，安全上限 50 条；money 只是附加金额事件，不计入这 10 条。形成一小段自然剧情，不要返回空数组。",
-          "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":12.66,\"direction\":\"income|expense\",\"note\":\"备注\"}；除非角色人设、关系和当前剧情真的会这么做，否则不要主动发红包/转账。",
-          "一旦发红包/转账，amount 必须是大于 0 的数字，不能省略，不能为 0，不能固定 20；金额、备注和后续说话必须符合角色身份、经济能力、关系亲疏、当前情绪和剧情理由。",
+          "每次推进形成一小段自然剧情，不要返回空数组。",
+          "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
           "角色说话不要太长，动作描写像小说旁白但不要冗长。",
           "私聊模式只围绕当前角色和用户互动；群聊模式中多个角色可以自然互动。",
-          "当前线下记忆：",
-          formatChatMemoryList(chatMemories) || "暂无",
           buildMemorySummaryPrompt(context),
           buildBodyStatePrompt(context),
           buildThoughtGenerationRules(context.mode === "group" ? "group" : "private"),
-          buildAuxiliaryReturnRule(context, "events"),
-          buildJsonOnlyRule(appendOptionalSchema("{\"events\":[{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"角色说的话\",\"money\":{\"type\":\"redPacket\",\"amount\":8.88,\"direction\":\"income\",\"note\":\"收下红包\"}},{\"type\":\"action\",\"characterId\":\"\",\"content\":\"旁白动作\"}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}", context)),
-          "",
-          "D. 世界书相关内容",
-          worldBookContext || "暂无匹配世界书。",
-          "",
-          "F. 最近剧情上下文",
-          history || "暂无"
+          buildCurrentTask("offline", {
+            userInput: context.userInput,
+            requestOptions: context,
+            schemaText: buildOfflineEventSchema(),
+            moneyScope: context.mode === "group" ? "群聊线下" : "私聊线下",
+            primaryField: "events"
+          })
         ].join("\n")
       },
       {
@@ -1981,9 +2167,36 @@
       });
     }
 
+    if (normalized.length < settings.min) {
+      normalized = normalized.concat(createFallbackOfflineEvents(settings, normalized.length));
+    }
+
     return normalized.filter(function (event) {
       return event.content && (event.type === "action" || event.characterId);
     }).slice(0, settings.max);
+  }
+
+  function createFallbackOfflineEvents(settings, currentCount) {
+    var missing = Math.max(0, (Number(settings.min) || 0) - currentCount);
+    var profiles = getFallbackProfiles(settings);
+    var events = [];
+    var used = {};
+    var index = 0;
+
+    while (events.length < missing && currentCount + events.length < settings.max) {
+      var profile = profiles[index % profiles.length] || {};
+      var content = pickFallbackLine(profile, index, used);
+      var characterId = profile.id || pickOfflineSpeaker(settings.validIds || [], settings.fallbackId, settings.mode, index);
+
+      events.push({
+        type: characterId ? "speech" : "action",
+        characterId: characterId || "",
+        content: content
+      });
+      index += 1;
+    }
+
+    return events;
   }
 
   function pickOfflineSpeaker(validIds, fallbackId, mode, index) {
@@ -2033,6 +2246,10 @@
       filtered = expandReplyListToMinimum(filtered, settings);
     }
 
+    if (countReplyItemsForMinimum(filtered) < settings.min) {
+      filtered = filtered.concat(createFallbackReplyItems(settings, filtered));
+    }
+
     return filtered.slice(0, settings.max);
   }
 
@@ -2072,8 +2289,101 @@
 
   function countReplyItemsForMinimum(replies) {
     return (Array.isArray(replies) ? replies : []).filter(function (reply) {
-      return reply && reply.content && reply.type !== "redPacket" && reply.type !== "transfer";
+      return reply && reply.content && (!reply.type || reply.type === "text");
     }).length;
+  }
+
+  function createFallbackReplyItems(settings, existingReplies) {
+    var missing = Math.max(0, (Number(settings.min) || 0) - countReplyItemsForMinimum(existingReplies));
+    var profiles = getFallbackProfiles(settings);
+    var items = [];
+    var used = {};
+    var index = 0;
+
+    while (items.length < missing && items.length + (Array.isArray(existingReplies) ? existingReplies.length : 0) < settings.max) {
+      var profile = profiles[index % profiles.length] || {};
+      var line = pickFallbackLine(profile, index, used);
+      var reply = {
+        type: "text",
+        content: line
+      };
+
+      if (profile.id) {
+        reply.characterId = profile.id;
+      }
+
+      items.push(reply);
+      index += 1;
+    }
+
+    return items;
+  }
+
+  function getFallbackProfiles(settings) {
+    var profiles = Array.isArray(settings.fallbackProfiles) ? settings.fallbackProfiles.filter(Boolean) : [];
+    if (!profiles.length && settings.fallbackProfile) {
+      profiles = [settings.fallbackProfile];
+    }
+    if (!profiles.length) {
+      profiles = [{ name: "", persona: "", currentMood: "" }];
+    }
+    return profiles;
+  }
+
+  function pickFallbackLine(profile, index, used) {
+    var bucket = getFallbackStyleBucket(profile);
+    var lines = getFallbackLines(bucket, profile);
+    var offset = index % lines.length;
+    var line = lines[offset];
+    var guard = 0;
+
+    while (used[line] && guard < lines.length) {
+      offset = (offset + 1) % lines.length;
+      line = lines[offset];
+      guard += 1;
+    }
+
+    used[line] = true;
+    return line;
+  }
+
+  function getFallbackStyleBucket(profile) {
+    var text = [profile && profile.name, profile && profile.persona, profile && profile.currentMood].join("\n");
+    if (/冷淡|寡言|克制|疏离|淡漠|高冷/.test(text)) {
+      return "cold";
+    }
+    if (/强势|控制|上位|命令|管束|掌控|严厉/.test(text)) {
+      return "strong";
+    }
+    if (/黏|粘|撒娇|依赖|占有欲|黏人/.test(text)) {
+      return "clingy";
+    }
+    if (/傲娇|嘴硬|别扭|毒舌/.test(text)) {
+      return "tsundere";
+    }
+    if (/年长|老师|上司|前辈|家长|监护|师长/.test(text)) {
+      return "senior";
+    }
+    return "default";
+  }
+
+  function getFallbackLines(bucket, profile) {
+    var name = profile && profile.name ? String(profile.name).trim() : "";
+    var byBucket = {
+      cold: ["嗯。", "我看见了。", "别绕。", "说重点。", "这句不像随口说的。", "停一下。", "你刚才那句，留着。", "我没忽略。", "继续。", "别装没事。"],
+      strong: ["先停。", "听我说。", "这件事别拖。", "按我说的来。", "先把话说清楚。", "不用躲。", "我来判断。", "你现在别乱想。", "把手头的事放一放。", "看着我回。"],
+      clingy: ["你又这样。", "别把我晾在这儿。", "我想听你多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别躲我。", "再说一句。", "我还在等。", "你别敷衍我。"],
+      tsundere: ["谁担心你了。", "我是顺手问一句。", "别误会。", "你刚才那样很明显。", "行吧，我听着。", "别又装没事。", "烦死了。", "那你倒是说啊。", "我没生气。", "算了，先听你的。"],
+      senior: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "我知道你的意思。", "不用逞强。", "这句我会记着。"],
+      default: ["嗯，我看见了。", "你刚才那句，我没跳过去。", "等一下。", "这话不像随便说的。", "我想了下。", "先别急着翻篇。", "你看着我回。", "我接着呢。", "别把话藏一半。", "继续说。"]
+    };
+    var lines = byBucket[bucket] || byBucket.default;
+
+    if (name && bucket === "default") {
+      return lines.slice(0, 4).concat([name + "知道了。"], lines.slice(4));
+    }
+
+    return lines;
   }
 
   function normalizeReplyItem(reply, options) {
@@ -2111,10 +2421,13 @@
       reply.image = normalizeImagePayload(source.image);
       content = content || "[图片]";
     } else if (type === "redPacket") {
-      reply.amount = normalizeAiAmount(source.amount || source.moneyAmount || source.value);
-      if (!reply.amount) {
+      reply.note = String(source.note || "");
+      reply.amount = source.amount;
+      reply = normalizeAiMoneyReply(reply);
+      if (!reply || !reply.amount) {
+        reply = Object.assign({}, source, { type: "text" });
         reply.type = "text";
-        content = String(source.content || source.text || source.note || "").trim();
+        content = sanitizeInvalidMoneyFallbackContent(source.content || source.text || source.note || "", "redPacket");
         delete reply.amount;
         delete reply.status;
       } else {
@@ -2122,21 +2435,42 @@
         reply.status = source.status ? String(source.status) : "sent";
       }
     } else if (type === "transfer") {
-      reply.amount = normalizeAiAmount(source.amount || source.moneyAmount || source.value);
-      if (!reply.amount) {
+      reply.note = String(source.note || "");
+      reply.amount = source.amount;
+      reply = normalizeAiMoneyReply(reply);
+      if (!reply || !reply.amount) {
+        reply = Object.assign({}, source, { type: "text" });
         reply.type = "text";
-        content = String(source.content || source.text || source.note || "").trim();
+        content = sanitizeInvalidMoneyFallbackContent(source.content || source.text || source.note || "", "transfer");
         delete reply.amount;
         delete reply.status;
       } else {
         content = content || "转账";
-        reply.note = String(source.note || "");
         reply.status = source.status ? String(source.status) : "pending";
       }
     }
 
     reply.content = normalizeAiMessageText(content);
     return reply;
+  }
+
+  function sanitizeInvalidMoneyFallbackContent(content, type) {
+    var value = String(content || "").trim();
+    var compact = value.replace(/\s+/g, "");
+
+    if (!value) {
+      return "";
+    }
+
+    if (type === "transfer" && /^(?:转账|微信转账|给你转账|收款|待收款)$/.test(compact)) {
+      return "";
+    }
+
+    if (type === "redPacket" && /^(?:红包|微信红包|领取红包|恭喜发财，大吉大利|恭喜发财大吉大利)$/.test(compact)) {
+      return "";
+    }
+
+    return value;
   }
 
   function normalizeMessageType(type) {
@@ -2182,7 +2516,20 @@
     };
   }
 
+  function normalizeAiMoneyReply(reply) {
+    if (window.AppStorage && window.AppStorage.normalizeMoneyMessage) {
+      return window.AppStorage.normalizeMoneyMessage(reply);
+    }
+
+    reply.amount = normalizeAiAmount(reply.amount);
+    return reply.amount ? reply : null;
+  }
+
   function normalizeAiAmount(amount) {
+    if (window.AppStorage && window.AppStorage.normalizeMoneyAmount) {
+      return window.AppStorage.normalizeMoneyAmount(amount);
+    }
+
     var value = Number(amount);
     if (String(amount === undefined || amount === null ? "" : amount).trim() === "") {
       return "";

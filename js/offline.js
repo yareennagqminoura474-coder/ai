@@ -972,12 +972,15 @@
 
   function recordOfflineMoneyEvent(event, mode, chatId, character) {
     var money = event && event.money && typeof event.money === "object" ? event.money : event;
-    var amount = Number(money && money.amount);
+    var normalizedAmount = window.AppStorage && window.AppStorage.normalizeMoneyAmount
+      ? window.AppStorage.normalizeMoneyAmount(money && money.amount)
+      : "";
+    var amount = normalizedAmount ? Number(normalizedAmount) : 0;
     var direction = money && money.direction === "expense" ? "expense" : (money && money.direction === "income" ? "income" : "");
     var kind = money && (money.moneyType || money.type);
     var recordType;
 
-    if (!window.AppStorage.addWalletLedger || !Number.isFinite(amount) || amount < 0.01 || !direction) {
+    if (!window.AppStorage.addWalletLedger || !amount || amount < 0.01 || !direction) {
       return;
     }
 
