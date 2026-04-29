@@ -2,7 +2,12 @@
   "use strict";
 
   var STORAGE_KEY = "myAiApp.apiJobs";
-  var STALE_RUNNING_MS = 10000;
+  var STALE_RUNNING_MS = 10 * 60 * 1000;
+  var MAX_STORED_JOBS = 20;
+  var MAX_ERROR_JOBS = 5;
+  var MAX_DONE_JOBS = 5;
+  var DONE_RETENTION_MS = 5 * 60 * 1000;
+  var ERROR_RETENTION_MS = 30 * 60 * 1000;
   var handlers = {};
   var runningJobs = {};
   var renderQueue = {};
@@ -22,13 +27,249 @@
     }
   }
 
+  function truncateText(value, maxLength) {
+    var text = String(value || "").trim();
+    return text.length > maxLength ? text.slice(0, maxLength) : text;
+  }
+
+  function normalizeMessagesField(messages) {
+    if (Array.isArray(messages)) {
+      return messages;
+    }
+    if (messages && typeof messages === "object") {
+      if (typeof messages.beforeMessageCount === "number" || typeof messages.afterMessageCount === "number" || typeof messages.count === "number") {
+        return messages;
+      }
+    }
+    return [];
+  }
+
+  function summarizeMessageForStorage(message) {
+    if (!message || typeof message !== "object") {
+      return truncateText(String(message || ""), 200);
+    }
+
+    var parts = [];
+    if (message.role) {
+      parts.push(String(message.role));
+    }
+    if (typeof message.content === "string") {
+      parts.push(message.content);
+    } else if (typeof message.text === "string") {
+      parts.push(message.text);
+    } else if (typeof message.description === "string") {
+      parts.push(message.description);
+    } else if (typeof message.name === "string") {
+      parts.push(message.name);
+    } else {
+      try {
+        parts.push(JSON.stringify(message));
+      } catch (error) {
+        parts.push(String(message));
+      }
+    }
+
+    return truncateText(parts.filter(Boolean).join(" ").replace(/\s+/g, " "), 200);
+  }
+
+  function summarizeMessagesForStorage(messages, countKey) {
+    if (!Array.isArray(messages)) {
+      messages = normalizeMessagesField(messages);
+    }
+
+    var count = Array.isArray(messages) ? messages.length : (typeof messages.count === "number" ? messages.count : 0);
+    var lastMessage = Array.isArray(messages) && messages.length ? messages[messages.length - 1] : null;
+
+    return {
+      [countKey]: count,
+      lastMessagePreview: summarizeMessageForStorage(lastMessage)
+    };
+  }
+
+  function sanitizeRequestSnapshot(source) {
+    var snapshot = source && typeof source === "object" ? source : {};
+
+    return {
+      userInput: truncateText(snapshot.userInput, 300),
+      sceneName: truncateText(snapshot.sceneName || "", 100),
+      sceneDescription: truncateText(snapshot.sceneDescription || "", 220),
+      selectedWorldBookIds: Array.isArray(snapshot.selectedWorldBookIds) ? snapshot.selectedWorldBookIds.slice(0, 20) : [],
+      regenerateInstruction: truncateText(snapshot.regenerateInstruction, 300),
+      blockReason: truncateText(snapshot.blockReason, 200),
+      bodyStateEnabled: Boolean(snapshot.bodyStateEnabled),
+      memorySummaryDue: Boolean(snapshot.memorySummaryDue),
+      createdAt: Number(snapshot.createdAt) || 0
+    };
+  }
+
+  function sanitizeJobForStorage(job) {
+    var normalized = normalizeJob(job);
+
+    return {
+      id: normalized.id,
+      targetType: normalized.targetType,
+      targetId: normalized.targetId,
+      mode: normalized.mode,
+      status: normalized.status,
+      generationId: normalized.generationId,
+      createdAt: normalized.createdAt,
+      updatedAt: normalized.updatedAt,
+      error: truncateText(normalized.error, 200),
+      requestSnapshot: sanitizeRequestSnapshot(normalized.requestSnapshot),
+      beforeMessages: summarizeMessagesForStorage(normalized.beforeMessages, "beforeMessageCount"),
+      afterMessages: summarizeMessagesForStorage(normalized.afterMessages, "afterMessageCount")
+    };
+  }
+
+  function isQuotaExceeded(error) {
+    var message = error && error.message ? String(error.message).toLowerCase() : "";
+    return message.indexOf("quota") !== -1 || message.indexOf("storage") !== -1 || message.indexOf("disk") !== -1;
+  }
+
   function getJobs() {
     var jobs = parseJson(localStorage.getItem(STORAGE_KEY), []);
     return Array.isArray(jobs) ? jobs : [];
   }
 
+  function cleanupJobsFromList(jobs) {
+    var now = Date.now();
+
+    return (Array.isArray(jobs) ? jobs.slice() : []).map(function (job) {
+      var normalized = normalizeJob(job);
+
+      if (normalized.status === "running" && now - normalized.updatedAt > STALE_RUNNING_MS) {
+        normalized.status = "interrupted";
+        normalized.updatedAt = now;
+      }
+
+      return normalized;
+    }).filter(function (job) {
+      if (job.status === "done" && now - job.updatedAt > DONE_RETENTION_MS) {
+        return false;
+      }
+      if (job.status === "error" && now - job.updatedAt > ERROR_RETENTION_MS) {
+        return false;
+      }
+      return true;
+    });
+  }
+
+  function cleanupJobs() {
+    var jobs = getJobs();
+    var cleaned = cleanupJobsFromList(jobs);
+    if (cleaned.length !== jobs.length) {
+      saveJobs(cleaned);
+    }
+    return cleaned;
+  }
+
+  function reduceJobsForStorage(jobs) {
+    var activeStatuses = { pending: true, running: true, interrupted: true };
+    var active = [];
+    var error = [];
+    var done = [];
+    var others = [];
+
+    (Array.isArray(jobs) ? jobs.slice() : []).forEach(function (job) {
+      var normalized = normalizeJob(job);
+
+      if (activeStatuses[normalized.status]) {
+        active.push(normalized);
+        return;
+      }
+      if (normalized.status === "error") {
+        error.push(normalized);
+        return;
+      }
+      if (normalized.status === "done") {
+        done.push(normalized);
+        return;
+      }
+      others.push(normalized);
+    });
+
+    function sortByUpdatedAt(list) {
+      return list.sort(function (a, b) {
+        return b.updatedAt - a.updatedAt;
+      });
+    }
+
+    active = sortByUpdatedAt(active).slice(0, MAX_STORED_JOBS);
+    error = sortByUpdatedAt(error).slice(0, MAX_ERROR_JOBS);
+    done = sortByUpdatedAt(done).slice(0, MAX_DONE_JOBS);
+    others = sortByUpdatedAt(others).slice(0, MAX_DONE_JOBS);
+
+    var stored = active.slice();
+
+    [error, done, others].forEach(function (list) {
+      list.forEach(function (job) {
+        if (stored.length < MAX_STORED_JOBS) {
+          stored.push(job);
+        }
+      });
+    });
+
+    return stored.map(sanitizeJobForStorage);
+  }
+
   function saveJobs(jobs) {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(Array.isArray(jobs) ? jobs.slice(-120) : []));
+    jobs = cleanupJobsFromList(jobs);
+    var storedJobs = reduceJobsForStorage(jobs);
+
+    try {
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(storedJobs));
+      return;
+    } catch (error) {
+      if (!isQuotaExceeded(error)) {
+        console.warn("API job storage failed.", error);
+        return;
+      }
+    }
+
+    try {
+      var withoutDone = reduceJobsForStorage(jobs.filter(function (job) {
+        return normalizeJob(job).status !== "done";
+      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutDone));
+      return;
+    } catch (error) {
+      if (!isQuotaExceeded(error)) {
+        console.warn("API job storage failed after removing done jobs.", error);
+        return;
+      }
+    }
+
+    try {
+      var withoutDoneError = reduceJobsForStorage(jobs.filter(function (job) {
+        var status = normalizeJob(job).status;
+        return status !== "done" && status !== "error";
+      }));
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(withoutDoneError));
+      return;
+    } catch (error) {
+      if (!isQuotaExceeded(error)) {
+        console.warn("API job storage failed after removing done and error jobs.", error);
+        return;
+      }
+    }
+
+    try {
+      var fallback = (Array.isArray(jobs) ? jobs.slice() : []).filter(function (job) {
+        var status = normalizeJob(job).status;
+        return status === "pending" || status === "running" || status === "interrupted";
+      }).sort(function (a, b) {
+        return normalizeJob(b).updatedAt - normalizeJob(a).updatedAt;
+      }).slice(0, MAX_STORED_JOBS).map(function (job) {
+        var minimal = sanitizeJobForStorage(job);
+        minimal.beforeMessages = { beforeMessageCount: minimal.beforeMessages.beforeMessageCount || minimal.beforeMessages.count || 0, lastMessagePreview: minimal.beforeMessages.lastMessagePreview || "" };
+        minimal.afterMessages = { afterMessageCount: minimal.afterMessages.afterMessageCount || minimal.afterMessages.count || 0, lastMessagePreview: minimal.afterMessages.lastMessagePreview || "" };
+        return minimal;
+      });
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(fallback));
+      return;
+    } catch (error) {
+      console.warn("API job storage failed after fallback compaction.", error);
+    }
   }
 
   function createId(prefix) {
@@ -54,8 +295,8 @@
       mode: String(job.mode || "chat"),
       status: String(job.status || "pending"),
       requestSnapshot: job.requestSnapshot && typeof job.requestSnapshot === "object" ? job.requestSnapshot : {},
-      beforeMessages: Array.isArray(job.beforeMessages) ? job.beforeMessages : [],
-      afterMessages: Array.isArray(job.afterMessages) ? job.afterMessages : [],
+      beforeMessages: normalizeMessagesField(job.beforeMessages),
+      afterMessages: normalizeMessagesField(job.afterMessages),
       generationId: String(job.generationId || createGenerationId()),
       createdAt: Number(job.createdAt) || now,
       updatedAt: Number(job.updatedAt) || now,
@@ -174,7 +415,7 @@
       result = await handler(job);
       updateJob(job.id, {
         status: "done",
-        afterMessages: result && Array.isArray(result.afterMessages) ? result.afterMessages : job.afterMessages,
+        afterMessages: [],
         error: ""
       });
       return result;
@@ -445,6 +686,17 @@
     flushChatHistorySave: flushChatHistorySave,
     saveOfflineSessionDebounced: saveOfflineSessionDebounced,
     flushAll: flushAll,
+    cleanupJobs: cleanupJobs,
+    clearFinishedJobs: function () {
+      var jobs = getJobs().filter(function (job) {
+        return normalizeJob(job).status !== "done" && normalizeJob(job).status !== "error";
+      });
+      saveJobs(jobs);
+    },
+    getStorageSize: function () {
+      var data = localStorage.getItem(STORAGE_KEY);
+      return data ? data.length : 0;
+    },
     hasGeneratedOutput: hasGeneratedOutput
   };
 })(window, document);
