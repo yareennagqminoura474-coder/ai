@@ -977,7 +977,7 @@
     var kind = money && (money.moneyType || money.type);
     var recordType;
 
-    if (!window.AppStorage.addWalletLedger || !amount || amount <= 0 || !direction) {
+    if (!window.AppStorage.addWalletLedger || !Number.isFinite(amount) || amount < 0.01 || !direction) {
       return;
     }
 

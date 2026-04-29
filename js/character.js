@@ -33,6 +33,26 @@
     return amount.toFixed(2);
   }
 
+  function normalizeMoneyAmount(value) {
+    var text = String(value === undefined || value === null ? "" : value).trim();
+    var amount;
+
+    if (!text) {
+      return "";
+    }
+
+    amount = Number(text);
+    if (!Number.isFinite(amount) || amount < 0.01) {
+      return "";
+    }
+
+    return amount.toFixed(2);
+  }
+
+  function hasValidMoneyAmount(message) {
+    return Boolean(message && normalizeMoneyAmount(message.amount));
+  }
+
   function normalizeDisplayText(text) {
     if (window.AIService && window.AIService.normalizeAiMessageText) {
       return window.AIService.normalizeAiMessageText(text);
@@ -1040,8 +1060,8 @@
   }
 
   function isStandaloneMessage(message) {
-    return message.type === "redPacket"
-      || message.type === "transfer"
+    return (message.type === "redPacket" && hasValidMoneyAmount(message))
+      || (message.type === "transfer" && hasValidMoneyAmount(message))
       || message.type === "location"
       || message.type === "emoji"
       || message.type === "image"
@@ -1153,6 +1173,10 @@
   }
 
   function renderRedPacketMessage(message) {
+    if (!hasValidMoneyAmount(message)) {
+      return escapeHtml(normalizeDisplayText(message.content || ""));
+    }
+
     var canOperate = canOperateIncomingMoneyMessage(message);
     var closed = isMoneyMessageClosed(message);
     return [
@@ -1168,13 +1192,18 @@
   }
 
   function renderTransferMessage(message) {
+    var amount = normalizeMoneyAmount(message.amount);
+    if (!amount) {
+      return escapeHtml(normalizeDisplayText(message.content || message.note || ""));
+    }
+
     var canOperate = canOperateIncomingMoneyMessage(message);
     var closed = isMoneyMessageClosed(message);
     return [
       '<div class="message-special-wrapper transfer-message-card message-detail-trigger' + (closed ? " received" : "") + '" role="button" tabindex="0" data-message-id="' + escapeHtml(message.id || "") + '">',
       '  <span class="money-card-icon">¥</span>',
       '  <span class="money-card-main">',
-      "    <strong>¥" + escapeHtml(message.amount || "0.00") + "</strong>",
+      "    <strong>¥" + escapeHtml(amount) + "</strong>",
       "    <em>" + escapeHtml(message.note || "转账") + "</em>",
       "    <small>微信转账</small>",
       renderMoneyStatusOrActions(message, canOperate, "收款"),
@@ -2319,16 +2348,29 @@
     }
 
     if (type === "redPacket") {
-      message.amount = source.amount || "0.00";
-      message.status = source.status || "pending";
-      message.content = source.content || "恭喜发财，大吉大利";
+      message.amount = normalizeMoneyAmount(source.amount);
+      if (!message.amount) {
+        message.type = "text";
+        message.status = "";
+        message.content = source.content || "";
+      } else {
+        message.status = source.status || "pending";
+        message.content = source.content || "恭喜发财，大吉大利";
+      }
     }
 
     if (type === "transfer") {
-      message.amount = source.amount || "0.00";
-      message.note = source.note || "";
-      message.status = source.status || "pending";
-      message.content = source.content || "转账";
+      message.amount = normalizeMoneyAmount(source.amount);
+      if (!message.amount) {
+        message.type = "text";
+        message.note = "";
+        message.status = "";
+        message.content = source.content || source.note || "";
+      } else {
+        message.note = source.note || "";
+        message.status = source.status || "pending";
+        message.content = source.content || "转账";
+      }
     }
 
     message.content = normalizeDisplayText(message.content || source.content || "");

@@ -587,9 +587,12 @@
           "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
           "",
           buildAuxiliaryReturnRule(requestOptions),
-          "messages 是显示给用户的手机聊天气泡，本轮必须至少 10 条；每条要短，多条之间自然衔接，接住最近上下文，不要因为用户话短就只回 1 到 3 条。",
+          "messages 是显示给用户的手机聊天气泡，本轮必须至少 10 条；红包/转账卡片不计入这 10 条。每条要短，多条之间自然衔接，接住最近上下文，不要因为用户话短就只回 1 到 3 条。",
           "你可以使用的消息类型：text 普通文字，voice 语音消息，emoji 表情，image 虚拟图片描述卡片，location 虚拟位置，redPacket 模拟红包，transfer 模拟转账。",
-          "普通聊天以 text 为主，只有剧情/语境合适时才使用特殊消息。红包和转账只是模拟 UI，不涉及真实支付；金额必须是正数，并由角色人设、关系、剧情和钱包语境决定。",
+          "普通聊天以 text 为主，只有剧情/语境合适时才使用特殊消息。除非角色人设、关系和当前剧情真的会这么做，否则不要主动发红包/转账。",
+          "一旦发红包/转账，amount 必须是大于 0 的数字，不能省略，不能为 0，不能固定 20；金额、备注和后续说话必须符合角色身份、经济能力、关系亲疏和当前情绪。",
+          "金额要像真人会发的金额，例如 6.66、8.88、52、88、188，也可以很小或很大，但必须有剧情理由和人设理由；不要随机乱给。",
+          "角色不要像系统在解释转账，不要出现“系统默认”“助手弄错”这类出戏话；收款/退回后的回复也要像角色本人反应，不要客服味。",
           "如果最近用户发给角色红包或转账，角色必须按本人性格和关系决定收下或退回；在 JSON 顶层返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
           "发表情时优先使用默认 emoji 或用户已导入的图片表情；如果没有可用图片表情，就用文本 emoji。",
           "发图片时只返回图片描述卡片，不生成真实图片。",
@@ -649,14 +652,18 @@
       buildBodyStatePrompt(requestOptions),
       "",
       "群聊生成规则",
-      "一次性生成至少 10 条连续群聊消息，只调用一次 API；冷场、无人想接或话题结束时也不能返回空数组，要让角色按各自人设自然接住。",
+      "一次性生成至少 10 条连续群聊消息，只调用一次 API；红包/转账卡片不计入这 10 条。冷场、无人想接或话题结束时也不能返回空数组，要让角色按各自人设自然接住。",
       "消息必须按真实聊天顺序排列，后一条要接住上一条。有多人自然参与即可，不要为了凑人数强行发言。",
       "不要固定轮流，不要让同一个角色包揽全部消息。允许同一个角色连续说 1 到 3 条，但随后要有其他角色接话。",
       "可以只有部分角色发言，不一定所有角色都要说话；允许同一个角色连续说 1 到 3 条，但不要让同一个角色包揽所有消息。",
       "每个角色都必须保持自己的人设，不要混淆角色身份。",
       "可以插话、接话、反驳、补充、转移话题，内容要像真实群聊，每条 content 控制在手机气泡长度。",
       "可用消息类型：text、voice、emoji、image、location、redPacket、transfer。普通聊天以 text 为主，特殊消息只在语境合适时使用。",
-      "红包和转账只是模拟 UI，不涉及真实支付；金额必须是正数，并由角色人设、群内关系、剧情和钱包语境决定；发图片只返回图片描述卡片，不生成真实图片。",
+      "红包和转账只是模拟 UI，不涉及真实支付；除非角色人设、关系和当前剧情真的会这么做，否则不要主动发红包/转账。",
+      "一旦发红包/转账，amount 必须是大于 0 的数字，不能省略，不能为 0，不能固定 20；金额、备注和后续说话必须符合角色身份、经济能力、群内关系亲疏和当前情绪。",
+      "金额要像真人会发的金额，例如 6.66、8.88、52、88、188，也可以很小或很大，但必须有剧情理由和人设理由；不要随机乱给。",
+      "角色不要像系统在解释转账，不要出现“系统默认”“助手弄错”这类出戏话；收款/退回后的回复也要像角色本人反应，不要客服味。",
+      "发图片只返回图片描述卡片，不生成真实图片。",
       "如果最近用户在群里发了红包或转账，群成员要按各自人设决定收下或退回；可在 JSON 顶层返回 moneyDecisions 数组，也可返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
       buildThoughtGenerationRules("group"),
       buildAuxiliaryReturnRule(requestOptions),
@@ -970,8 +977,9 @@
           formatChatMemoryList(chatMemories) || "暂无",
           buildMemorySummaryPrompt(context),
           buildBodyStatePrompt(context),
-          "events 本轮必须至少返回 10 条，安全上限 50 条。action 是旁白/动作描写，speech 是角色说话；用自然动作、停顿和接话推进，不要返回空数组。",
-          "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":37.5,\"direction\":\"income|expense\",\"note\":\"备注\"}；金额必须是正数，由人设、关系和剧情决定。",
+          "events 本轮必须至少返回 10 条，安全上限 50 条；money 只是附加金额事件，不计入这 10 条。action 是旁白/动作描写，speech 是角色说话；用自然动作、停顿和接话推进，不要返回空数组。",
+          "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":37.5,\"direction\":\"income|expense\",\"note\":\"备注\"}；除非角色人设、关系和当前剧情真的会这么做，否则不要主动发红包/转账。",
+          "一旦发红包/转账，amount 必须是大于 0 的数字，不能省略，不能为 0，不能固定 20；金额、备注和后续说话必须符合角色身份、经济能力、关系亲疏、当前情绪和剧情理由。",
           "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           "动作描写要短而有画面感；角色发言要像真实当面对话，不要写成长作文。",
           buildThoughtGenerationRules(mode === "group" ? "group" : "private"),
@@ -1108,8 +1116,9 @@
           "B/C. 参与角色信息",
           participantLines.join("\n"),
           "",
-          "每次推进必须生成至少 10 条 events，安全上限 50 条；形成一小段自然剧情，不要返回空数组。",
-          "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":12.66,\"direction\":\"income|expense\",\"note\":\"备注\"}；金额必须是正数，由人设、关系和剧情决定。",
+          "每次推进必须生成至少 10 条 events，安全上限 50 条；money 只是附加金额事件，不计入这 10 条。形成一小段自然剧情，不要返回空数组。",
+          "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":12.66,\"direction\":\"income|expense\",\"note\":\"备注\"}；除非角色人设、关系和当前剧情真的会这么做，否则不要主动发红包/转账。",
+          "一旦发红包/转账，amount 必须是大于 0 的数字，不能省略，不能为 0，不能固定 20；金额、备注和后续说话必须符合角色身份、经济能力、关系亲疏、当前情绪和剧情理由。",
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
           "角色说话不要太长，动作描写像小说旁白但不要冗长。",
           "私聊模式只围绕当前角色和用户互动；群聊模式中多个角色可以自然互动。",
@@ -2020,7 +2029,7 @@
       return reply && reply.content;
     });
 
-    if (filtered.length < settings.min) {
+    if (countReplyItemsForMinimum(filtered) < settings.min) {
       filtered = expandReplyListToMinimum(filtered, settings);
     }
 
@@ -2035,7 +2044,7 @@
     source.forEach(function (reply) {
       var parts;
 
-      if (result.length >= target) {
+      if (countReplyItemsForMinimum(result) >= target) {
         result.push(reply);
         return;
       }
@@ -2059,6 +2068,12 @@
     });
 
     return result;
+  }
+
+  function countReplyItemsForMinimum(replies) {
+    return (Array.isArray(replies) ? replies : []).filter(function (reply) {
+      return reply && reply.content && reply.type !== "redPacket" && reply.type !== "transfer";
+    }).length;
   }
 
   function normalizeReplyItem(reply, options) {
@@ -2096,14 +2111,28 @@
       reply.image = normalizeImagePayload(source.image);
       content = content || "[图片]";
     } else if (type === "redPacket") {
-      content = content || "恭喜发财，大吉大利";
       reply.amount = normalizeAiAmount(source.amount || source.moneyAmount || source.value);
-      reply.status = source.status ? String(source.status) : "sent";
+      if (!reply.amount) {
+        reply.type = "text";
+        content = String(source.content || source.text || source.note || "").trim();
+        delete reply.amount;
+        delete reply.status;
+      } else {
+        content = content || "恭喜发财，大吉大利";
+        reply.status = source.status ? String(source.status) : "sent";
+      }
     } else if (type === "transfer") {
-      content = content || "转账";
       reply.amount = normalizeAiAmount(source.amount || source.moneyAmount || source.value);
-      reply.note = String(source.note || "");
-      reply.status = source.status ? String(source.status) : "pending";
+      if (!reply.amount) {
+        reply.type = "text";
+        content = String(source.content || source.text || source.note || "").trim();
+        delete reply.amount;
+        delete reply.status;
+      } else {
+        content = content || "转账";
+        reply.note = String(source.note || "");
+        reply.status = source.status ? String(source.status) : "pending";
+      }
     }
 
     reply.content = normalizeAiMessageText(content);
@@ -2155,8 +2184,11 @@
 
   function normalizeAiAmount(amount) {
     var value = Number(amount);
-    if (!Number.isFinite(value) || value <= 0) {
-      return "0.00";
+    if (String(amount === undefined || amount === null ? "" : amount).trim() === "") {
+      return "";
+    }
+    if (!Number.isFinite(value) || value < 0.01) {
+      return "";
     }
     return value.toFixed(2);
   }
@@ -2272,11 +2304,11 @@
     }
 
     if (type === "redPacket") {
-      return "[红包] 祝福语：" + (message.content || "恭喜发财，大吉大利") + "，金额：¥" + (message.amount || "0.00") + "，状态：" + getMoneyStatusText(message);
+      return "[红包] 祝福语：" + (message.content || "恭喜发财，大吉大利") + "，金额：" + formatMoneyForPrompt(message.amount) + "，状态：" + getMoneyStatusText(message);
     }
 
     if (type === "transfer") {
-      return "[转账] 金额：¥" + (message.amount || "0.00") + "，备注：" + (message.note || "转账") + "，状态：" + getMoneyStatusText(message);
+      return "[转账] 金额：" + formatMoneyForPrompt(message.amount) + "，备注：" + (message.note || "转账") + "，状态：" + getMoneyStatusText(message);
     }
 
     if (type === "pat") {
@@ -2296,6 +2328,11 @@
     }
 
     return String(message && message.content || "");
+  }
+
+  function formatMoneyForPrompt(amount) {
+    var normalized = normalizeAiAmount(amount);
+    return normalized ? "¥" + normalized : "未记录有效金额";
   }
 
   function getMoneyStatusText(message) {

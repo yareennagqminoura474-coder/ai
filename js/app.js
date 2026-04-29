@@ -2089,6 +2089,22 @@
     return amount.toFixed(2);
   }
 
+  function normalizeMoneyAmount(value) {
+    var text = String(value === undefined || value === null ? "" : value).trim();
+    var amount;
+
+    if (!text) {
+      return "";
+    }
+
+    amount = Number(text);
+    if (!Number.isFinite(amount) || amount < 0.01) {
+      return "";
+    }
+
+    return amount.toFixed(2);
+  }
+
   function renderRecentChatItem(item) {
     return [
       '<article class="recent-chat-item' + (item.pinned ? " pinned" : "") + '">',
@@ -3263,12 +3279,12 @@
     }
 
     if (message.type === "redPacket") {
-      showMoneyDetail("红包详情", message.content || "恭喜发财，大吉大利", "¥" + (message.amount || "0.00"), getMoneyMessageStatusText(message));
+      showMoneyDetail("红包详情", message.content || "恭喜发财，大吉大利", formatMoneyDetailAmount(message.amount), getMoneyMessageStatusText(message));
       return;
     }
 
     if (message.type === "transfer") {
-      showMoneyDetail("转账详情", message.note || "转账", "¥" + (message.amount || "0.00"), getMoneyMessageStatusText(message));
+      showMoneyDetail("转账详情", message.note || "转账", formatMoneyDetailAmount(message.amount), getMoneyMessageStatusText(message));
       return;
     }
 
@@ -3290,6 +3306,11 @@
       '  <button type="button" class="full-button" data-close-sheet>关闭</button>',
       "</div>"
     ].join(""), bindSheetCloseButtons);
+  }
+
+  function formatMoneyDetailAmount(amount) {
+    var normalized = normalizeMoneyAmount(amount);
+    return normalized ? "¥" + normalized : "金额无效";
   }
 
   function getMoneyMessageStatusText(message) {
