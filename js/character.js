@@ -1157,11 +1157,11 @@
 
   function renderStandaloneMessage(message) {
     if (message.type === "redPacket") {
-      return renderRedPacketMessage(message);
+      return renderRedPacketCard(message);
     }
 
     if (message.type === "transfer") {
-      return renderTransferMessage(message);
+      return renderTransferCard(message);
     }
 
     if (message.type === "location") {
@@ -1259,7 +1259,7 @@
     return location.address || "常去的地方";
   }
 
-  function renderRedPacketMessage(message) {
+  function renderRedPacketCard(message) {
     var source = message || {};
     message = normalizeMoneyMessage(message);
     if (!message) {
@@ -1286,7 +1286,7 @@
     ].join("");
   }
 
-  function renderTransferMessage(message) {
+  function renderTransferCard(message) {
     var source = message || {};
     message = normalizeMoneyMessage(message);
     var amount = message ? message.amount : "";
@@ -3744,6 +3744,7 @@
     editActiveCharacter: editActiveCharacter,
     clearActiveChatHistory: clearActiveChatHistory,
     deleteActiveCharacter: deleteActiveCharacter,
+    toggleActiveCharacterBlock: toggleActiveCharacterBlock,
     openActiveCharacterOffline: openActiveCharacterOffline,
     updateInlineOfflineUi: updateInlineOfflineUi,
     openActivePrivateSettings: openActivePrivateSettings,

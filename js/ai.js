@@ -321,7 +321,7 @@
       "线下模式里 action 和 speech 要自然交替：动作有画面但别长篇，发言像当面脱口而出。",
       isOffline ? "线下模式要更像现场反应：可以被动作打断，可以边做事边短促回话，不要把现场写成系统旁白说明。" : "",
       isReenter ? "重回/重新生成时只改写最近一轮回复，仍然要像角色当下重新接住那句话，不要解释你在重写。" : "",
-      "一条回复可以拆成多条短气泡，像真人连续发消息；但只能按完整自然句或换行拆，不能按逗号、顿号、分号、冒号把一句话硬切成多条。",
+      "可以连续生成多条短气泡，像真人连续发消息；但不要把同一句话或同一个动作切碎成多条，不能按逗号、顿号、分号、冒号硬切。",
       "",
       "角色大脑规则（只在内部判断，绝不能写进 content）：",
       "角色先站在自己的利益、情绪、面子和关系位置上反应，不是为了满足用户而说话。",
@@ -591,7 +591,7 @@
     }
 
     parts = value
-      .split(/(?:\n+|(?<=[\u3002\uFF01\uFF1F\uFF5E\u2026\uFF1B;.!?]))/g)
+      .split(/(?:\n+|(?<=[\u3002\uFF01\uFF1F\uFF5E\u2026.!?]))/g)
       .map(function (part) {
         return part.trim();
       })
@@ -2421,10 +2421,6 @@
     }
 
     if (countReplyItemsForMinimum(filtered) < settings.min) {
-      filtered = expandReplyListToMinimum(filtered, settings);
-    }
-
-    if (countReplyItemsForMinimum(filtered) < settings.min) {
       filtered = filtered.concat(createFallbackReplyItems(settings, filtered));
     }
 
@@ -2525,37 +2521,7 @@
   }
 
   function expandReplyListToMinimum(replies, settings) {
-    var result = [];
-    var source = Array.isArray(replies) ? replies : [];
-    var target = Math.min(Number(settings.max) || MAX_CHAT_REPLY_COUNT, Math.max(Number(settings.min) || 0, 0));
-
-    source.forEach(function (reply) {
-      var parts;
-
-      if (countReplyItemsForMinimum(result) >= target) {
-        result.push(reply);
-        return;
-      }
-
-      if (!reply || reply.type !== "text") {
-        result.push(reply);
-        return;
-      }
-
-      parts = splitTextContentForTopUp(reply.content);
-      if (parts.length <= 1) {
-        result.push(reply);
-        return;
-      }
-
-      parts.forEach(function (content) {
-        result.push(Object.assign({}, reply, {
-          content: content
-        }));
-      });
-    });
-
-    return result;
+    return Array.isArray(replies) ? replies : [];
   }
 
   function countReplyItemsForMinimum(replies) {
@@ -2789,7 +2755,8 @@
 
   function normalizeAiMoneyReply(reply) {
     if (window.AppStorage && window.AppStorage.normalizeMoneyMessage) {
-      return window.AppStorage.normalizeMoneyMessage(reply);
+      reply = window.AppStorage.normalizeMoneyMessage(reply);
+      return reply && Number(reply.amount) !== 20 ? reply : null;
     }
 
     reply.amount = normalizeAiAmount(reply.amount);
@@ -2806,6 +2773,9 @@
       return "";
     }
     if (!Number.isFinite(value) || value < 0.01) {
+      return "";
+    }
+    if (Math.round(value * 100) === 2000) {
       return "";
     }
     return value.toFixed(2);

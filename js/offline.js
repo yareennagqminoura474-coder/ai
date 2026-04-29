@@ -53,6 +53,25 @@
     });
   }
 
+  function normalizeOfflineHistoryEventForRender(event) {
+    var source = event && typeof event === "object" ? event : { content: event };
+    var content = normalizeDisplayText(source.content || "");
+
+    if (source.role === "user" || source.type === "user") {
+      return Object.assign({}, source, {
+        role: "user",
+        type: "user",
+        content: content
+      });
+    }
+
+    return Object.assign({}, source, {
+      type: source.type === "speech" ? "speech" : "action",
+      characterId: source.type === "speech" ? source.characterId : "",
+      content: content
+    });
+  }
+
   function getCharacterById(characterId) {
     return window.AppStorage.getCharacters().find(function (character) {
       return character.id === characterId;
@@ -189,7 +208,9 @@
   function renderOfflineMessages() {
     var wrap = getElement("offlineMessages");
     var session = getCurrentSession();
-    var history = session ? session.history || [] : [];
+    var history = session ? (session.history || []).map(normalizeOfflineHistoryEventForRender).filter(function (event) {
+      return event.content;
+    }) : [];
 
     if (!wrap) {
       return;
