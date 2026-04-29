@@ -2452,6 +2452,7 @@
     getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
     getElement("chatOfflineBtn").addEventListener("click", window.CharacterManager.openActiveCharacterOffline);
+    addClick("chatBlockBtn", window.CharacterManager.toggleActiveCharacterBlock);
     getElement("privateOfflineExitBtn").addEventListener("click", function () {
       window.OfflineManager.disableInlineOffline();
     });
@@ -6368,6 +6369,9 @@
     loadSettingsIntoForm();
     refreshHomeSummary();
     setActivePage("homeScreen");
+    if (window.AppApiJobs && window.AppApiJobs.resumeInterruptedJobs) {
+      window.AppApiJobs.resumeInterruptedJobs();
+    }
   }
 
   function showSettingsTip(message, isError) {
@@ -6437,7 +6441,14 @@
     }
 
     if (context.bodyStateEnabled && result && result.bodyState && window.AppStorage.saveBodyState) {
-      window.AppStorage.saveBodyState(context.targetType, context.targetId, result.bodyState);
+      if (context.generationId && window.AppStorage.saveBodyStateSnapshot) {
+        window.AppStorage.saveBodyStateSnapshot(context.generationId, context.targetType, context.targetId, context.bodyState || {});
+      }
+      window.AppStorage.saveBodyState(context.targetType, context.targetId, Object.assign({}, result.bodyState, {
+        generationId: context.generationId || "",
+        targetType: context.targetType,
+        targetId: context.targetId
+      }));
     }
   }
 

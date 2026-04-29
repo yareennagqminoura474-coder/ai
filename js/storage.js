@@ -13,6 +13,8 @@
     emojiPacks: "myAiApp.emojiPacks",
     worldBooks: "myAiApp.worldBooks",
     thoughts: "myAiApp.thoughts",
+    blockRelations: "myAiApp.blockRelations",
+    bodyStateSnapshots: "myAiApp.bodyStateSnapshots",
     diaries: "myAiApp.diaries",
     userProfile: "myAiApp.userProfile",
     userPersonas: "myAiApp.userPersonas",
@@ -21,6 +23,7 @@
     moments: "myAiApp.moments",
     inlineOffline: "myAiApp.inlineOffline",
     wallet: "myAiApp.wallet",
+    moneyMessageMigrationVersion: "myAiApp.moneyMessageMigrationVersion",
     shop: "myAiApp.shop",
     recentHidden: "myAiApp.recentHidden",
     theme: "myAiApp.theme",
@@ -30,6 +33,12 @@
     groupChatPrefix: "myAiApp.groupChat.",
     offlinePrefix: "myAiApp.offline."
   };
+  var debouncedPrivateChatSaves = {};
+  var debouncedPrivateChatTimers = {};
+  var debouncedGroupChatSaves = {};
+  var debouncedGroupChatTimers = {};
+  var debouncedOfflineSaves = {};
+  var debouncedOfflineTimers = {};
 
   function parseJson(value, fallback) {
     if (!value) {
@@ -46,6 +55,13 @@
 
   function createId(prefix) {
     return String(prefix || "id") + "_" + Date.now() + "_" + Math.random().toString(36).slice(2, 8);
+  }
+
+  function normalizeGenerationIdList(generationIds) {
+    var list = Array.isArray(generationIds) ? generationIds : [generationIds];
+    return list.map(function (generationId) {
+      return String(generationId || "");
+    }).filter(Boolean);
   }
 
   function roundAmount(value) {
@@ -100,31 +116,169 @@
 
   function normalizeMoneyMessage(message) {
     var source = message && typeof message === "object" ? message : null;
-    var amount;
-    var amountFromFallback = false;
+    var mismatch;
 
     if (!source || (source.type !== "redPacket" && source.type !== "transfer")) {
       return source;
     }
 
-    amount = normalizeMoneyAmount(source.amount);
-    if (!amount) {
-      amount = normalizeMoneyAmount(source.content);
-      amountFromFallback = Boolean(amount);
-    }
-    if (!amount) {
-      amount = normalizeMoneyAmount(source.note);
-      amountFromFallback = Boolean(amount);
-    }
-    if (!amount) {
+    mismatch = detectMoneyAmountMismatch(source);
+    if (!mismatch.amount) {
       return null;
     }
 
-    source.amount = amount;
-    if (amountFromFallback && isMoneyAmountOnlyText(source.content)) {
+    source.amount = mismatch.amount;
+    if (mismatch.cleanedContent !== undefined) {
+      source.content = mismatch.cleanedContent;
+    }
+    if (mismatch.cleanedNote !== undefined) {
+      source.note = mismatch.cleanedNote;
+    }
+    if (mismatch.repairedFromFallback && isMoneyAmountOnlyText(source.content)) {
       source.content = source.type === "redPacket" ? "恭喜发财，大吉大利" : "转账";
     }
     return source;
+  }
+
+  function detectMoneyAmountMismatch(message) {
+    var source = message && typeof message === "object" ? message : {};
+    var amountInfo = extractMoneyAmountInfo(source.amount);
+    var contentInfo = extractMoneyAmountInfo(source.content);
+    var noteInfo = extractMoneyAmountInfo(source.note);
+    var suspicious = isSuspiciousMessageAmount(amountInfo);
+    var fallback = chooseMoneyFallbackAmount(amountInfo, contentInfo, noteInfo);
+    var result = {
+      amount: amountInfo.normalized,
+      amountInfo: amountInfo,
+      contentAmount: contentInfo.normalized,
+      noteAmount: noteInfo.normalized,
+      repairedFromFallback: false
+    };
+
+    if (suspicious && fallback) {
+      result.amount = fallback.normalized;
+      result.repairedFromFallback = true;
+      result.source = fallback.source;
+      return result;
+    }
+
+    if (!amountInfo.normalized) {
+      result.amount = "";
+      return result;
+    }
+
+    if (hasConflictingAmount(amountInfo, contentInfo)) {
+      result.cleanedContent = cleanConflictingMoneyText(source.content, source.type, "content");
+    }
+    if (hasConflictingAmount(amountInfo, noteInfo)) {
+      result.cleanedNote = cleanConflictingMoneyText(source.note, source.type, "note");
+    }
+
+    return result;
+  }
+
+  function extractMoneyAmountInfo(value) {
+    var text = String(value === undefined || value === null ? "" : value).trim();
+    var compact;
+    var match;
+    var amount;
+
+    if (typeof value === "number") {
+      return {
+        raw: value,
+        value: Number.isFinite(value) ? roundAmount(value) : NaN,
+        normalized: normalizeMoneyAmount(value),
+        hasNumber: Number.isFinite(value)
+      };
+    }
+
+    if (!text) {
+      return { raw: value, value: NaN, normalized: "", hasNumber: false };
+    }
+
+    compact = text
+      .replace(/[￥¥]/g, "")
+      .replace(/元/g, "")
+      .replace(/,/g, "")
+      .replace(/\s+/g, "");
+    match = compact.match(/[-+]?\d+(?:\.\d+)?/);
+    if (!match) {
+      return { raw: value, value: NaN, normalized: "", hasNumber: false };
+    }
+
+    amount = Number(match[0]);
+    return {
+      raw: value,
+      value: Number.isFinite(amount) ? roundAmount(amount) : NaN,
+      normalized: normalizeMoneyAmount(value),
+      hasNumber: Number.isFinite(amount)
+    };
+  }
+
+  function isSuspiciousMessageAmount(amountInfo) {
+    if (!amountInfo || !amountInfo.normalized) {
+      return true;
+    }
+
+    return amountInfo.value === 0 || amountInfo.value === 20;
+  }
+
+  function chooseMoneyFallbackAmount(amountInfo, contentInfo, noteInfo) {
+    var candidates = [
+      Object.assign({ source: "content" }, contentInfo || {}),
+      Object.assign({ source: "note" }, noteInfo || {})
+    ].filter(function (item) {
+      return item.normalized;
+    });
+    var current = amountInfo && Number.isFinite(amountInfo.value) ? amountInfo.value : NaN;
+    var index;
+    var nonDefaultCandidate = null;
+
+    if (!candidates.length) {
+      return null;
+    }
+
+    for (index = 0; index < candidates.length; index += 1) {
+      if (candidates[index].value !== 20) {
+        nonDefaultCandidate = candidates[index];
+        break;
+      }
+    }
+
+    if (current === 20) {
+      if (nonDefaultCandidate) {
+        return nonDefaultCandidate;
+      }
+      return null;
+    }
+
+    if (current === 0 || !Number.isFinite(current)) {
+      return nonDefaultCandidate || candidates[0];
+    }
+
+    return null;
+  }
+
+  function hasConflictingAmount(primaryInfo, secondaryInfo) {
+    if (!primaryInfo || !secondaryInfo || !primaryInfo.normalized || !secondaryInfo.normalized) {
+      return false;
+    }
+
+    return primaryInfo.normalized !== secondaryInfo.normalized;
+  }
+
+  function cleanConflictingMoneyText(value, type, fieldName) {
+    var original = String(value || "");
+    var cleaned = original
+      .replace(/(?:转账金额|红包金额|金额)\s*[：:]\s*[￥¥]?\s*[-+]?\d[\d,]*(?:\.\d+)?\s*元?/g, "")
+      .replace(/\s{2,}/g, " ")
+      .trim();
+
+    if (fieldName === "content" && !cleaned && isMoneyAmountOnlyText(original)) {
+      return type === "redPacket" ? "恭喜发财，大吉大利" : "转账";
+    }
+
+    return cleaned;
   }
 
   function isMoneyAmountOnlyText(value) {
@@ -219,16 +373,139 @@
   }
 
   function getChatHistory(characterId) {
+    if (debouncedPrivateChatSaves[characterId]) {
+      return debouncedPrivateChatSaves[characterId].slice();
+    }
+
     var messages = parseJson(localStorage.getItem(STORAGE_KEYS.chatPrefix + characterId), []);
     return Array.isArray(messages) ? messages : [];
   }
 
   function saveChatHistory(characterId, messages) {
+    if (debouncedPrivateChatTimers[characterId]) {
+      clearTimeout(debouncedPrivateChatTimers[characterId]);
+      delete debouncedPrivateChatTimers[characterId];
+    }
+    delete debouncedPrivateChatSaves[characterId];
     localStorage.setItem(STORAGE_KEYS.chatPrefix + characterId, JSON.stringify(messages || []));
+  }
+
+  function saveChatHistoryDebounced(characterId, messages, delay) {
+    if (!characterId) {
+      return;
+    }
+
+    debouncedPrivateChatSaves[characterId] = Array.isArray(messages) ? messages.slice() : [];
+    if (debouncedPrivateChatTimers[characterId]) {
+      clearTimeout(debouncedPrivateChatTimers[characterId]);
+    }
+    debouncedPrivateChatTimers[characterId] = setTimeout(function () {
+      flushChatHistorySave(characterId);
+    }, Math.max(40, Number(delay) || 120));
+  }
+
+  function flushChatHistorySave(characterId) {
+    var pending = debouncedPrivateChatSaves[characterId];
+
+    if (debouncedPrivateChatTimers[characterId]) {
+      clearTimeout(debouncedPrivateChatTimers[characterId]);
+      delete debouncedPrivateChatTimers[characterId];
+    }
+
+    if (!pending) {
+      return;
+    }
+
+    delete debouncedPrivateChatSaves[characterId];
+    localStorage.setItem(STORAGE_KEYS.chatPrefix + characterId, JSON.stringify(pending || []));
   }
 
   function deleteChatHistory(characterId) {
     localStorage.removeItem(STORAGE_KEYS.chatPrefix + characterId);
+  }
+
+  function getBlockRelations() {
+    var relations = parseJson(localStorage.getItem(STORAGE_KEYS.blockRelations), {});
+    return relations && typeof relations === "object" && !Array.isArray(relations) ? relations : {};
+  }
+
+  function saveBlockRelations(relations) {
+    localStorage.setItem(STORAGE_KEYS.blockRelations, JSON.stringify(relations || {}));
+  }
+
+  function getBlockRelationKey(characterId) {
+    return "private:" + String(characterId || "");
+  }
+
+  function normalizeBlockState(state) {
+    var source = state && typeof state === "object" ? state : {};
+    return {
+      userBlocked: Boolean(source.userBlocked),
+      characterBlocked: Boolean(source.characterBlocked),
+      userBlockReason: String(source.userBlockReason || ""),
+      characterBlockReason: String(source.characterBlockReason || ""),
+      userBlockedAt: Number(source.userBlockedAt) || 0,
+      characterBlockedAt: Number(source.characterBlockedAt) || 0,
+      lastBlockReactionAt: Number(source.lastBlockReactionAt) || 0,
+      updatedAt: Number(source.updatedAt) || 0
+    };
+  }
+
+  function getBlockState(characterId) {
+    return normalizeBlockState(getBlockRelations()[getBlockRelationKey(characterId)]);
+  }
+
+  function saveBlockState(characterId, state) {
+    var relations = getBlockRelations();
+    var key = getBlockRelationKey(characterId);
+    var normalized = normalizeBlockState(Object.assign({}, state || {}, {
+      updatedAt: Date.now()
+    }));
+
+    if (!normalized.userBlocked && !normalized.characterBlocked && !normalized.userBlockReason && !normalized.characterBlockReason) {
+      delete relations[key];
+    } else {
+      relations[key] = normalized;
+    }
+
+    saveBlockRelations(relations);
+    return relations[key] || normalizeBlockState({});
+  }
+
+  function setUserBlockedCharacter(characterId, blocked, reason) {
+    var state = getBlockState(characterId);
+    state.userBlocked = Boolean(blocked);
+    state.userBlockReason = blocked ? String(reason || state.userBlockReason || "") : "";
+    state.userBlockedAt = blocked ? Date.now() : 0;
+    return saveBlockState(characterId, state);
+  }
+
+  function setCharacterBlockedUser(characterId, blocked, reason) {
+    var state = getBlockState(characterId);
+    state.characterBlocked = Boolean(blocked);
+    state.characterBlockReason = blocked ? String(reason || state.characterBlockReason || "") : "";
+    state.characterBlockedAt = blocked ? Date.now() : 0;
+    return saveBlockState(characterId, state);
+  }
+
+  function setBlockReactionTimestamp(characterId, timestamp) {
+    var state = getBlockState(characterId);
+    state.lastBlockReactionAt = Number(timestamp) || Date.now();
+    return saveBlockState(characterId, state);
+  }
+
+  function isUserBlockedCharacter(characterId) {
+    return getBlockState(characterId).userBlocked;
+  }
+
+  function isCharacterBlockedUser(characterId) {
+    return getBlockState(characterId).characterBlocked;
+  }
+
+  function clearBlockState(characterId) {
+    var relations = getBlockRelations();
+    delete relations[getBlockRelationKey(characterId)];
+    saveBlockRelations(relations);
   }
 
   function getGroups() {
@@ -369,12 +646,51 @@
   }
 
   function getGroupChatHistory(groupId) {
+    if (debouncedGroupChatSaves[groupId]) {
+      return debouncedGroupChatSaves[groupId].slice();
+    }
+
     var messages = parseJson(localStorage.getItem(STORAGE_KEYS.groupChatPrefix + groupId), []);
     return Array.isArray(messages) ? messages : [];
   }
 
   function saveGroupChatHistory(groupId, messages) {
+    if (debouncedGroupChatTimers[groupId]) {
+      clearTimeout(debouncedGroupChatTimers[groupId]);
+      delete debouncedGroupChatTimers[groupId];
+    }
+    delete debouncedGroupChatSaves[groupId];
     localStorage.setItem(STORAGE_KEYS.groupChatPrefix + groupId, JSON.stringify(messages || []));
+  }
+
+  function saveGroupChatHistoryDebounced(groupId, messages, delay) {
+    if (!groupId) {
+      return;
+    }
+
+    debouncedGroupChatSaves[groupId] = Array.isArray(messages) ? messages.slice() : [];
+    if (debouncedGroupChatTimers[groupId]) {
+      clearTimeout(debouncedGroupChatTimers[groupId]);
+    }
+    debouncedGroupChatTimers[groupId] = setTimeout(function () {
+      flushGroupChatHistorySave(groupId);
+    }, Math.max(40, Number(delay) || 120));
+  }
+
+  function flushGroupChatHistorySave(groupId) {
+    var pending = debouncedGroupChatSaves[groupId];
+
+    if (debouncedGroupChatTimers[groupId]) {
+      clearTimeout(debouncedGroupChatTimers[groupId]);
+      delete debouncedGroupChatTimers[groupId];
+    }
+
+    if (!pending) {
+      return;
+    }
+
+    delete debouncedGroupChatSaves[groupId];
+    localStorage.setItem(STORAGE_KEYS.groupChatPrefix + groupId, JSON.stringify(pending || []));
   }
 
   function deleteGroupChatHistory(groupId) {
@@ -440,8 +756,14 @@
 
     memories = getCharacterMemory(characterId);
     memories.push({
+      id: String(memoryItem.id || createId("memory")),
       content: String(memoryItem.content),
       source: memoryItem.source || "private",
+      generationId: String(memoryItem.generationId || memoryItem.sourceGenerationId || ""),
+      sourceGenerationId: String(memoryItem.sourceGenerationId || memoryItem.generationId || ""),
+      targetType: String(memoryItem.targetType || ""),
+      targetId: String(memoryItem.targetId || ""),
+      relatedMessageIds: Array.isArray(memoryItem.relatedMessageIds) ? memoryItem.relatedMessageIds.map(String) : [],
       createdAt: Number(memoryItem.createdAt) || Date.now()
     });
 
@@ -577,6 +899,11 @@
       sourceTime: Number(source.sourceTime) || Number(source.createdAt) || now,
       type: type,
       source: source.source === "group" || source.source === "offline" ? source.source : "private",
+      generationId: String(source.generationId || source.sourceGenerationId || ""),
+      sourceGenerationId: String(source.sourceGenerationId || source.generationId || ""),
+      targetType: String(source.targetType || ""),
+      targetId: String(source.targetId || ""),
+      relatedMessageIds: Array.isArray(source.relatedMessageIds) ? source.relatedMessageIds.map(String) : [],
       createdAt: Number(source.createdAt) || now,
       updatedAt: Number(source.updatedAt) || Number(source.createdAt) || now
     };
@@ -631,6 +958,72 @@
     return store[getChatScopedKey(targetType, targetId)];
   }
 
+  function getBodyStateSnapshotStore() {
+    var snapshots = parseJson(localStorage.getItem(STORAGE_KEYS.bodyStateSnapshots), {});
+    return snapshots && typeof snapshots === "object" && !Array.isArray(snapshots) ? snapshots : {};
+  }
+
+  function saveBodyStateSnapshotStore(snapshots) {
+    localStorage.setItem(STORAGE_KEYS.bodyStateSnapshots, JSON.stringify(snapshots || {}));
+  }
+
+  function saveBodyStateSnapshot(generationId, targetType, targetId, oldBodyState) {
+    var snapshots;
+
+    if (!generationId || !targetId) {
+      return null;
+    }
+
+    snapshots = getBodyStateSnapshotStore();
+    snapshots[String(generationId)] = {
+      generationId: String(generationId),
+      targetType: targetType === "group" ? "group" : (targetType === "offline" ? "offline" : "private"),
+      targetId: String(targetId),
+      beforeSnapshot: normalizeBodyState(oldBodyState || {}),
+      createdAt: Date.now()
+    };
+    saveBodyStateSnapshotStore(snapshots);
+    return snapshots[String(generationId)];
+  }
+
+  function getBodyStateSnapshot(generationId) {
+    var source = getBodyStateSnapshotStore()[String(generationId || "")];
+
+    if (!source || typeof source !== "object") {
+      return null;
+    }
+
+    return {
+      generationId: String(source.generationId || generationId || ""),
+      targetType: source.targetType === "group" ? "group" : (source.targetType === "offline" ? "offline" : "private"),
+      targetId: String(source.targetId || ""),
+      beforeSnapshot: normalizeBodyState(source.beforeSnapshot || {}),
+      createdAt: Number(source.createdAt) || 0
+    };
+  }
+
+  function restoreBodyStateBeforeGenerationIds(targetType, targetId, generationIds) {
+    var ids = normalizeGenerationIdList(generationIds);
+    var snapshots;
+
+    if (!ids.length) {
+      return false;
+    }
+
+    snapshots = ids.map(getBodyStateSnapshot).filter(function (snapshot) {
+      return snapshot && snapshot.targetType === targetType && snapshot.targetId === String(targetId || "");
+    }).sort(function (a, b) {
+      return (b.createdAt || 0) - (a.createdAt || 0);
+    });
+
+    if (!snapshots.length) {
+      return false;
+    }
+
+    saveBodyState(targetType, targetId, snapshots[0].beforeSnapshot);
+    return true;
+  }
+
   function clearBodyState(targetType, targetId) {
     var store = getBodyStateStore();
     delete store[getChatScopedKey(targetType, targetId)];
@@ -674,6 +1067,9 @@
       restNeeded: normalizeBoolean(source.restNeeded),
       recoverySuggestion: String(source.recoverySuggestion || "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。"),
       parts: normalizedParts,
+      generationId: String(source.generationId || ""),
+      targetType: String(source.targetType || ""),
+      targetId: String(source.targetId || ""),
       updatedAt: Number(source.updatedAt) || Date.now()
     };
   }
@@ -700,6 +1096,12 @@
   }
 
   function getOfflineSession(sessionId) {
+    if (debouncedOfflineSaves[sessionId]) {
+      return Object.assign({}, debouncedOfflineSaves[sessionId], {
+        history: Array.isArray(debouncedOfflineSaves[sessionId].history) ? debouncedOfflineSaves[sessionId].history.slice() : []
+      });
+    }
+
     return parseJson(localStorage.getItem(STORAGE_KEYS.offlinePrefix + sessionId), null);
   }
 
@@ -708,7 +1110,50 @@
       return;
     }
 
+    if (debouncedOfflineTimers[session.id]) {
+      clearTimeout(debouncedOfflineTimers[session.id]);
+      delete debouncedOfflineTimers[session.id];
+    }
+    delete debouncedOfflineSaves[session.id];
     localStorage.setItem(STORAGE_KEYS.offlinePrefix + session.id, JSON.stringify(session));
+  }
+
+  function saveOfflineSessionDebounced(session, delay) {
+    if (!session || !session.id) {
+      return;
+    }
+
+    debouncedOfflineSaves[session.id] = Object.assign({}, session, {
+      history: Array.isArray(session.history) ? session.history.slice() : []
+    });
+    if (debouncedOfflineTimers[session.id]) {
+      clearTimeout(debouncedOfflineTimers[session.id]);
+    }
+    debouncedOfflineTimers[session.id] = setTimeout(function () {
+      flushOfflineSessionSave(session.id);
+    }, Math.max(40, Number(delay) || 120));
+  }
+
+  function flushOfflineSessionSave(sessionId) {
+    var pending = debouncedOfflineSaves[sessionId];
+
+    if (debouncedOfflineTimers[sessionId]) {
+      clearTimeout(debouncedOfflineTimers[sessionId]);
+      delete debouncedOfflineTimers[sessionId];
+    }
+
+    if (!pending) {
+      return;
+    }
+
+    delete debouncedOfflineSaves[sessionId];
+    localStorage.setItem(STORAGE_KEYS.offlinePrefix + sessionId, JSON.stringify(pending));
+  }
+
+  function flushAllDebouncedSaves() {
+    Object.keys(debouncedPrivateChatSaves).forEach(flushChatHistorySave);
+    Object.keys(debouncedGroupChatSaves).forEach(flushGroupChatHistorySave);
+    Object.keys(debouncedOfflineSaves).forEach(flushOfflineSessionSave);
   }
 
   function deleteOfflineSession(sessionId) {
@@ -905,6 +1350,10 @@
       content: String(source.content || ""),
       mood: String(source.mood || ""),
       visibleSummary: String(source.visibleSummary || source.summary || ""),
+      generationId: String(source.generationId || source.sourceGenerationId || ""),
+      sourceGenerationId: String(source.sourceGenerationId || source.generationId || ""),
+      targetType: String(source.targetType || source.source || ""),
+      targetId: String(source.targetId || source.chatId || ""),
       relatedMessageIds: Array.isArray(source.relatedMessageIds) ? source.relatedMessageIds.map(String) : [],
       readAt: source.readAt !== undefined ? Number(source.readAt) || 0 : 0,
       unread: source.unread === false ? false : true,
@@ -1428,6 +1877,140 @@
     localStorage.setItem(STORAGE_KEYS.wallet, JSON.stringify(wallet || {}));
   }
 
+  function migrateMoneyMessagesInHistories() {
+    var currentVersion = Number(localStorage.getItem(STORAGE_KEYS.moneyMessageMigrationVersion)) || 0;
+
+    if (currentVersion >= 1) {
+      return false;
+    }
+
+    migrateMoneyMessageHistoryPrefix(STORAGE_KEYS.chatPrefix);
+    migrateMoneyMessageHistoryPrefix(STORAGE_KEYS.groupChatPrefix);
+    migrateOfflineMoneyMessageHistories();
+    localStorage.setItem(STORAGE_KEYS.moneyMessageMigrationVersion, "1");
+    return true;
+  }
+
+  function migrateMoneyMessageHistoryPrefix(prefix) {
+    var index;
+    var key;
+    var value;
+    var migrated;
+
+    for (index = 0; index < localStorage.length; index += 1) {
+      key = localStorage.key(index);
+      if (!key || key.indexOf(prefix) !== 0) {
+        continue;
+      }
+
+      value = parseJson(localStorage.getItem(key), []);
+      if (!Array.isArray(value)) {
+        continue;
+      }
+
+      migrated = migrateMoneyMessageArray(value);
+      if (migrated.changed) {
+        localStorage.setItem(key, JSON.stringify(migrated.items));
+      }
+    }
+  }
+
+  function migrateOfflineMoneyMessageHistories() {
+    var index;
+    var key;
+    var session;
+    var changed;
+    var inlineStates;
+
+    for (index = 0; index < localStorage.length; index += 1) {
+      key = localStorage.key(index);
+      if (!key || key.indexOf(STORAGE_KEYS.offlinePrefix) !== 0) {
+        continue;
+      }
+
+      session = parseJson(localStorage.getItem(key), null);
+      if (!session || typeof session !== "object") {
+        continue;
+      }
+
+      changed = migrateMoneyMessageArraysOnObject(session, ["history", "messages", "events"]);
+      if (changed) {
+        localStorage.setItem(key, JSON.stringify(session));
+      }
+    }
+
+    inlineStates = parseJson(localStorage.getItem(STORAGE_KEYS.inlineOffline), null);
+    if (inlineStates && typeof inlineStates === "object" && !Array.isArray(inlineStates)) {
+      changed = false;
+      Object.keys(inlineStates).forEach(function (stateKey) {
+        if (migrateMoneyMessageArraysOnObject(inlineStates[stateKey], ["history", "messages", "events"])) {
+          changed = true;
+        }
+      });
+      if (changed) {
+        localStorage.setItem(STORAGE_KEYS.inlineOffline, JSON.stringify(inlineStates));
+      }
+    }
+  }
+
+  function migrateMoneyMessageArraysOnObject(target, fieldNames) {
+    var changed = false;
+
+    if (!target || typeof target !== "object") {
+      return false;
+    }
+
+    (fieldNames || []).forEach(function (fieldName) {
+      var migrated;
+      if (!Array.isArray(target[fieldName])) {
+        return;
+      }
+
+      migrated = migrateMoneyMessageArray(target[fieldName]);
+      if (migrated.changed) {
+        target[fieldName] = migrated.items;
+        changed = true;
+      }
+    });
+
+    return changed;
+  }
+
+  function migrateMoneyMessageArray(messages) {
+    var changed = false;
+    var items = (Array.isArray(messages) ? messages : []).map(function (message) {
+      var migrated = migrateOneMoneyMessage(message);
+      if (migrated !== message) {
+        changed = true;
+      }
+      return migrated;
+    });
+
+    return { items: items, changed: changed };
+  }
+
+  function migrateOneMoneyMessage(message) {
+    var source = message && typeof message === "object" ? message : null;
+    var normalized;
+
+    if (!source || (source.type !== "redPacket" && source.type !== "transfer")) {
+      return message;
+    }
+
+    normalized = normalizeMoneyMessage(Object.assign({}, source));
+    if (normalized) {
+      return normalized;
+    }
+
+    return Object.assign({}, source, {
+      type: "text",
+      amount: "",
+      note: "",
+      status: "",
+      content: source.content || source.note || (source.type === "redPacket" ? "红包" : "转账")
+    });
+  }
+
   function addWalletLedger(record, options) {
     var wallet = getWallet();
     var normalized = normalizeLedgerRecord(record || {}, 0);
@@ -1592,6 +2175,7 @@
         sourceId: info.sourceId || "",
         characterId: info.characterId || source.characterId || "",
         groupId: info.groupId || "",
+        sourceGenerationId: source.generationId || info.generationId || "",
         note: source.note || "亲属卡支付给" + (sourceName || "角色")
       });
     } else {
@@ -1610,6 +2194,7 @@
         sourceId: info.sourceId || "",
         characterId: info.characterId || source.characterId || "",
         groupId: info.groupId || "",
+        sourceGenerationId: source.generationId || info.generationId || "",
         note: source.note || source.content || (source.type === "redPacket" ? "红包" : "转账"),
         createdAt: source.createdAt || Date.now()
       }, {
@@ -1663,6 +2248,7 @@
       sourceId: info.sourceId || "",
       characterId: info.characterId || source.characterId || "",
       groupId: info.groupId || "",
+      sourceGenerationId: source.generationId || info.generationId || "",
       note: source.note || source.content || (source.type === "redPacket" ? "红包" : "转账"),
       createdAt: Date.now()
     });
@@ -1708,6 +2294,7 @@
         sourceId: info.sourceId || "",
         characterId: info.characterId || source.characterId || "",
         groupId: info.groupId || "",
+        sourceGenerationId: source.generationId || info.generationId || "",
         note: "已退回，未入账：" + (source.note || source.content || (source.type === "redPacket" ? "红包" : "转账")),
         createdAt: Date.now()
       }, {
@@ -1759,6 +2346,7 @@
         sourceId: info.sourceId || "",
         characterId: info.characterId || source.characterId || "",
         groupId: info.groupId || "",
+        sourceGenerationId: source.generationId || info.generationId || "",
         note: "对方退回：" + (source.note || source.content || (source.type === "redPacket" ? "红包" : "转账")),
         createdAt: Date.now()
       });
@@ -1852,6 +2440,8 @@
       chatMemories: getChatMemoryStore(),
       chatRounds: getChatRoundStore(),
       bodyStates: getBodyStateStore(),
+      bodyStateSnapshots: getBodyStateSnapshotStore(),
+      blockRelations: getBlockRelations(),
       emojiPacks: getEmojiPacks(),
       worldBooks: getWorldBooks(),
       thoughts: getThoughtStore(),
@@ -1899,6 +2489,8 @@
     saveChatMemoryStore(normalized.chatMemories);
     saveChatRoundStore(normalized.chatRounds);
     saveBodyStateStore(normalized.bodyStates);
+    saveBodyStateSnapshotStore(normalized.bodyStateSnapshots);
+    saveBlockRelations(normalized.blockRelations);
     saveEmojiPacks(normalized.emojiPacks);
     saveWorldBooks(normalized.worldBooks);
     saveThoughtStore(normalized.thoughts);
@@ -1927,6 +2519,9 @@
     Object.keys(normalized.offlineSessions).forEach(function (sessionId) {
       saveOfflineSession(normalized.offlineSessions[sessionId]);
     });
+
+    localStorage.removeItem(STORAGE_KEYS.moneyMessageMigrationVersion);
+    migrateMoneyMessagesInHistories();
   }
 
   function normalizeBackupData(data) {
@@ -1959,6 +2554,8 @@
       chatMemories: normalizeChatMemories(data.chatMemories || data.chatMemory || {}),
       chatRounds: normalizeChatRounds(data.chatRounds || data.roundCounters || {}),
       bodyStates: normalizeBodyStates(data.bodyStates || data.bodyState || {}),
+      bodyStateSnapshots: normalizeBodyStateSnapshots(data.bodyStateSnapshots || {}),
+      blockRelations: normalizeBlockRelations(data.blockRelations || {}),
       emojiPacks: normalizeEmojiPacks(data.emojiPacks || []),
       worldBooks: normalizeWorldBooks(data.worldBooks || []),
       thoughts: normalizeThoughts(data.thoughts || {}),
@@ -2264,8 +2861,14 @@
       normalized[String(characterId)] = Array.isArray(memories)
         ? memories.map(function (item) {
           return {
+            id: String(item && item.id || createId("memory")),
             content: String(item && item.content || ""),
             source: item && item.source ? String(item.source) : "private",
+            generationId: String(item && (item.generationId || item.sourceGenerationId) || ""),
+            sourceGenerationId: String(item && (item.sourceGenerationId || item.generationId) || ""),
+            targetType: String(item && item.targetType || ""),
+            targetId: String(item && item.targetId || ""),
+            relatedMessageIds: Array.isArray(item && item.relatedMessageIds) ? item.relatedMessageIds.map(String) : [],
             createdAt: Number(item && item.createdAt) || Date.now()
           };
         }).filter(function (item) {
@@ -2316,6 +2919,47 @@
 
     Object.keys(states).forEach(function (key) {
       normalized[String(key)] = normalizeBodyState(states[key]);
+    });
+
+    return normalized;
+  }
+
+  function normalizeBodyStateSnapshots(snapshots) {
+    var normalized = {};
+
+    if (!snapshots || typeof snapshots !== "object" || Array.isArray(snapshots)) {
+      return normalized;
+    }
+
+    Object.keys(snapshots).forEach(function (generationId) {
+      var source = snapshots[generationId] && typeof snapshots[generationId] === "object" ? snapshots[generationId] : {};
+      var id = String(source.generationId || generationId || "");
+
+      if (!id) {
+        return;
+      }
+
+      normalized[id] = {
+        generationId: id,
+        targetType: source.targetType === "group" ? "group" : (source.targetType === "offline" ? "offline" : "private"),
+        targetId: String(source.targetId || ""),
+        beforeSnapshot: normalizeBodyState(source.beforeSnapshot || {}),
+        createdAt: Number(source.createdAt) || Date.now()
+      };
+    });
+
+    return normalized;
+  }
+
+  function normalizeBlockRelations(relations) {
+    var normalized = {};
+
+    if (!relations || typeof relations !== "object" || Array.isArray(relations)) {
+      return normalized;
+    }
+
+    Object.keys(relations).forEach(function (key) {
+      normalized[String(key)] = normalizeBlockState(relations[key]);
     });
 
     return normalized;
@@ -2405,6 +3049,10 @@
       content: String(source.content || ""),
       mood: String(source.mood || ""),
       visibleSummary: String(source.visibleSummary || source.summary || ""),
+      generationId: String(source.generationId || source.sourceGenerationId || ""),
+      sourceGenerationId: String(source.sourceGenerationId || source.generationId || ""),
+      targetType: String(source.targetType || source.source || ""),
+      targetId: String(source.targetId || source.chatId || ""),
       relatedMessageIds: Array.isArray(source.relatedMessageIds) ? source.relatedMessageIds.map(String) : [],
       readAt: source.readAt !== undefined ? Number(source.readAt) || 0 : (source.unread ? 0 : Number(source.createdAt) || Date.now()),
       unread: source.unread === true && !Number(source.readAt),
@@ -2747,14 +3395,17 @@
   function migrateWalletLedgerAmounts(wallet) {
     var target = wallet || normalizeWallet({});
     var repaired = false;
+    var balanceDelta = 0;
 
-    if (target.moneyAmountMigrationVersion >= 1) {
+    if (target.moneyAmountMigrationVersion >= 2) {
       return { wallet: target, changed: false };
     }
 
     target.ledger = (target.ledger || []).map(function (record) {
       var amount = Number(record && record.amount);
       var noteAmount;
+      var repairedAmount;
+      var delta;
 
       if (!record || !isMoneyLedgerType(record.type) || !shouldRepairLegacyLedgerAmount(amount)) {
         return record;
@@ -2765,13 +3416,21 @@
         return record;
       }
 
+      repairedAmount = Number(noteAmount);
+      delta = repairedAmount - (Number.isFinite(amount) ? amount : 0);
+      if (shouldLedgerAffectBalance(record) && delta) {
+        balanceDelta += record.direction === "income" ? delta : -delta;
+      }
       repaired = true;
       return Object.assign({}, record, {
-        amount: Number(noteAmount)
+        amount: repairedAmount
       });
     });
 
-    target.moneyAmountMigrationVersion = 1;
+    if (balanceDelta) {
+      target.balance = Math.max(0, roundAmount((Number(target.balance) || 0) + balanceDelta));
+    }
+    target.moneyAmountMigrationVersion = 2;
     return { wallet: target, changed: true, repaired: repaired };
   }
 
@@ -2782,6 +3441,11 @@
 
   function shouldRepairLegacyLedgerAmount(amount) {
     return !Number.isFinite(amount) || amount === 0 || amount === 20;
+  }
+
+  function shouldLedgerAffectBalance(record) {
+    var type = String(record && record.type || "").toLowerCase();
+    return type !== "transfer_return" && type !== "redpacket_return";
   }
 
   function normalizeLedgerRecord(record, index) {
@@ -2894,6 +3558,8 @@
     localStorage.removeItem(STORAGE_KEYS.chatMemories);
     localStorage.removeItem(STORAGE_KEYS.chatRounds);
     localStorage.removeItem(STORAGE_KEYS.bodyStates);
+    localStorage.removeItem(STORAGE_KEYS.bodyStateSnapshots);
+    localStorage.removeItem(STORAGE_KEYS.blockRelations);
     localStorage.removeItem(STORAGE_KEYS.emojiPacks);
     localStorage.removeItem(STORAGE_KEYS.worldBooks);
     localStorage.removeItem(STORAGE_KEYS.thoughts);
@@ -2905,6 +3571,7 @@
     localStorage.removeItem(STORAGE_KEYS.moments);
     localStorage.removeItem(STORAGE_KEYS.inlineOffline);
     localStorage.removeItem(STORAGE_KEYS.wallet);
+    localStorage.removeItem(STORAGE_KEYS.moneyMessageMigrationVersion);
     localStorage.removeItem(STORAGE_KEYS.shop);
     localStorage.removeItem(STORAGE_KEYS.recentHidden);
     localStorage.removeItem(STORAGE_KEYS.theme);
@@ -2930,6 +3597,128 @@
     });
   }
 
+  function removeGenerationArtifacts(generationIds, options) {
+    var ids = normalizeGenerationIdList(generationIds);
+    var settings = options || {};
+
+    if (!ids.length) {
+      return;
+    }
+
+    removeThoughtArtifacts(ids);
+    removeCharacterMemoryArtifacts(ids);
+    removeChatMemoryArtifacts(ids, settings.targetType, settings.targetId);
+    removeWalletLedgerArtifacts(ids);
+    if (settings.targetType && settings.targetId) {
+      restoreBodyStateBeforeGenerationIds(settings.targetType, settings.targetId, ids);
+    }
+  }
+
+  function hasGenerationId(value, generationIds) {
+    return generationIds.indexOf(String(value || "")) !== -1;
+  }
+
+  function removeThoughtArtifacts(generationIds) {
+    var store = getThoughtStore();
+    var changed = false;
+
+    Object.keys(store).forEach(function (characterId) {
+      var next = (Array.isArray(store[characterId]) ? store[characterId] : []).filter(function (thought) {
+        return !hasGenerationId(thought.generationId || thought.sourceGenerationId, generationIds);
+      });
+
+      if (next.length !== (store[characterId] || []).length) {
+        store[characterId] = next;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      saveThoughtStore(store);
+    }
+  }
+
+  function removeCharacterMemoryArtifacts(generationIds) {
+    var store = getMemoryStore();
+    var changed = false;
+
+    Object.keys(store).forEach(function (characterId) {
+      var next = (Array.isArray(store[characterId]) ? store[characterId] : []).filter(function (memory) {
+        return !hasGenerationId(memory && (memory.generationId || memory.sourceGenerationId), generationIds);
+      });
+
+      if (next.length !== (store[characterId] || []).length) {
+        store[characterId] = next;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      saveMemoryStore(store);
+    }
+  }
+
+  function removeChatMemoryArtifacts(generationIds, targetType, targetId) {
+    var store = getChatMemoryStore();
+    var scopedKey = targetType && targetId ? getChatScopedKey(targetType, targetId) : "";
+    var changed = false;
+
+    Object.keys(store).forEach(function (key) {
+      if (scopedKey && key !== scopedKey) {
+        return;
+      }
+
+      var next = (Array.isArray(store[key]) ? store[key] : []).filter(function (memory) {
+        return !hasGenerationId(memory && (memory.generationId || memory.sourceGenerationId), generationIds);
+      });
+
+      if (next.length !== (store[key] || []).length) {
+        store[key] = next;
+        changed = true;
+      }
+    });
+
+    if (changed) {
+      saveChatMemoryStore(store);
+    }
+  }
+
+  function removeWalletLedgerArtifacts(generationIds) {
+    var wallet = getWallet();
+    var removed = [];
+
+    wallet.ledger = (wallet.ledger || []).filter(function (record) {
+      var generated = hasGenerationId(record && (record.sourceGenerationId || record.generationId), generationIds)
+        && record.manual !== true
+        && record.userManual !== true;
+
+      if (generated) {
+        removed.push(record);
+      }
+
+      return !generated;
+    });
+
+    if (!removed.length) {
+      return;
+    }
+
+    removed.forEach(function (record) {
+      var amount = Number(record.amount) || 0;
+      if (!amount || !shouldLedgerAffectBalance(record)) {
+        return;
+      }
+
+      if (record.direction === "income") {
+        wallet.balance = roundAmount(wallet.balance - amount);
+      } else if (record.direction === "expense") {
+        wallet.balance = roundAmount(wallet.balance + amount);
+      }
+    });
+
+    saveWallet(wallet);
+  }
+
   window.AppStorage = {
     getCharacters: getCharacters,
     saveCharacters: saveCharacters,
@@ -2940,7 +3729,16 @@
     saveSettings: saveSettings,
     getChatHistory: getChatHistory,
     saveChatHistory: saveChatHistory,
+    saveChatHistoryDebounced: saveChatHistoryDebounced,
+    flushChatHistorySave: flushChatHistorySave,
     deleteChatHistory: deleteChatHistory,
+    getBlockState: getBlockState,
+    setUserBlockedCharacter: setUserBlockedCharacter,
+    setCharacterBlockedUser: setCharacterBlockedUser,
+    setBlockReactionTimestamp: setBlockReactionTimestamp,
+    isUserBlockedCharacter: isUserBlockedCharacter,
+    isCharacterBlockedUser: isCharacterBlockedUser,
+    clearBlockState: clearBlockState,
     getGroups: getGroups,
     saveGroups: saveGroups,
     addGroup: addGroup,
@@ -2954,6 +3752,8 @@
     canCharactersInteractInMoments: canCharactersInteractInMoments,
     getGroupChatHistory: getGroupChatHistory,
     saveGroupChatHistory: saveGroupChatHistory,
+    saveGroupChatHistoryDebounced: saveGroupChatHistoryDebounced,
+    flushGroupChatHistorySave: flushGroupChatHistorySave,
     deleteGroupChatHistory: deleteGroupChatHistory,
     getEmojiPacks: getEmojiPacks,
     saveEmojiPacks: saveEmojiPacks,
@@ -2975,11 +3775,17 @@
     resetChatRoundCounter: resetChatRoundCounter,
     getBodyState: getBodyState,
     saveBodyState: saveBodyState,
+    saveBodyStateSnapshot: saveBodyStateSnapshot,
+    getBodyStateSnapshot: getBodyStateSnapshot,
+    restoreBodyStateBeforeGenerationIds: restoreBodyStateBeforeGenerationIds,
     clearBodyState: clearBodyState,
     clearAllBodyStates: clearAllBodyStates,
     getDefaultBodyState: getDefaultBodyState,
     getOfflineSession: getOfflineSession,
     saveOfflineSession: saveOfflineSession,
+    saveOfflineSessionDebounced: saveOfflineSessionDebounced,
+    flushOfflineSessionSave: flushOfflineSessionSave,
+    flushAllDebouncedSaves: flushAllDebouncedSaves,
     deleteOfflineSession: deleteOfflineSession,
     getAllChatHistories: getAllChatHistories,
     getAllGroupChatHistories: getAllGroupChatHistories,
@@ -3061,7 +3867,10 @@
     spendFamilyCard: spendFamilyCard,
     normalizeMoneyAmount: normalizeMoneyAmount,
     normalizeMoneyMessage: normalizeMoneyMessage,
+    detectMoneyAmountMismatch: detectMoneyAmountMismatch,
     migrateWalletLedgerAmounts: migrateWalletLedgerAmounts,
+    migrateMoneyMessagesInHistories: migrateMoneyMessagesInHistories,
+    removeGenerationArtifacts: removeGenerationArtifacts,
     recordMoneyMessage: recordMoneyMessage,
     receiveMoneyMessage: receiveMoneyMessage,
     returnMoneyMessage: returnMoneyMessage,
@@ -3071,4 +3880,6 @@
     importAllData: importAllData,
     clearAllData: clearAllData
   };
+
+  migrateMoneyMessagesInHistories();
 })(window);

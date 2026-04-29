@@ -781,6 +781,7 @@
     selectedPrivateMessageIds = [];
     updateChatHeader(character);
     updateInlineOfflineUi();
+    updatePrivateBlockUi(characterId);
     closeAllMenus();
     ensureOpeningMessage(character);
     renderChatMessages(characterId);
@@ -897,11 +898,16 @@
     }
 
     if (!isPrivateMessageSelectionMode) {
-      requestAnimationFrame(function () {
+      if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
+        window.AppApiJobs.scheduleScrollToBottom(messagesWrap);
+      } else {
+        requestAnimationFrame(function () {
         messagesWrap.scrollTop = messagesWrap.scrollHeight;
-      });
+        });
+      }
     }
 
+    updatePrivateBlockUi(characterId);
     updateThoughtButton(characterId);
   }
 
@@ -1617,12 +1623,48 @@
     textarea.remove();
   }
 
+  function appendPrivateMessageLocally(characterId, message, previousMessages) {
+    var wrap = getElement("chatMessages");
+    var character = getCharacterById(characterId);
+    var previous = Array.isArray(previousMessages) ? previousMessages.filter(function (item) {
+      return item && item.type !== "loading";
+    }) : [];
+    var last = previous.length ? previous[previous.length - 1] : null;
+    var html = "";
+
+    if (!wrap || activeCharacterId !== characterId || isPrivateMessageSelectionMode || !message) {
+      schedulePrivateRender(characterId);
+      return;
+    }
+
+    if (wrap.querySelector(".chat-empty")) {
+      schedulePrivateRender(characterId);
+      return;
+    }
+
+    if (!last || getDateKey(last.createdAt) !== getDateKey(message.createdAt)) {
+      html += renderDateSeparator(message.createdAt);
+    }
+
+    html += renderPrivateMessage(message, character);
+    wrap.insertAdjacentHTML("beforeend", html);
+    if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
+      window.AppApiJobs.scheduleScrollToBottom(wrap);
+    } else {
+      requestAnimationFrame(function () {
+        wrap.scrollTop = wrap.scrollHeight;
+      });
+    }
+  }
+
   function sendUserMessage() {
     var input = getElement("chatInput");
     var content = input ? input.value.trim() : "";
     var now;
     var messages;
+    var previousMessages;
     var isOffline = isInlineOfflineActive();
+    var message;
 
     if (!activeCharacterId || !getCharacterById(activeCharacterId) || !content) {
       return;
@@ -1630,14 +1672,15 @@
 
     now = Date.now();
     messages = window.AppStorage.getChatHistory(activeCharacterId);
-
-    messages.push({
+    previousMessages = messages.slice();
+    message = {
       id: String(now),
       role: "user",
       type: isOffline ? "offlineUserAction" : "text",
       content: content,
       createdAt: now
-    });
+    };
+    messages.push(message);
 
     window.AppStorage.addCharacterMemory(activeCharacterId, {
       content: (isOffline ? "用户在线下模式中说/做：" : "用户曾说：") + content,
@@ -1653,20 +1696,34 @@
     }
 
     closeToolPanel();
-    renderChatMessages(activeCharacterId);
-    renderCharacterList();
+    appendPrivateMessageLocally(activeCharacterId, message, previousMessages);
+    schedulePrivateListRender();
   }
 
   async function handleComposerAction() {
     var input = getElement("chatInput");
+    var characterId = activeCharacterId;
+    var blockState = characterId ? getPrivateBlockState(characterId) : {};
+    var hadInput = Boolean(input && input.value.trim());
 
     if (isInlineOfflineActive()) {
       await requestCharacterReply();
       return;
     }
 
-    if (input && input.value.trim()) {
+    if (hadInput) {
       sendUserMessage();
+    }
+
+    if (hadInput && blockState.userBlocked) {
+      addPrivateSystemMessage(characterId, "已拉黑，对方消息会被拦截。");
+      return;
+    }
+
+    if (hadInput && blockState.characterBlocked) {
+      addPrivateSystemMessage(characterId, "对方暂时拒收你的消息。");
+      maybeRequestCharacterBlockedReaction(characterId, blockState);
+      return;
     }
 
     await requestCharacterReply();
@@ -1878,6 +1935,7 @@
       sourceType: "private",
       sourceId: character.id,
       characterId: character.id,
+      generationId: message.generationId || "",
       sourceName: character.name
     }) || message;
   }
@@ -2102,8 +2160,10 @@
     }
   }
 
-  function appendPrivateReplies(messages, characterId, replies) {
+  function appendPrivateReplies(messages, characterId, replies, meta) {
     var startAt = Date.now();
+    var generated = [];
+    var extra = meta || {};
 
     (replies || []).slice(0, 50).forEach(function (item, index) {
       var createdAt;
@@ -2114,33 +2174,46 @@
       }
 
       createdAt = startAt + index;
-      message = createPrivateCharacterReplyMessage(item, createdAt);
+      message = createPrivateCharacterReplyMessage(item, createdAt, extra);
       message = recordPrivateMoneyMessage(message, getCharacterById(characterId));
       messages.push(message);
+      generated.push(message);
       window.AppStorage.addCharacterMemory(characterId, {
         content: "角色曾回复：" + getMessageMemoryText(message),
         source: "private",
+        generationId: extra.generationId || "",
+        sourceGenerationId: extra.generationId || "",
+        relatedMessageIds: [message.id],
+        targetType: "private",
+        targetId: characterId,
         createdAt: createdAt
       });
     });
 
-    return messages;
+    return {
+      messages: messages,
+      generated: generated
+    };
   }
 
-  function streamPrivateReplies(baseMessages, characterId, replies, suffixMessages) {
+  function streamPrivateReplies(baseMessages, characterId, replies, suffixMessages, meta) {
     var shown = [];
     var startAt = Date.now();
     var suffix = Array.isArray(suffixMessages) ? suffixMessages : [];
+    var extra = meta || {};
     var items = (replies || []).slice(0, 50).filter(function (item) {
       return item && item.content;
     });
+    var appended;
 
     if (!window.AppStream || !window.AppStream.appendMessagesWithStreamEffect) {
-      window.AppStorage.saveChatHistory(characterId, appendPrivateReplies(baseMessages.slice(), characterId, items).concat(suffix));
+      appended = appendPrivateReplies(baseMessages.slice(), characterId, items, extra);
+      window.AppStorage.saveChatHistory(characterId, appended.messages.concat(suffix));
       if (activeCharacterId === characterId) {
-        renderChatMessages(characterId);
+        schedulePrivateRender(characterId);
       }
-      return Promise.resolve();
+      schedulePrivateListRender();
+      return Promise.resolve(appended.generated);
     }
 
     return window.AppStream.appendMessagesWithStreamEffect({
@@ -2156,20 +2229,30 @@
           return;
         }
 
-        message = createPrivateCharacterReplyMessage(item, createdAt);
+        message = createPrivateCharacterReplyMessage(item, createdAt, extra);
         message = recordPrivateMoneyMessage(message, character);
         shown.push(message);
         window.AppStorage.addCharacterMemory(characterId, {
           content: "角色曾回复：" + getMessageMemoryText(message),
           source: "private",
+          generationId: extra.generationId || "",
+          sourceGenerationId: extra.generationId || "",
+          relatedMessageIds: [message.id],
+          targetType: "private",
+          targetId: characterId,
           createdAt: createdAt
         });
-        window.AppStorage.saveChatHistory(characterId, baseMessages.concat(shown, suffix));
+        savePrivateHistoryDebounced(characterId, baseMessages.concat(shown, suffix));
         if (activeCharacterId === characterId) {
-          renderChatMessages(characterId);
+          schedulePrivateRender(characterId);
         }
-        renderCharacterList();
       }
+    }).then(function () {
+      window.AppStorage.saveChatHistory(characterId, baseMessages.concat(shown, suffix));
+      flushPrivateHistory(characterId);
+      schedulePrivateRender(characterId);
+      schedulePrivateListRender();
+      return shown;
     });
   }
 
@@ -2284,9 +2367,10 @@
     return "";
   }
 
-  function persistPrivateAiExtras(characterId, result, source) {
+  function persistPrivateAiExtras(characterId, result, source, meta) {
     var now = Date.now();
     var character = getCharacterById(characterId);
+    var extra = meta || {};
 
     if (!character || !result) {
       return;
@@ -2300,6 +2384,11 @@
           content: thought.content,
           mood: thought.mood || "",
           visibleSummary: thought.visibleSummary || thought.summary || "",
+          generationId: extra.generationId || "",
+          sourceGenerationId: extra.generationId || "",
+          relatedMessageIds: extra.relatedMessageIds || [],
+          targetType: "private",
+          targetId: characterId,
           createdAt: now
         });
       });
@@ -2318,6 +2407,11 @@
         window.AppStorage.addCharacterMemory(characterId, {
           content: memory.content,
           source: source || "private",
+          generationId: extra.generationId || "",
+          sourceGenerationId: extra.generationId || "",
+          relatedMessageIds: extra.relatedMessageIds || [],
+          targetType: "private",
+          targetId: characterId,
           createdAt: now
         });
       });
@@ -2326,15 +2420,24 @@
     }
   }
 
-  function createPrivateCharacterReplyMessage(reply, createdAt) {
+  function createPrivateCharacterReplyMessage(reply, createdAt, meta) {
     var source = reply && typeof reply === "object" ? reply : { content: String(reply || "") };
     var type = source.type || "text";
+    var extra = meta || {};
     var message = Object.assign({}, source, {
       id: String(createdAt + Math.random()),
       role: "character",
       type: type,
-      createdAt: createdAt
+      createdAt: createdAt,
+      generationId: extra.generationId || source.generationId || "",
+      parentUserMessageId: extra.parentUserMessageId || source.parentUserMessageId || "",
+      generatedAt: extra.generatedAt || createdAt
     });
+
+    if (extra.blockedMessage || source.blockedMessage) {
+      message.blockedMessage = true;
+      message.type = source.type || "blockedReaction";
+    }
 
     if (type === "voice") {
       message.voice = Object.assign({
@@ -2408,7 +2511,52 @@
     }
 
     message.content = normalizeDisplayText(message.content || source.content || "");
+    message.generationId = message.generationId || extra.generationId || source.generationId || "";
+    message.parentUserMessageId = message.parentUserMessageId || extra.parentUserMessageId || source.parentUserMessageId || "";
+    message.generatedAt = message.generatedAt || extra.generatedAt || createdAt;
+    if (extra.blockedMessage || source.blockedMessage) {
+      message.blockedMessage = true;
+      if (message.type === "text") {
+        message.type = "blockedReaction";
+      }
+    }
     return message;
+  }
+
+  function schedulePrivateRender(characterId) {
+    if (window.AppApiJobs && window.AppApiJobs.scheduleRenderChat) {
+      window.AppApiJobs.scheduleRenderChat("private", characterId);
+      return;
+    }
+    renderChatMessages(characterId);
+  }
+
+  function schedulePrivateListRender() {
+    if (window.AppApiJobs && window.AppApiJobs.scheduleRenderList) {
+      window.AppApiJobs.scheduleRenderList("private");
+      return;
+    }
+    renderCharacterList();
+  }
+
+  function savePrivateHistoryDebounced(characterId, messages) {
+    if (window.AppApiJobs && window.AppApiJobs.saveChatHistoryDebounced) {
+      window.AppApiJobs.saveChatHistoryDebounced("private", characterId, messages, 120);
+      return;
+    }
+    window.AppStorage.saveChatHistory(characterId, messages);
+  }
+
+  function flushPrivateHistory(characterId) {
+    if (window.AppApiJobs && window.AppApiJobs.flushChatHistorySave) {
+      window.AppApiJobs.flushChatHistorySave("private", characterId);
+    }
+  }
+
+  function getPrivateBlockState(characterId) {
+    return window.AppStorage && window.AppStorage.getBlockState
+      ? window.AppStorage.getBlockState(characterId)
+      : { userBlocked: false, characterBlocked: false, lastBlockReactionAt: 0 };
   }
 
   function estimateVoiceDuration(text) {
@@ -2427,6 +2575,8 @@
     var reply;
     var errorContent;
     var generationContext;
+    var generationId;
+    var generatedMessages;
 
     if (!requestCharacterId || !character) {
       return;
@@ -2634,6 +2784,52 @@
     renderCharacterList();
   }
 
+  function addPrivateSystemMessage(characterId, content, meta) {
+    var messages = window.AppStorage.getChatHistory(characterId);
+    var now = Date.now();
+    var message = Object.assign({
+      id: String(now + Math.random()),
+      role: "system",
+      type: "text",
+      content: content,
+      createdAt: now
+    }, meta || {});
+
+    messages.push(message);
+    window.AppStorage.saveChatHistory(characterId, messages);
+    if (activeCharacterId === characterId) {
+      schedulePrivateRender(characterId);
+    }
+    schedulePrivateListRender();
+    return message;
+  }
+
+  function toggleActiveCharacterBlock() {
+    var character = activeCharacterId ? getCharacterById(activeCharacterId) : null;
+    var state = character ? getPrivateBlockState(character.id) : null;
+    var nextBlocked;
+    var reason = "";
+
+    closeAllMenus();
+
+    if (!character || !window.AppStorage || !window.AppStorage.setUserBlockedCharacter) {
+      return;
+    }
+
+    nextBlocked = !state.userBlocked;
+    if (nextBlocked && window.prompt) {
+      reason = window.prompt("拉黑原因（可选）", "") || "";
+    }
+
+    window.AppStorage.setUserBlockedCharacter(character.id, nextBlocked, reason);
+    addPrivateSystemMessage(character.id, nextBlocked ? "你已拉黑 " + (character.name || "对方") + "。" : "你已取消拉黑 " + (character.name || "对方") + "。");
+    updatePrivateBlockUi(character.id);
+
+    if (nextBlocked) {
+      requestPrivateBlockReaction(character.id, "userBlocked", reason);
+    }
+  }
+
   function deleteActiveCharacter() {
     if (activeCharacterId) {
       deleteCharacterWithConfirm(activeCharacterId);
@@ -2681,6 +2877,48 @@
 
     if (menuButton) {
       menuButton.textContent = active ? "退出线下模式" : "进入线下模式";
+    }
+  }
+
+  function ensurePrivateBlockNotice() {
+    var notice = getElement("privateBlockNotice");
+    var messages = getElement("chatMessages");
+
+    if (notice || !messages || !messages.parentNode) {
+      return notice;
+    }
+
+    notice = document.createElement("div");
+    notice.id = "privateBlockNotice";
+    notice.className = "private-block-notice hidden";
+    messages.parentNode.insertBefore(notice, messages);
+    return notice;
+  }
+
+  function updatePrivateBlockUi(characterId) {
+    var state = characterId ? getPrivateBlockState(characterId) : {};
+    var notice = ensurePrivateBlockNotice();
+    var input = getElement("chatInput");
+    var menuButton = getElement("chatBlockBtn");
+    var blockedText = "";
+
+    if (state.userBlocked) {
+      blockedText = "已拉黑，对方消息会被拦截";
+    } else if (state.characterBlocked) {
+      blockedText = "对方暂时拒收你的消息";
+    }
+
+    if (notice) {
+      notice.textContent = blockedText;
+      notice.classList.toggle("hidden", !blockedText);
+    }
+
+    if (input && !isInlineOfflineActive()) {
+      input.placeholder = state.userBlocked ? "已拉黑，仍可发送但不会触发正常回复" : (state.characterBlocked ? "对方暂时拒收你的消息" : "输入消息");
+    }
+
+    if (menuButton) {
+      menuButton.textContent = state.userBlocked ? "取消拉黑" : "拉黑";
     }
   }
 

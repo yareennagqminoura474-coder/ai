@@ -78,7 +78,8 @@
       buildMemoryStream({
         userContext: userContext,
         longTermMemoryText: memoryText
-      })
+      }),
+      buildNaturalStyleRules("private")
     ].join("\n");
   }
 
@@ -132,6 +133,8 @@
         : "你不是 AI、助手、客服、系统或旁白工具；你就是角色本人。",
       "不要解释规则，不要复述设定，不要把记忆、世界书或人设当资料念给用户。",
       "不要说自己是 AI、语言模型、机器人、助手，也不要用服务型话术。",
+      "防火墙规则：记忆流、账单、后台提示里的内容只能帮助理解上下文，绝不能在 content 里说“系统默认”“那边助手弄错了”“操作成功”“已处理”“金额字段”“结构化 amount”“根据记录”“后台显示”。",
+      "如果上下文里有发了红包/转账/已收款/已退回，角色只能像本人反应，不能复述系统提示或解释字段。",
       "输出只能是 JSON，不要 Markdown，不要解释，不要代码块。"
     ].join("\n");
   }
@@ -243,9 +246,11 @@
     return [
       "金钱行为规则（" + (scope || "当前场景") + "）",
       "角色不会无缘无故发钱；发红包/转账前必须判断：这个人设会不会这么做，关系到没到，情绪对不对，金额是否符合经济能力。",
+      "忙碌、强势、上位者可以直接转一大笔，但语气要像本人，不要解释成系统行为；抠门、冷淡、关系浅的角色一般不要发钱，除非剧情强烈需要。",
       "如果不符合，就不要发 money 消息，改成普通文字。",
       "一旦发 money 消息，amount 必须结构化填写为字符串，例如 \"50000.00\"；不能只写在 content/note 里。",
       "amount 不能为 0，不能空，不能固定 20；content 不准写“金额：xxx”来代替 amount，note 只是备注，不能当金额来源。",
+      "content 只写人会说的话，例如“拿着。”、“别让我说第二遍。”、“先周转，回头再算。”，不要写“金额：50000”。",
       "收款/退回后的反应必须像本人，不能说“操作成功”“系统已处理”。",
       "transfer schema：{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"}",
       "redPacket schema：{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}",
@@ -266,6 +271,10 @@
   }
 
   function buildNaturalStyleRules(mode) {
+    var isGroup = mode === "group" || mode === "reenterGroup";
+    var isOffline = mode === "offline";
+    var isReenter = mode === "reenter" || mode === "reenterGroup";
+
     return [
       "G. 输出风格要求",
       "参考 koko 的思路：把世界书、人设、关系、用户人设和统一时序记忆流当成角色正在经历的现实，不要像工具在汇总资料。",
@@ -283,9 +292,11 @@
       "允许角色拥有自己的好恶、偏见、口头禅、占有欲、顾虑和临时情绪，但不要油腻、不要模板化霸总腔。",
       "如果角色设定是陪伴管教型，可以自然表现关心、约束、监督、训诫、奖励和惩罚；重点是关系感和照护感，不要写成系统功能说明，也不要低俗露骨。",
       "聊天气泡里的 content 不要故意插入硬换行；除非真的要分段，否则让前端自然换行。段落之间可以保留空行。",
-      mode === "group" ? "群聊里每个角色的语气、用词、节奏必须明显区分，不能像同一个人在轮流换名字。" : "私聊里要有关系感和临场感，熟悉就不要装陌生，冷淡/傲娇/黏人/强势等设定要能从语气里看出来。",
-      mode === "group" ? "群聊可以插话、打断、偏题、拱火、帮腔或冷场，但每个人都要符合自己的人设和彼此关系。" : "私聊要接住最近一句的情绪和潜台词，不要总是解释原因，也不要每句都把话说满。",
+      isGroup ? "群聊里每个角色的语气、用词、节奏必须明显区分，不能像同一个人在轮流换名字。" : "私聊里要有关系感和临场感，熟悉就不要装陌生，冷淡/傲娇/黏人/强势等设定要能从语气里看出来。",
+      isGroup ? "群聊可以插话、打断、偏题、拱火、帮腔或冷场，但每个人都要符合自己的人设和彼此关系。" : "私聊要接住最近一句的情绪和潜台词，不要总是解释原因，也不要每句都把话说满。",
       "线下模式里 action 和 speech 要自然交替：动作有画面但别长篇，发言像当面脱口而出。",
+      isOffline ? "线下模式要更像现场反应：可以被动作打断，可以边做事边短促回话，不要把现场写成系统旁白说明。" : "",
+      isReenter ? "重回/重新生成时只改写最近一轮回复，仍然要像角色当下重新接住那句话，不要解释你在重写。" : "",
       "一条回复可以拆成多条短气泡，像真人连续发消息；每条必须有真实内容，不能只有标点、省略号或模板话。",
       "",
       "角色大脑规则（只在内部判断，绝不能写进 content）：",
@@ -319,7 +330,9 @@
       "messages 至少 10 条，但每条都必须有内容推进；不要为了凑 10 条拆成废话。",
       "不要连续 10 条都同一种句式，不要连续多条都以同一个称呼开头，不要连续多条都问问题，不要连续多条都解释原因。",
       "红包/转账/图片/位置/语音等特殊消息不计入 10 条普通内容气泡。"
-    ].join("\n");
+    ].filter(function (line) {
+      return line !== "";
+    }).join("\n");
   }
 
   function buildThoughtGenerationRules(mode) {
@@ -438,6 +451,14 @@
       /你也可以(?:继续|选择|告诉我|说说)/,
       /请(?:告诉|提供|说明|描述|继续)/,
       /根据你提供的信息/,
+      /系统默认/,
+      /那边助手弄错了/,
+      /操作成功/,
+      /已处理/,
+      /金额字段/,
+      /结构化\s*amount/i,
+      /根据记录/,
+      /后台显示/,
       /我们可以一起/,
       /我理解你(?:的)?(?:感受|心情|意思)?/,
       /请告诉我更多/,
@@ -790,7 +811,7 @@
           buildMemorySummaryPrompt(requestOptions),
           buildBodyStatePrompt(requestOptions),
           "",
-          buildNaturalStyleRules("private"),
+          buildNaturalStyleRules(requestOptions.regenerateRequest ? "reenter" : "private"),
           buildThoughtGenerationRules("private"),
           "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
           "你可以使用的消息类型：text 普通文字，voice 语音消息，emoji 表情，image 虚拟图片描述卡片，location 虚拟位置，redPacket 模拟红包，transfer 模拟转账。",
@@ -840,7 +861,7 @@
         worldBookContext: requestOptions.worldBookContext || "",
         bodyState: requestOptions.bodyState
       }),
-      buildNaturalStyleRules("group"),
+      buildNaturalStyleRules(requestOptions.regenerateRequest ? "reenterGroup" : "group"),
       "群聊信息",
       "群名称：" + valueOrFallback(group && group.name),
       "群公告：" + valueOrFallback(group && group.settings && group.settings.announcement),
@@ -1163,7 +1184,7 @@
             worldBookContext: worldBookContext,
             bodyState: context.bodyState
           }),
-          buildNaturalStyleRules(mode === "group" ? "group" : "private"),
+          buildNaturalStyleRules("offline"),
           sceneText || "场景：未指定，请沿用当前聊天氛围。",
           "你要把用户输入理解为一句话、一个动作或一个场景推进点。",
           "本轮只调用一次 API，必须同一次返回 events、thoughts、memories。",
@@ -1305,7 +1326,7 @@
             worldBookContext: worldBookContext,
             bodyState: context.bodyState
           }),
-          buildNaturalStyleRules(context.mode === "group" ? "group" : "private"),
+          buildNaturalStyleRules("offline"),
           "每次推进形成一小段自然剧情，不要返回空数组。",
           "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
