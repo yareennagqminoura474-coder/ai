@@ -1116,7 +1116,7 @@
     return [
       '<div class="message-row system offline-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="inline-offline-action-card"><i aria-hidden="true">✦</i><span>' + escapeHtml(message.content) + '</span><small>' + formatInlineTime(message.createdAt) + "</small></div>",
+      '  <div class="inline-offline-action-card"><i aria-hidden="true">✦</i><span>' + escapeHtml(message.content) + "</span></div>",
       "</div>"
     ].join("");
   }
@@ -1268,12 +1268,18 @@
 
     var canOperate = canOperateIncomingMoneyMessage(message);
     var closed = isMoneyMessageClosed(message);
+    var amount = message.amount;
+    var note = message.note && message.note !== message.content ? message.note : "";
     return [
-      '<div class="message-special-wrapper red-packet-card message-detail-trigger' + (closed ? " received" : "") + '" role="button" tabindex="0" data-message-id="' + escapeHtml(message.id || "") + '">',
-      '  <span class="money-card-icon">福</span>',
+      '<div class="message-special-wrapper money-card red-packet-card red-packet message-detail-trigger' + getMoneyCardStateClass(message, closed) + '" role="button" tabindex="0" data-message-id="' + escapeHtml(message.id || "") + '">',
+      '  <span class="money-card-icon" aria-hidden="true">🧧</span>',
       '  <span class="money-card-main">',
-      "    <strong>" + escapeHtml(message.content || "恭喜发财，大吉大利") + "</strong>",
-      "    <em>微信红包</em>",
+      '    <span class="money-card-header">',
+      '      <strong class="money-card-title">' + escapeHtml(message.content || "红包") + "</strong>",
+      '      <em class="money-card-status">' + escapeHtml(getMoneyMessageStatusText(message)) + "</em>",
+      "    </span>",
+      '    <span class="money-card-amount">¥' + escapeHtml(amount) + "</span>",
+      note ? '    <small class="money-card-note">' + escapeHtml(note) + "</small>" : "",
       renderMoneyStatusOrActions(message, canOperate, "领取"),
       "  </span>",
       "</div>"
@@ -1290,13 +1296,17 @@
 
     var canOperate = canOperateIncomingMoneyMessage(message);
     var closed = isMoneyMessageClosed(message);
+    var note = message.note || (message.content && message.content !== "转账" ? message.content : "");
     return [
-      '<div class="message-special-wrapper transfer-message-card message-detail-trigger' + (closed ? " received" : "") + '" role="button" tabindex="0" data-message-id="' + escapeHtml(message.id || "") + '">',
-      '  <span class="money-card-icon">¥</span>',
+      '<div class="message-special-wrapper money-card transfer-message-card transfer message-detail-trigger' + getMoneyCardStateClass(message, closed) + '" role="button" tabindex="0" data-message-id="' + escapeHtml(message.id || "") + '">',
+      '  <span class="money-card-icon" aria-hidden="true">¥</span>',
       '  <span class="money-card-main">',
-      "    <strong>¥" + escapeHtml(amount) + "</strong>",
-      "    <em>" + escapeHtml(message.note || "转账") + "</em>",
-      "    <small>微信转账</small>",
+      '    <span class="money-card-header">',
+      '      <strong class="money-card-title">转账</strong>',
+      '      <em class="money-card-status">' + escapeHtml(getMoneyMessageStatusText(message)) + "</em>",
+      "    </span>",
+      '    <span class="money-card-amount">¥' + escapeHtml(amount) + "</span>",
+      '    <small class="money-card-note">' + escapeHtml(note || "微信转账") + "</small>",
       renderMoneyStatusOrActions(message, canOperate, "收款"),
       "  </span>",
       "</div>"
@@ -1308,12 +1318,21 @@
       return [
         '    <span class="money-card-actions">',
         '      <button type="button" data-money-action="accept">' + escapeHtml(acceptLabel) + "</button>",
-        '      <button type="button" data-money-action="reject">退回</button>',
+        '      <button class="secondary" type="button" data-money-action="reject">退回</button>',
         "    </span>"
       ].join("");
     }
 
-    return '    <small class="money-card-action">' + escapeHtml(getMoneyMessageStatusText(message)) + "</small>";
+    return "";
+  }
+
+  function getMoneyCardStateClass(message, closed) {
+    var status = message && message.status ? String(message.status) : "";
+    var returned = status === "returned" || status === "rejected" || status === "refunded";
+    if (returned) {
+      return " returned received";
+    }
+    return closed ? " done received" : "";
   }
 
   function canOperateIncomingMoneyMessage(message) {
@@ -2728,17 +2747,15 @@
 
   function handlePrivateAiActions(characterId, result, meta) {
     var actions = result && Array.isArray(result.actions) ? result.actions : [];
-    var generationId = meta && meta.generationId || "";
 
     actions.forEach(function (action) {
       if (!action || action.type !== "blockUser" || !window.AppStorage || !window.AppStorage.setCharacterBlockedUser) {
         return;
       }
       window.AppStorage.setCharacterBlockedUser(characterId, true, action.reason || action.content || "");
-      addPrivateSystemMessage(characterId, "对方暂时拒收你的消息。", {
-        generationId: generationId,
-        sourceGenerationId: generationId
-      });
+      if (activeCharacterId === characterId) {
+        updatePrivateBlockUi(characterId);
+      }
     });
   }
 
@@ -3005,6 +3022,7 @@
 
     if (menu.classList.contains("hidden")) {
       closeAllMenus();
+      updatePrivateBlockUi(activeCharacterId);
       menu.classList.remove("hidden");
     } else {
       menu.classList.add("hidden");
@@ -3097,6 +3115,8 @@
     window.AppStorage.setUserBlockedCharacter(character.id, nextBlocked, reason);
     addPrivateSystemMessage(character.id, nextBlocked ? "你已拉黑 " + (character.name || "对方") + "。" : "你已取消拉黑 " + (character.name || "对方") + "。");
     updatePrivateBlockUi(character.id);
+    renderChatMessages(character.id);
+    renderCharacterList();
 
     if (nextBlocked) {
       requestPrivateBlockReaction(character.id, "userBlocked", reason);

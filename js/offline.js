@@ -251,7 +251,6 @@
       '<div class="offline-action-card' + cls + '">',
       '  <span>' + escapeHtml(normalizeDisplayText(event.content)) + "</span>",
       '  <i aria-hidden="true">✦</i>',
-      '  <small>' + formatTime(event.createdAt) + "</small>",
       "</div>"
     ].join("");
   }

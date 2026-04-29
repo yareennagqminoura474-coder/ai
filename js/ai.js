@@ -243,11 +243,24 @@
 
   function buildReplyRhythmRules(primaryField) {
     var field = primaryField || "messages";
+    if (field === "events") {
+      return [
+        "输出节奏规则",
+        "events 每次至少 10 条自然事件；红包、转账、图片、位置、语音等特殊消息不计入这 10 条。",
+        "一个完整动作只能算 1 条，不许拆成多个短语；角色一句完整台词只能算 1 条，不许按逗号、顿号、分号或冒号拆开。",
+        "不够 10 条时，生成新的自然推进：动作、停顿、反应、角色发言、环境变化或下一步安排，而不是拆碎已有句子。",
+        "action 要短而完整，一条动作卡表达一个完整动作或镜头；speech 要像当面对话，一条 speech 表达一句完整话。",
+        "动作是动作，说话是说话，不要把旁白写成系统说明。"
+      ].join("\n");
+    }
+
     return [
       "输出节奏规则",
       field + " 每次至少 10 条普通内容气泡/事件；红包、转账、图片、位置、语音等特殊消息不计入这 10 条。",
       "不能 10 条都在解释，不能 10 条都在问问题，不能 10 条都同一种句式。",
       "可以有停顿、改口、反问、打断、语音、表情，但每条都要符合角色人设和当前情绪。",
+      "不要把一句完整话按逗号、顿号、分号或冒号拆成多条；一条气泡必须有独立语义。",
+      "不够 10 条时，生成新的自然气泡继续推进，而不是把同一句话拆成前半句/后半句。",
       "每条要短而有推进，不要为了凑数制造废话。"
     ].join("\n");
   }
@@ -289,7 +302,7 @@
       "G. 输出风格要求",
       "参考 koko 的思路：把世界书、人设、关系、用户人设和统一时序记忆流当成角色正在经历的现实，不要像工具在汇总资料。",
       "你不是助手，不负责解释规则、复述人设、总结记忆或引导用户继续输入；所有话都必须像角色本人在此刻自然反应。",
-      "回复前先判断最近上下文：即使用户话短、冷场、沉默、敷衍、晚安或像在结束话题，也不能返回空数组；要以角色本人能成立的方式接住，至少拆成 10 条有内容的短气泡或事件。",
+      "回复前先判断最近上下文：即使用户话短、冷场、沉默、敷衍、晚安或像在结束话题，也不能返回空数组；要以角色本人能成立的方式接住，至少生成 10 条有内容的自然气泡或事件。",
       "统一时序记忆要当作连续关系来用：注意最近消息的时间和间隔，隔了很久要自然反应，但不要像报表一样说明时间线。",
       "回复要像真人在手机里当下发消息：自然、口语、有情绪波动，有停顿和短句，不要写成说明文、读后感或安慰模板。",
       "禁止明显 AI/客服/助手口吻，尤其不要把这些话当成高频开头或模板：好的、当然、我理解你、根据你提供的信息、我们可以一起、请告诉我更多、你可以继续、作为 AI、我可以帮你、如果你需要、这取决于、是否需要我。",
@@ -308,7 +321,7 @@
       "线下模式里 action 和 speech 要自然交替：动作有画面但别长篇，发言像当面脱口而出。",
       isOffline ? "线下模式要更像现场反应：可以被动作打断，可以边做事边短促回话，不要把现场写成系统旁白说明。" : "",
       isReenter ? "重回/重新生成时只改写最近一轮回复，仍然要像角色当下重新接住那句话，不要解释你在重写。" : "",
-      "一条回复可以拆成多条短气泡，像真人连续发消息；每条必须有真实内容，不能只有标点、省略号或模板话。",
+      "一条回复可以拆成多条短气泡，像真人连续发消息；但只能按完整自然句或换行拆，不能按逗号、顿号、分号、冒号把一句话硬切成多条。",
       "",
       "角色大脑规则（只在内部判断，绝不能写进 content）：",
       "角色先站在自己的利益、情绪、面子和关系位置上反应，不是为了满足用户而说话。",
@@ -341,8 +354,10 @@
       "",
       "JSON 消息节奏规则：",
       "messages 至少 10 条，但每条都必须有内容推进；不要为了凑 10 条拆成废话。",
+      "不要为了凑 10 条把同一句话切成前半句/后半句；不足时生成新的自然反应、停顿、追问、转场或补充。",
       "不要连续 10 条都同一种句式，不要连续多条都以同一个称呼开头，不要连续多条都问问题，不要连续多条都解释原因。",
-      "红包/转账/图片/位置/语音等特殊消息不计入 10 条普通内容气泡。"
+      "红包/转账/图片/位置/语音等特殊消息不计入 10 条普通内容气泡。",
+      isOffline ? "线下 events 至少 10 条自然事件；不允许把“直起腰、看着他、眼神收敛、透出压迫感”拆成四条。action 是完整镜头，speech 是完整台词，不够时新增自然推进。" : ""
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
@@ -897,7 +912,7 @@
         role: "user",
         content: [
           "用户信息：" + userContext.name + "；" + (userContext.persona || "无补充资料"),
-          "请以 " + valueOrFallback(profile.name) + " 本人身份接住最近一句；即使无话可接或对方明显结束，也要按角色关系给出至少 10 条短气泡，不要返回空数组。",
+          "请以 " + valueOrFallback(profile.name) + " 本人身份接住最近一句；即使无话可接或对方明显结束，也要按角色关系给出至少 10 条自然短气泡，不要返回空数组，也不要把一句完整话按逗号拆开凑数。",
           "最近聊天：",
           history || "暂无历史消息"
         ].join("\n")
@@ -953,7 +968,7 @@
         extraRules: buildBlockReactionRules(requestOptions)
       }),
       "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount(),
-      "如果后续旧规则提到可以少回或返回空数组，请忽略；本轮必须保留至少 10 条有真实内容的自然消息。"
+      "如果后续旧规则提到可以少回或返回空数组，请忽略；本轮必须保留至少 10 条有真实内容的自然消息，不要靠拆碎同一句话凑数。"
     ].join("\n");
   }
 
@@ -1280,6 +1295,9 @@
           buildMemorySummaryPrompt(context),
           buildBodyStatePrompt(context),
           "events 形成一小段自然剧情；action 是旁白/动作描写，speech 是角色说话；用自然动作、停顿和接话推进，不要返回空数组。",
+          "events 至少 10 条，但必须是 10 个自然事件；一个完整动作只算 1 条，不许拆成多个短语。",
+          "不够 10 条时，新增动作、停顿、反应、角色发言、环境变化或下一步安排；不要靠拆碎动作或一句话凑数。",
+          "禁止把“直起腰、看着他、眼神收敛、透出压迫感”拆成四条；action 要短而完整，speech 要像当面对话。",
           "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"37.50\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           "动作描写要短而有画面感；角色发言要像真实当面对话，不要写成长作文。",
@@ -1432,6 +1450,9 @@
           buildNaturalStyleRules("offline"),
           buildAntiRepeatRules(context),
           "每次推进形成一小段自然剧情，不要返回空数组。",
+          "events 至少 10 条自然事件；一个完整动作只能是一条 action，一句完整台词只能是一条 speech，不许按逗号、顿号、分号或冒号拆开。",
+          "不够 10 条时，新增自然推进：动作、停顿、反应、角色发言、环境变化、下一步安排；不要把已有动作或句子切碎。",
+          "禁止把“直起腰、看着他、眼神收敛、透出压迫感”拆成四条；动作描写要像剧情镜头，不要像第三方功能提示。",
           "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
           "角色说话不要太长，动作描写像小说旁白但不要冗长。",
@@ -2261,10 +2282,11 @@
     (Array.isArray(events) ? events : []).forEach(function (event, index) {
       var source = event && typeof event === "object" ? event : { content: event };
       var type = source.type === "speech" ? "speech" : "action";
-      var contentParts = splitTextContentForTopUp(source.content).filter(Boolean);
+      var content = normalizeAiMessageText(source.content);
+      var contentParts = type === "speech" ? splitTextContentForTopUp(content).filter(Boolean) : (content ? [content] : []);
 
-      if (!contentParts.length && source.content) {
-        contentParts = [String(source.content).trim()];
+      if (!contentParts.length && content) {
+        contentParts = [content];
       }
 
       contentParts.forEach(function (content, partIndex) {
@@ -2279,19 +2301,6 @@
         }));
       });
     });
-
-    if (normalized.length < settings.min && rawContent) {
-      splitTextContentForTopUp(rawContent).forEach(function (content, index) {
-        if (normalized.length >= settings.min) {
-          return;
-        }
-        normalized.push({
-          type: index % 3 === 1 && validIds.length ? "speech" : "action",
-          characterId: index % 3 === 1 && validIds.length ? pickOfflineSpeaker(validIds, settings.fallbackId, settings.mode, index) : "",
-          content: content
-        });
-      });
-    }
 
     if (settings.previousReplyText || settings.rejectedReplyText || settings.lastAssistantText || settings.oldReplyText) {
       normalized = filterRepeatedContentItems(normalized, [
@@ -2313,13 +2322,15 @@
     var missing = Math.max(0, (Number(settings.min) || 0) - currentCount);
     var profiles = getFallbackProfiles(settings);
     var events = [];
-    var used = {};
+    var usedSpeech = {};
+    var usedAction = {};
     var index = 0;
 
     while (events.length < missing && currentCount + events.length < settings.max) {
       var profile = profiles[index % profiles.length] || {};
-      var content = pickFallbackLine(profile, index, used);
-      var characterId = profile.id || pickOfflineSpeaker(settings.validIds || [], settings.fallbackId, settings.mode, index);
+      var useAction = index % 3 === 0 || !(settings.validIds || []).length;
+      var content = useAction ? pickFallbackOfflineActionLine(index, usedAction) : pickFallbackLine(profile, index, usedSpeech);
+      var characterId = useAction ? "" : (profile.id || pickOfflineSpeaker(settings.validIds || [], settings.fallbackId, settings.mode, index));
 
       events.push({
         type: characterId ? "speech" : "action",
@@ -2330,6 +2341,33 @@
     }
 
     return events;
+  }
+
+  function pickFallbackOfflineActionLine(index, used) {
+    var lines = [
+      "他没有立刻说话，只把手里的东西慢慢放下。",
+      "空气安静了几秒，连细小的动静都显得清楚。",
+      "他抬眼看过来，目光停在你脸上没有移开。",
+      "窗外的光落进来，把两个人之间的距离照得很分明。",
+      "他往前走了一步，又在恰好的距离停住。",
+      "桌面被指节轻轻叩了一下，节奏很慢。",
+      "他把刚才的话咽回去，像是在重新判断你的反应。",
+      "周围短暂地静下来，只剩呼吸声贴得很近。",
+      "他侧过身，让出一点空间，却没有真的退开。",
+      "那点压着的情绪没有散，只是被他暂时收住。"
+    ];
+    var offset = index % lines.length;
+    var line = lines[offset];
+    var guard = 0;
+
+    while (used[line] && guard < lines.length) {
+      offset = (offset + 1) % lines.length;
+      line = lines[offset];
+      guard += 1;
+    }
+
+    used[line] = true;
+    return line;
   }
 
   function pickOfflineSpeaker(validIds, fallbackId, mode, index) {
@@ -2814,7 +2852,7 @@
     }
 
     parts = cleaned
-      .split(/(?:\n+|(?<=[\u3002\uFF01\uFF1F\uFF5E\u2026\uFF1B;.!?]))/g)
+      .split(/(?:\n+|(?<=[\u3002\uFF01\uFF1F\uFF5E\u2026.!?]))/g)
       .map(function (part) {
         return normalizeAiMessageText(part.replace(/^[-*\d.\s]+/, ""));
       })
@@ -2838,16 +2876,7 @@
       return parts;
     }
 
-    parts = cleaned
-      .split(/(?<=[，,、；;：:])|(?:\s{2,})/g)
-      .map(function (part) {
-        return normalizeAiMessageText(part);
-      })
-      .filter(function (part) {
-        return part && part.length >= 3;
-      });
-
-    return parts.length > 1 ? parts : [cleaned];
+    return [cleaned];
   }
 
   function summarizeMessageForAI(message) {

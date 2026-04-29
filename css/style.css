@@ -4189,11 +4189,9 @@ textarea::placeholder {
   white-space: pre-wrap;
 }
 
-.inline-offline-action-card small {
-  grid-column: 2;
-  color: var(--muted);
-  font-size: 11px;
-  line-height: 1.2;
+.inline-offline-action-card small,
+.inline-offline-action-card time {
+  display: none;
 }
 
 .inline-offline-speech-bubble {
@@ -4302,8 +4300,7 @@ textarea::placeholder {
   user-select: none;
 }
 
-.red-packet-card,
-.transfer-message-card,
+.money-card,
 .location-message-card {
   width: min(246px, 76vw);
   max-width: 100%;
@@ -4311,29 +4308,36 @@ textarea::placeholder {
   border-radius: 8px;
   text-align: left;
   font: inherit;
-  box-shadow: 0 8px 20px rgba(31, 38, 34, 0.1);
+  box-shadow: 0 10px 24px rgba(31, 38, 34, 0.13);
   overflow: hidden;
   cursor: pointer;
 }
 
-.red-packet-card,
-.transfer-message-card {
-  min-height: 78px;
+.money-card {
+  width: min(278px, 76vw);
+  min-height: 112px;
   display: grid;
-  grid-template-columns: 44px minmax(0, 1fr);
-  gap: 10px;
-  align-items: center;
-  padding: 12px;
-}
-
-.red-packet-card {
-  background: linear-gradient(135deg, #f06a43, #d95036);
+  grid-template-columns: 46px minmax(0, 1fr);
+  gap: 11px;
+  align-items: start;
+  padding: 13px;
   color: #ffffff;
 }
 
-.transfer-message-card {
-  background: linear-gradient(135deg, #f2b648, #e99a2f);
-  color: #ffffff;
+.money-card.red-packet {
+  background: linear-gradient(135deg, #ff8a3d 0%, #e84f35 54%, #b92b2a 100%);
+}
+
+.money-card.transfer {
+  background: linear-gradient(135deg, #55d1aa 0%, #22a987 56%, #15826e 100%);
+}
+
+.money-card.done {
+  box-shadow: 0 8px 18px rgba(31, 38, 34, 0.1);
+}
+
+.money-card.returned {
+  filter: saturate(0.72);
 }
 
 .money-card-icon {
@@ -4350,32 +4354,59 @@ textarea::placeholder {
 .money-card-main {
   min-width: 0;
   display: grid;
-  gap: 3px;
+  gap: 5px;
 }
 
-.money-card-main strong,
-.money-card-main em,
-.money-card-main small {
+.money-card-header {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.money-card-title,
+.money-card-note {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 
-.money-card-main strong {
+.money-card-title {
+  min-width: 0;
+  flex: 1;
   font-size: 15px;
   line-height: 1.3;
+  font-weight: 900;
 }
 
-.money-card-main em,
-.money-card-main small {
+.money-card-amount {
+  font-size: 19px;
+  line-height: 1.2;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.money-card-note {
   font-size: 12px;
   font-style: normal;
-  opacity: 0.9;
+  opacity: 0.86;
+}
+
+.money-card-status {
+  flex: none;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.2);
+  color: #ffffff;
+  font-size: 11px;
+  font-style: normal;
+  font-weight: 900;
+  line-height: 1.2;
 }
 
 .money-card-action {
   justify-self: start;
-  margin-top: 3px;
+  margin-top: 2px;
   padding: 3px 8px;
   border-radius: 999px;
   background: rgba(255, 255, 255, 0.22);
@@ -4388,29 +4419,42 @@ textarea::placeholder {
   justify-self: start;
   display: flex;
   gap: 6px;
-  margin-top: 4px;
+  margin-top: 5px;
 }
 
 .money-card-actions button {
-  min-width: 44px;
-  min-height: 26px;
-  padding: 4px 9px;
+  min-width: 52px;
+  min-height: 28px;
+  padding: 5px 12px;
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.24);
-  color: #ffffff;
+  background: rgba(255, 255, 255, 0.94);
+  color: #b92b2a;
   font: inherit;
   font-size: 12px;
   font-weight: 900;
   cursor: pointer;
 }
 
-.money-card-actions button:last-child {
-  background: rgba(255, 255, 255, 0.14);
+.transfer .money-card-actions button {
+  color: #08715e;
 }
 
-.message-special-wrapper.received .money-card-action {
-  opacity: 0.72;
+.money-card-actions button.secondary {
+  border: 1px solid rgba(255, 255, 255, 0.62);
+  background: rgba(32, 42, 38, 0.16);
+  color: #ffffff;
+}
+
+.money-card-actions button:disabled,
+.message-special-wrapper.received .money-card-actions button {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.message-special-wrapper.received .money-card-action,
+.message-special-wrapper.received .money-card-status {
+  opacity: 0.78;
 }
 
 .location-message-card {
@@ -4664,6 +4708,10 @@ textarea::placeholder {
 .group-message-main .ai-image-card,
 .group-message-main .voice-message {
   width: min(246px, 100%);
+}
+
+.group-message-main .money-card {
+  width: min(278px, 100%);
 }
 
 .chat-tool-panel {
@@ -5428,7 +5476,7 @@ textarea::placeholder {
   position: relative;
   width: min(86%, 360px);
   margin: 14px auto;
-  padding: 13px 34px 18px 14px;
+  padding: 13px 34px 13px 14px;
   border-radius: 8px;
   background: rgba(255, 255, 255, 0.94);
   color: #51444b;
@@ -5448,7 +5496,9 @@ textarea::placeholder {
   font-style: normal;
 }
 
-.offline-action-card small {
+.offline-action-card small,
+.offline-action-card time {
+  display: none;
   position: absolute;
   right: 12px;
   bottom: 6px;

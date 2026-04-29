@@ -120,6 +120,15 @@
     handlers[key] = handler;
   }
 
+  function hasHandler(targetType, mode) {
+    return Boolean(getHandler(normalizeJob({
+      targetType: targetType,
+      targetId: "__handler_probe__",
+      mode: mode,
+      generationId: "__handler_probe__"
+    })));
+  }
+
   function isTargetRunning(targetType, targetId, modes) {
     var type = normalizeTargetType(targetType);
     var id = String(targetId || "");
@@ -425,6 +434,7 @@
     getJobs: getJobs,
     runJob: runJob,
     registerHandler: registerHandler,
+    hasHandler: hasHandler,
     isTargetRunning: isTargetRunning,
     resumeInterruptedJobs: resumeInterruptedJobs,
     touchRunningJobs: touchRunningJobs,

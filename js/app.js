@@ -58,6 +58,7 @@
   var noteSearchKeyword = "";
   var expandedWorldBookIds = {};
   var expandedWorldEntryIds = {};
+  var apiJobResumeRetryTimer = null;
   var currentThemeId = "default";
   var currentDesktopPage = 0;
   var desktopTouchStartX = 0;
@@ -2454,7 +2455,11 @@
     getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
     getElement("chatOfflineBtn").addEventListener("click", window.CharacterManager.openActiveCharacterOffline);
-    addClick("chatBlockBtn", window.CharacterManager.toggleActiveCharacterBlock);
+    addClick("chatBlockBtn", function (event) {
+      event.preventDefault();
+      event.stopPropagation();
+      window.CharacterManager.toggleActiveCharacterBlock();
+    });
     getElement("privateOfflineExitBtn").addEventListener("click", function () {
       window.OfflineManager.disableInlineOffline();
     });
@@ -6469,6 +6474,7 @@
         refreshHomeSummary();
         applySavedTheme();
         loadSettingsIntoForm();
+        resumeAppApiJobsWhenReady();
         showSettingsTip("数据导入成功");
       } catch (error) {
         showSettingsTip(error.message || "导入失败，请检查 JSON 文件格式", true);
@@ -6553,9 +6559,7 @@
     loadSettingsIntoForm();
     refreshHomeSummary();
     setActivePage("homeScreen");
-    if (window.AppApiJobs && window.AppApiJobs.resumeInterruptedJobs) {
-      window.AppApiJobs.resumeInterruptedJobs();
-    }
+    resumeAppApiJobsWhenReady();
   }
 
   function showSettingsTip(message, isError) {
@@ -6572,6 +6576,52 @@
       savedTip.textContent = "";
       savedTip.classList.remove("error");
     }, 2200);
+  }
+
+  function areAppApiJobHandlersReady() {
+    var requiredHandlers = [
+      ["private", "chat"],
+      ["private", "inlineOffline"],
+      ["private", "regenerate"],
+      ["private", "blockReaction"],
+      ["group", "chat"],
+      ["group", "inlineOffline"],
+      ["group", "regenerate"],
+      ["offline", "offline"]
+    ];
+
+    if (!window.AppApiJobs || !window.AppApiJobs.resumeInterruptedJobs) {
+      return false;
+    }
+
+    if (!window.CharacterManager || !window.GroupManager || !window.OfflineManager) {
+      return false;
+    }
+
+    if (!window.AppApiJobs.hasHandler) {
+      return true;
+    }
+
+    return requiredHandlers.every(function (item) {
+      return window.AppApiJobs.hasHandler(item[0], item[1]);
+    });
+  }
+
+  function resumeAppApiJobsWhenReady(attempt) {
+    var retry = Number(attempt) || 0;
+
+    window.clearTimeout(apiJobResumeRetryTimer);
+
+    if (areAppApiJobHandlersReady()) {
+      window.AppApiJobs.resumeInterruptedJobs();
+      return;
+    }
+
+    if (retry < 12) {
+      apiJobResumeRetryTimer = window.setTimeout(function () {
+        resumeAppApiJobsWhenReady(retry + 1);
+      }, 50);
+    }
   }
 
   function buildChatGenerationContext(targetType, targetId, extras) {
@@ -6914,9 +6964,7 @@
     loadSettingsIntoForm();
     refreshHomeSummary();
     setActivePage("homeScreen");
-    if (window.AppApiJobs && window.AppApiJobs.resumeInterruptedJobs) {
-      window.AppApiJobs.resumeInterruptedJobs();
-    }
+    resumeAppApiJobsWhenReady();
   }
 
   window.setActivePage = setActivePage;

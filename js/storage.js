@@ -134,9 +134,6 @@
     if (mismatch.cleanedNote !== undefined) {
       source.note = mismatch.cleanedNote;
     }
-    if (mismatch.repairedFromFallback && isMoneyAmountOnlyText(source.content)) {
-      source.content = source.type === "redPacket" ? "恭喜发财，大吉大利" : "转账";
-    }
     return source;
   }
 
@@ -145,22 +142,12 @@
     var amountInfo = extractMoneyAmountInfo(source.amount);
     var contentInfo = extractMoneyAmountInfo(source.content);
     var noteInfo = extractMoneyAmountInfo(source.note);
-    var suspicious = isSuspiciousMessageAmount(amountInfo);
-    var fallback = chooseMoneyFallbackAmount(amountInfo, contentInfo, noteInfo);
     var result = {
       amount: amountInfo.normalized,
       amountInfo: amountInfo,
       contentAmount: contentInfo.normalized,
-      noteAmount: noteInfo.normalized,
-      repairedFromFallback: false
+      noteAmount: noteInfo.normalized
     };
-
-    if (suspicious && fallback) {
-      result.amount = fallback.normalized;
-      result.repairedFromFallback = true;
-      result.source = fallback.source;
-      return result;
-    }
 
     if (!amountInfo.normalized) {
       result.amount = "";
@@ -213,50 +200,6 @@
       normalized: normalizeMoneyAmount(value),
       hasNumber: Number.isFinite(amount)
     };
-  }
-
-  function isSuspiciousMessageAmount(amountInfo) {
-    if (!amountInfo || !amountInfo.normalized) {
-      return true;
-    }
-
-    return amountInfo.value === 0 || amountInfo.value === 20;
-  }
-
-  function chooseMoneyFallbackAmount(amountInfo, contentInfo, noteInfo) {
-    var candidates = [
-      Object.assign({ source: "content" }, contentInfo || {}),
-      Object.assign({ source: "note" }, noteInfo || {})
-    ].filter(function (item) {
-      return item.normalized;
-    });
-    var current = amountInfo && Number.isFinite(amountInfo.value) ? amountInfo.value : NaN;
-    var index;
-    var nonDefaultCandidate = null;
-
-    if (!candidates.length) {
-      return null;
-    }
-
-    for (index = 0; index < candidates.length; index += 1) {
-      if (candidates[index].value !== 20) {
-        nonDefaultCandidate = candidates[index];
-        break;
-      }
-    }
-
-    if (current === 20) {
-      if (nonDefaultCandidate) {
-        return nonDefaultCandidate;
-      }
-      return null;
-    }
-
-    if (current === 0 || !Number.isFinite(current)) {
-      return nonDefaultCandidate || candidates[0];
-    }
-
-    return null;
   }
 
   function hasConflictingAmount(primaryInfo, secondaryInfo) {
