@@ -9,6 +9,8 @@
   var selectedGroupIds = [];
   var isGroupMessageSelectionMode = false;
   var selectedGroupMessageIds = [];
+  var INITIAL_GROUP_RENDER_LIMIT = 60;
+  var groupVisibleMessageCounts = {};
   var collapsedAnnouncements = {};
 
   function getElement(id) {
@@ -567,16 +569,21 @@
     getElement("groupChatTitle").textContent = group.name;
     updateInlineOfflineUi();
     closeAllMenus();
-    renderGroupChatMessages(groupId);
     window.setActivePage("groupChatScreen");
     updateThoughtButton(groupId);
+    window.setTimeout(function () {
+      renderGroupChatMessages(groupId);
+    }, 0);
   }
 
-  function renderGroupChatMessages(groupId) {
+  function renderGroupChatMessages(groupId, options) {
     var wrap = getElement("groupChatMessages");
     var group = getGroupById(groupId);
     var settings = getGroupSettings(group);
     var messages = window.AppStorage.getGroupChatHistory(groupId);
+    var renderOptions = options || {};
+    var visibleInfo = getGroupVisibleMessages(groupId, messages, renderOptions);
+    var visibleMessages = visibleInfo.messages;
     var messageIds = messages.map(function (message) {
       return message.id;
     });
@@ -595,7 +602,7 @@
     if (!messages.length) {
       wrap.innerHTML = renderGroupAnnouncement(group, settings) + '<div class="chat-empty">发送一句话，再点回复让群成员互动</div>' + (isGroupMessageSelectionMode ? renderGroupMessageBatchActionBar(selectableCount) : "");
     } else {
-      wrap.innerHTML = renderGroupAnnouncement(group, settings) + renderGroupMessagesWithDates(messages, function (message) {
+      wrap.innerHTML = renderGroupAnnouncement(group, settings) + renderGroupLoadMoreBar(groupId, visibleInfo.hiddenCount) + renderGroupMessagesWithDates(visibleMessages, function (message) {
         var messageId = escapeHtml(message.id || "");
         var selectCheck = renderGroupMessageSelectCheck(message);
         var userAvatar = renderGroupUserMessageAvatar(group, settings);
@@ -635,6 +642,7 @@
 
         return renderCharacterGroupMessage(message);
       }) + (isGroupMessageSelectionMode ? renderGroupMessageBatchActionBar(selectableCount) : "");
+      bindGroupLoadMore(wrap, groupId);
       bindGroupMessageActions(wrap, messages);
       bindGroupMessageDetails(wrap, messages);
     }
@@ -643,15 +651,75 @@
 
     if (isGroupMessageSelectionMode) {
       bindGroupMessageBatchActions(wrap, messages);
+    } else {
+      bindGroupHistoryScrollLoader(wrap, groupId);
     }
 
-    if (!isGroupMessageSelectionMode) {
-      requestAnimationFrame(function () {
-        wrap.scrollTop = wrap.scrollHeight;
-      });
+    if (!isGroupMessageSelectionMode && !renderOptions.skipScroll) {
+      if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
+        window.AppApiJobs.scheduleScrollToBottom(wrap);
+      } else {
+        requestAnimationFrame(function () {
+          wrap.scrollTop = wrap.scrollHeight;
+        });
+      }
     }
 
     updateThoughtButton(groupId);
+  }
+
+  function getGroupVisibleMessages(groupId, messages, options) {
+    var allMessages = Array.isArray(messages) ? messages : [];
+    var forceFull = options && options.forceFull || isGroupMessageSelectionMode;
+    var current = groupVisibleMessageCounts[groupId] || INITIAL_GROUP_RENDER_LIMIT;
+    var count = forceFull ? allMessages.length : Math.min(allMessages.length, Math.max(INITIAL_GROUP_RENDER_LIMIT, current));
+
+    groupVisibleMessageCounts[groupId] = count;
+    return {
+      messages: allMessages.slice(Math.max(0, allMessages.length - count)),
+      hiddenCount: Math.max(0, allMessages.length - count)
+    };
+  }
+
+  function renderGroupLoadMoreBar(groupId, hiddenCount) {
+    if (!hiddenCount) {
+      return "";
+    }
+
+    return '<button class="chat-load-more" type="button" data-group-load-more="' + escapeHtml(groupId || "") + '">加载更早消息（' + hiddenCount + '）</button>';
+  }
+
+  function bindGroupLoadMore(wrap, groupId) {
+    var button = wrap ? wrap.querySelector("[data-group-load-more]") : null;
+
+    if (!button) {
+      return;
+    }
+
+    button.addEventListener("click", function () {
+      groupVisibleMessageCounts[groupId] = (groupVisibleMessageCounts[groupId] || INITIAL_GROUP_RENDER_LIMIT) + INITIAL_GROUP_RENDER_LIMIT;
+      renderGroupChatMessages(groupId, { skipScroll: true });
+    });
+  }
+
+  function bindGroupHistoryScrollLoader(wrap, groupId) {
+    if (!wrap || wrap.__groupHistoryLoaderBound === groupId) {
+      return;
+    }
+
+    wrap.__groupHistoryLoaderBound = groupId;
+    wrap.addEventListener("scroll", function () {
+      if (activeGroupId !== groupId || wrap.scrollTop > 28) {
+        return;
+      }
+
+      if (!wrap.querySelector("[data-group-load-more]")) {
+        return;
+      }
+
+      groupVisibleMessageCounts[groupId] = (groupVisibleMessageCounts[groupId] || INITIAL_GROUP_RENDER_LIMIT) + INITIAL_GROUP_RENDER_LIMIT;
+      renderGroupChatMessages(groupId, { skipScroll: true });
+    }, { passive: true });
   }
 
   function applyGroupChatBackground(wrap, background) {
@@ -1722,11 +1790,18 @@
     var nextIndex;
     var before;
     var after;
-    var aiResult;
-    var replies;
-    var generationContext;
+    var oldMessages;
+    var oldGenerationIds;
+    var oldBodyState;
+    var rejectedReplyText;
+    var generationId;
 
-    if (!group || !characters.length || isGroupReplying) {
+    if (!group || !characters.length) {
+      return;
+    }
+
+    if (isGroupJobRunning(group.id, ["regenerate"])) {
+      showGroupBusyNotice(group.id);
       return;
     }
 
@@ -1740,75 +1815,81 @@
     }
 
     nextIndex = index + 1;
-    while (nextIndex < messages.length && messages[nextIndex].role === "character") {
+    while (nextIndex < messages.length && messages[nextIndex].role !== "user") {
       nextIndex += 1;
     }
 
     before = messages.slice(0, index + 1);
+    oldMessages = messages.slice(index + 1, nextIndex);
     after = messages.slice(nextIndex);
+    oldGenerationIds = collectGroupGenerationIds(oldMessages);
+    oldBodyState = window.AppStorage.getBodyState ? window.AppStorage.getBodyState("group", group.id) : null;
+    rejectedReplyText = collectGroupReplyText(oldMessages);
+    generationId = window.AppApiJobs && window.AppApiJobs.createGenerationId
+      ? window.AppApiJobs.createGenerationId()
+      : "generation_" + Date.now();
 
     isGroupReplying = true;
     setGroupReplyState(true);
-    window.AppStorage.saveGroupChatHistory(group.id, before.concat([{
-      id: String(Date.now()),
-      role: "character",
-      characterId: characters[0].id,
-      characterName: characters[0].name,
-      content: "正在输入...",
-      type: "loading",
-      createdAt: Date.now()
-    }], after));
-    renderGroupChatMessages(group.id);
+
+    if (oldGenerationIds.length && window.AppStorage.removeGenerationArtifacts) {
+      window.AppStorage.removeGenerationArtifacts(oldGenerationIds, {
+        targetType: "group",
+        targetId: group.id
+      });
+    }
+
+    window.AppStorage.saveGroupChatHistory(group.id, before.concat([createGroupLoadingMessage(generationId, characters[0])], after));
+    scheduleGroupRender(group.id);
 
     try {
-      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
-        ? window.AppExtras.buildChatGenerationContext("group", group.id, {
+      await requestGroupJob({
+        targetType: "group",
+        targetId: group.id,
+        mode: "regenerate",
+        generationId: generationId,
+        beforeMessages: before,
+        afterMessages: after,
+        requestSnapshot: {
+          parentUserMessageId: messageId,
           regenerateRequest: true,
-          regenerateInstruction: String(requirement || "").trim()
-        })
-        : {};
-      aiResult = normalizeGroupAiResult(await window.AIService.sendGroupChatRequest(
-        group,
-        characters,
-        before,
-        window.AppStorage.getMemoriesForCharacters(group.memberIds),
-        generationContext
-      ));
-      replies = aiResult.replies;
-      if (!replies.length) {
-        messages = before.concat(after);
-        showEmptyAiReplyToast();
-        return;
-      }
-      persistGroupAiExtras(group, aiResult);
-      await streamGroupReplies(before.slice(), group, characters, replies, after);
-      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
-        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
-      }
+          regenerateInstruction: String(requirement || "").trim(),
+          previousReplyText: getPreviousGroupReplyText(messages, index),
+          rejectedReplyText: rejectedReplyText,
+          oldGenerationIds: oldGenerationIds,
+          oldMessages: oldMessages
+        }
+      });
       messages = null;
     } catch (error) {
-      messages = before.concat([{
+      if (oldBodyState && window.AppStorage.saveBodyState) {
+        window.AppStorage.saveBodyState("group", group.id, oldBodyState);
+      }
+      messages = before.concat(oldMessages, [{
         id: String(Date.now()),
         role: "character",
         characterId: characters[0].id,
         characterName: characters[0].name,
         content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
         type: "error",
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        generationId: generationId
       }], after);
     } finally {
       if (messages) {
         window.AppStorage.saveGroupChatHistory(group.id, messages);
       }
-      renderGroupChatMessages(group.id);
-      renderGroupList();
+      scheduleGroupRender(group.id);
+      scheduleGroupListRender();
       isGroupReplying = false;
       setGroupReplyState(false);
     }
   }
 
-  function appendGroupReplies(messages, group, characters, replies) {
+  function appendGroupReplies(messages, group, characters, replies, meta) {
     var startAt = Date.now();
+    var extra = meta || {};
+    var generated = [];
 
     (replies || []).slice(0, 50).forEach(function (reply, index) {
       var character = getCharacterById(reply.characterId) || characters[0];
@@ -1820,33 +1901,46 @@
       }
 
       createdAt = startAt + index;
-      message = createGroupCharacterReplyMessage(reply, character, createdAt);
+      message = createGroupCharacterReplyMessage(reply, character, createdAt, extra);
       message = recordGroupMoneyMessage(message, group, character);
       messages.push(message);
+      generated.push(message);
       window.AppStorage.addCharacterMemory(character.id, {
         content: "\u89d2\u8272\u5728\u7fa4\u804a\u91cc\u56de\u590d\u4e86\uff1a" + getMessageMemoryText(message),
         source: "group",
+        generationId: extra.generationId || "",
+        sourceGenerationId: extra.generationId || "",
+        relatedMessageIds: [message.id],
+        targetType: "group",
+        targetId: group.id,
         createdAt: createdAt
       });
     });
 
-    return messages;
+    return {
+      messages: messages,
+      generated: generated
+    };
   }
 
-  function streamGroupReplies(baseMessages, group, characters, replies, suffixMessages) {
+  function streamGroupReplies(baseMessages, group, characters, replies, suffixMessages, meta) {
     var shown = [];
     var startAt = Date.now();
     var suffix = Array.isArray(suffixMessages) ? suffixMessages : [];
+    var extra = meta || {};
     var items = (replies || []).slice(0, 50).filter(function (item) {
       return item && item.content;
     });
+    var appended;
 
     if (!window.AppStream || !window.AppStream.appendMessagesWithStreamEffect) {
-      window.AppStorage.saveGroupChatHistory(group.id, appendGroupReplies(baseMessages.slice(), group, characters, items).concat(suffix));
+      appended = appendGroupReplies(baseMessages.slice(), group, characters, items, extra);
+      window.AppStorage.saveGroupChatHistory(group.id, appended.messages.concat(suffix));
       if (activeGroupId === group.id) {
-        renderGroupChatMessages(group.id);
+        scheduleGroupRender(group.id);
       }
-      return Promise.resolve();
+      scheduleGroupListRender();
+      return Promise.resolve(appended.generated);
     }
 
     return window.AppStream.appendMessagesWithStreamEffect({
@@ -1862,20 +1956,30 @@
           return;
         }
 
-        message = createGroupCharacterReplyMessage(reply, character, createdAt);
+        message = createGroupCharacterReplyMessage(reply, character, createdAt, extra);
         message = recordGroupMoneyMessage(message, group, character);
         shown.push(message);
         window.AppStorage.addCharacterMemory(character.id, {
           content: "\u89d2\u8272\u5728\u7fa4\u804a\u91cc\u56de\u590d\u4e86\uff1a" + getMessageMemoryText(message),
           source: "group",
+          generationId: extra.generationId || "",
+          sourceGenerationId: extra.generationId || "",
+          relatedMessageIds: [message.id],
+          targetType: "group",
+          targetId: group.id,
           createdAt: createdAt
         });
-        window.AppStorage.saveGroupChatHistory(group.id, baseMessages.concat(shown, suffix));
+        saveGroupHistoryDebounced(group.id, baseMessages.concat(shown, suffix));
         if (activeGroupId === group.id) {
-          renderGroupChatMessages(group.id);
+          scheduleGroupRender(group.id);
         }
-        renderGroupList();
       }
+    }).then(function () {
+      window.AppStorage.saveGroupChatHistory(group.id, baseMessages.concat(shown, suffix));
+      flushGroupHistory(group.id);
+      scheduleGroupRender(group.id);
+      scheduleGroupListRender();
+      return shown;
     });
   }
 
@@ -1991,8 +2095,9 @@
     return "";
   }
 
-  function persistGroupAiExtras(group, result) {
+  function persistGroupAiExtras(group, result, meta) {
     var now = Date.now();
+    var extra = meta || {};
 
     if (!group || !result) {
       return;
@@ -2011,6 +2116,11 @@
           content: thought.content,
           mood: thought.mood || "",
           visibleSummary: thought.visibleSummary || thought.summary || "",
+          generationId: extra.generationId || "",
+          sourceGenerationId: extra.generationId || "",
+          relatedMessageIds: extra.relatedMessageIds || [],
+          targetType: "group",
+          targetId: group.id,
           createdAt: now
         });
       });
@@ -2034,6 +2144,11 @@
         window.AppStorage.addCharacterMemory(characterId, {
           content: memory.content,
           source: "group",
+          generationId: extra.generationId || "",
+          sourceGenerationId: extra.generationId || "",
+          relatedMessageIds: extra.relatedMessageIds || [],
+          targetType: "group",
+          targetId: group.id,
           createdAt: now
         });
       });
@@ -2042,16 +2157,20 @@
     }
   }
 
-  function createGroupCharacterReplyMessage(reply, character, createdAt) {
+  function createGroupCharacterReplyMessage(reply, character, createdAt, meta) {
     var source = reply && typeof reply === "object" ? reply : { content: String(reply || "") };
     var type = source.type || "text";
+    var extra = meta || {};
     var message = Object.assign({}, source, {
       id: String(createdAt + Math.random()),
       role: "character",
       characterId: character.id,
       characterName: character.name,
       type: type,
-      createdAt: createdAt
+      createdAt: createdAt,
+      generationId: extra.generationId || source.generationId || "",
+      parentUserMessageId: extra.parentUserMessageId || source.parentUserMessageId || "",
+      generatedAt: extra.generatedAt || createdAt
     });
 
     if (type === "voice") {
@@ -2131,6 +2250,9 @@
     }
 
     message.content = normalizeDisplayText(message.content || source.content || "");
+    message.generationId = message.generationId || extra.generationId || source.generationId || "";
+    message.parentUserMessageId = message.parentUserMessageId || extra.parentUserMessageId || source.parentUserMessageId || "";
+    message.generatedAt = message.generatedAt || extra.generatedAt || createdAt;
     return message;
   }
 
@@ -2164,10 +2286,7 @@
     var characters = group ? getGroupCharacters(group) : [];
     var messages;
     var historyForRequest;
-    var now;
-    var aiResult;
-    var replies;
-    var generationContext;
+    var generationId;
 
     if (!group || isGroupReplying || !characters.length) {
       return;
@@ -2195,56 +2314,37 @@
       return;
     }
 
+    if (isGroupJobRunning(group.id, ["chat"])) {
+      showGroupBusyNotice(group.id);
+      return;
+    }
+
     isGroupReplying = true;
     setGroupReplyState(true);
-    now = Date.now();
     historyForRequest = messages.slice();
+    generationId = window.AppApiJobs && window.AppApiJobs.createGenerationId
+      ? window.AppApiJobs.createGenerationId()
+      : "generation_" + Date.now();
 
-    messages.push({
-      id: String(now),
-      role: "character",
-      characterId: characters[0].id,
-      characterName: characters[0].name,
-      content: "正在输入中",
-      type: "loading",
-      createdAt: now
-    });
+    messages.push(createGroupLoadingMessage(generationId, characters[0]));
     window.AppStorage.saveGroupChatHistory(group.id, messages);
-    renderGroupChatMessages(group.id);
+    scheduleGroupRender(group.id);
 
     try {
-      generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
-        ? window.AppExtras.buildChatGenerationContext("group", group.id)
-        : {};
-      aiResult = normalizeGroupAiResult(await window.AIService.sendGroupChatRequest(
-        group,
-        characters,
-        historyForRequest,
-        window.AppStorage.getMemoriesForCharacters(group.memberIds),
-        generationContext
-      ));
-      replies = aiResult.replies;
-
-      messages = removeLoadingMessages(window.AppStorage.getGroupChatHistory(group.id));
-      window.AppStorage.saveGroupChatHistory(group.id, messages);
-      if (activeGroupId === group.id) {
-        renderGroupChatMessages(group.id);
-      }
-      if (!replies.length) {
-        showEmptyAiReplyToast();
-        messages = null;
-        return;
-      }
-      messages = applyGroupMoneyDecisions(messages, group, aiResult);
-      window.AppStorage.saveGroupChatHistory(group.id, messages);
-      persistGroupAiExtras(group, aiResult);
-      await streamGroupReplies(messages, group, characters, replies, []);
-      if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
-        window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
-      }
+      await requestGroupJob({
+        targetType: "group",
+        targetId: group.id,
+        mode: "chat",
+        generationId: generationId,
+        beforeMessages: historyForRequest,
+        requestSnapshot: {
+          parentUserMessageId: getLastGroupUserMessage(historyForRequest) && getLastGroupUserMessage(historyForRequest).id || "",
+          previousReplyText: getPreviousGroupReplyText(historyForRequest)
+        }
+      });
       messages = null;
     } catch (error) {
-      messages = removeLoadingMessages(window.AppStorage.getGroupChatHistory(group.id));
+      messages = removeGroupLoadingByGeneration(window.AppStorage.getGroupChatHistory(group.id), generationId);
       messages.push({
         id: String(Date.now()),
         role: "character",
@@ -2252,14 +2352,15 @@
         characterName: characters[0].name,
         content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
         type: "error",
-        createdAt: Date.now()
+        createdAt: Date.now(),
+        generationId: generationId
       });
     } finally {
       if (messages) {
         window.AppStorage.saveGroupChatHistory(group.id, messages);
       }
-      renderGroupChatMessages(group.id);
-      renderGroupList();
+      scheduleGroupRender(group.id);
+      scheduleGroupListRender();
       isGroupReplying = false;
       setGroupReplyState(false);
     }
@@ -2284,6 +2385,231 @@
     return (Array.isArray(messages) ? messages : []).filter(function (message) {
       return message.type !== "loading";
     });
+  }
+
+  function scheduleGroupRender(groupId) {
+    if (window.AppApiJobs && window.AppApiJobs.scheduleRenderChat) {
+      window.AppApiJobs.scheduleRenderChat("group", groupId);
+      return;
+    }
+    renderGroupChatMessages(groupId);
+  }
+
+  function scheduleGroupListRender() {
+    if (window.AppApiJobs && window.AppApiJobs.scheduleRenderList) {
+      window.AppApiJobs.scheduleRenderList("group");
+      return;
+    }
+    renderGroupList();
+  }
+
+  function saveGroupHistoryDebounced(groupId, messages) {
+    if (window.AppApiJobs && window.AppApiJobs.saveChatHistoryDebounced) {
+      window.AppApiJobs.saveChatHistoryDebounced("group", groupId, messages, 120);
+      return;
+    }
+    window.AppStorage.saveGroupChatHistory(groupId, messages);
+  }
+
+  function flushGroupHistory(groupId) {
+    if (window.AppApiJobs && window.AppApiJobs.flushChatHistorySave) {
+      window.AppApiJobs.flushChatHistorySave("group", groupId);
+    }
+  }
+
+  function isGroupJobRunning(groupId, modes) {
+    return Boolean(window.AppApiJobs
+      && window.AppApiJobs.isTargetRunning
+      && window.AppApiJobs.isTargetRunning("group", groupId, modes));
+  }
+
+  function showGroupBusyNotice(groupId) {
+    if (groupId && activeGroupId === groupId && window.AppExtras && window.AppExtras.showToast) {
+      window.AppExtras.showToast("正在回复中", true);
+    }
+  }
+
+  function createGroupLoadingMessage(generationId, character) {
+    var now = Date.now();
+    return {
+      id: String(now + Math.random()),
+      role: "character",
+      characterId: character && character.id || "",
+      characterName: character && character.name || "角色",
+      content: "正在输入中",
+      type: "loading",
+      createdAt: now,
+      generationId: generationId || ""
+    };
+  }
+
+  function removeGroupLoadingByGeneration(messages, generationId) {
+    var gid = String(generationId || "");
+    return (Array.isArray(messages) ? messages : []).filter(function (message) {
+      if (!message || message.type !== "loading") {
+        return true;
+      }
+      return gid && message.generationId !== gid;
+    });
+  }
+
+  function collectGroupGenerationIds(messages) {
+    var ids = {};
+
+    (Array.isArray(messages) ? messages : []).forEach(function (message) {
+      if (message && message.generationId) {
+        ids[String(message.generationId)] = true;
+      }
+      if (message && message.sourceGenerationId) {
+        ids[String(message.sourceGenerationId)] = true;
+      }
+    });
+
+    return Object.keys(ids);
+  }
+
+  function collectGroupReplyText(messages) {
+    return (Array.isArray(messages) ? messages : []).filter(function (message) {
+      return message && message.role === "character" && message.type !== "loading" && message.type !== "error" && message.content;
+    }).map(function (message) {
+      return (message.characterName || "角色") + "：" + getMessageMemoryText(message);
+    }).join("\n");
+  }
+
+  function getPreviousGroupReplyText(messages, userIndex) {
+    var list = Array.isArray(messages) ? messages : [];
+    var index = typeof userIndex === "number" ? userIndex : list.length - 1;
+    var end = index;
+    var start = end - 1;
+
+    while (start >= 0 && list[start] && list[start].role !== "user") {
+      start -= 1;
+    }
+
+    return collectGroupReplyText(list.slice(start + 1, end));
+  }
+
+  function getLastGroupUserMessage(messages) {
+    var list = Array.isArray(messages) ? messages : [];
+    var index;
+
+    for (index = list.length - 1; index >= 0; index -= 1) {
+      if (list[index] && list[index].role === "user") {
+        return list[index];
+      }
+    }
+
+    return null;
+  }
+
+  function hasGroupGeneratedOutput(groupId, generationId) {
+    return Boolean(window.AppApiJobs
+      && window.AppApiJobs.hasGeneratedOutput
+      && window.AppApiJobs.hasGeneratedOutput("group", groupId, generationId));
+  }
+
+  function requestGroupJob(input) {
+    if (!window.AppApiJobs || !window.AppApiJobs.runJob) {
+      return Promise.reject(new Error("API job runner unavailable."));
+    }
+
+    return window.AppApiJobs.runJob(input);
+  }
+
+  async function handleGroupChatJob(job) {
+    var groupId = job.targetId;
+    var group = getGroupById(groupId);
+    var characters = group ? getGroupCharacters(group) : [];
+    var requestSnapshot = job.requestSnapshot || {};
+    var historyForRequest = Array.isArray(job.beforeMessages) && job.beforeMessages.length
+      ? job.beforeMessages
+      : removeGroupLoadingByGeneration(window.AppStorage.getGroupChatHistory(groupId), job.generationId);
+    var suffixMessages = Array.isArray(job.afterMessages) ? job.afterMessages : [];
+    var generationContext;
+    var aiResult;
+    var replies;
+    var messages;
+    var baseMessages;
+    var generatedMessages;
+    var parentUserMessage = requestSnapshot.parentUserMessageId ? { id: requestSnapshot.parentUserMessageId } : getLastGroupUserMessage(historyForRequest);
+
+    if (!group || !characters.length) {
+      throw new Error("群聊不存在或没有成员。");
+    }
+
+    if (hasGroupGeneratedOutput(groupId, job.generationId)) {
+      messages = removeGroupLoadingByGeneration(window.AppStorage.getGroupChatHistory(groupId), job.generationId);
+      window.AppStorage.saveGroupChatHistory(groupId, messages);
+      scheduleGroupRender(groupId);
+      scheduleGroupListRender();
+      return { afterMessages: messages };
+    }
+
+    generationContext = window.AppExtras && window.AppExtras.buildChatGenerationContext
+      ? window.AppExtras.buildChatGenerationContext("group", groupId, {
+        generationId: job.generationId,
+        previousReplyText: requestSnapshot.previousReplyText || getPreviousGroupReplyText(historyForRequest),
+        rejectedReplyText: requestSnapshot.rejectedReplyText || "",
+        regenerateRequest: requestSnapshot.regenerateRequest,
+        regenerateInstruction: requestSnapshot.regenerateInstruction
+      })
+      : requestSnapshot;
+
+    aiResult = normalizeGroupAiResult(await window.AIService.sendGroupChatRequest(
+      group,
+      characters,
+      historyForRequest,
+      window.AppStorage.getMemoriesForCharacters(group.memberIds),
+      generationContext
+    ));
+    replies = aiResult.replies || [];
+
+    messages = removeGroupLoadingByGeneration(window.AppStorage.getGroupChatHistory(groupId), job.generationId);
+    window.AppStorage.saveGroupChatHistory(groupId, messages);
+    scheduleGroupRender(groupId);
+
+    if (!replies.length) {
+      showEmptyAiReplyToast();
+      scheduleGroupListRender();
+      return { afterMessages: messages };
+    }
+
+    baseMessages = suffixMessages.length || requestSnapshot.regenerateRequest
+      ? historyForRequest.slice()
+      : messages;
+    baseMessages = applyGroupMoneyDecisions(baseMessages, group, aiResult);
+    window.AppStorage.saveGroupChatHistory(groupId, baseMessages.concat(suffixMessages));
+    generatedMessages = await streamGroupReplies(baseMessages, group, characters, replies, suffixMessages, {
+      generationId: job.generationId,
+      parentUserMessageId: parentUserMessage && parentUserMessage.id || "",
+      generatedAt: Date.now()
+    });
+    persistGroupAiExtras(group, aiResult, {
+      generationId: job.generationId,
+      relatedMessageIds: (generatedMessages || []).map(function (message) {
+        return message.id;
+      })
+    });
+
+    if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {
+      window.AppExtras.finalizeChatGenerationContext(generationContext, aiResult);
+    }
+
+    messages = window.AppStorage.getGroupChatHistory(groupId);
+    scheduleGroupRender(groupId);
+    scheduleGroupListRender();
+    return { afterMessages: messages };
+  }
+
+  async function handleGroupRegenerateJob(job) {
+    return handleGroupChatJob(job);
+  }
+
+  async function handleGroupInlineOfflineJob(job) {
+    if (window.OfflineManager && window.OfflineManager.handleGroupInlineOfflineJob) {
+      return window.OfflineManager.handleGroupInlineOfflineJob(job);
+    }
+    throw new Error("线下管理器还没有准备好。");
   }
 
   function setCompactReplyButton(button, label, busy) {
@@ -2421,7 +2747,7 @@
     closeAllMenus();
 
     if (group && window.AppExtras && window.AppExtras.openBodyStatePanel) {
-      window.AppExtras.openBodyStatePanel("group", group.id, "身体状态");
+      window.AppExtras.openBodyStatePanel("group", group.id, "你的身体状态");
     }
   }
 
@@ -2692,6 +3018,17 @@
       return false;
     });
 
+    if (!target && activeGroupId) {
+      renderGroupChatMessages(activeGroupId, { forceFull: true });
+      Array.prototype.some.call(wrap.querySelectorAll("[data-message-id]"), function (node) {
+        if (node.dataset.messageId === messageId) {
+          target = node;
+          return true;
+        }
+        return false;
+      });
+    }
+
     if (target) {
       target.scrollIntoView({ block: "center", behavior: "smooth" });
       target.classList.add("message-search-hit");
@@ -2704,6 +3041,18 @@
   function getActiveGroupId() {
     return activeGroupId;
   }
+
+  function registerGroupApiJobHandlers() {
+    if (!window.AppApiJobs || !window.AppApiJobs.registerHandler) {
+      return;
+    }
+
+    window.AppApiJobs.registerHandler("group", "chat", handleGroupChatJob);
+    window.AppApiJobs.registerHandler("group", "inlineOffline", handleGroupInlineOfflineJob);
+    window.AppApiJobs.registerHandler("group", "regenerate", handleGroupRegenerateJob);
+  }
+
+  registerGroupApiJobHandlers();
 
   window.GroupManager = {
     renderGroupList: renderGroupList,

@@ -79,7 +79,9 @@
         userContext: userContext,
         longTermMemoryText: memoryText
       }),
-      buildNaturalStyleRules("private")
+      buildMatchedWorldBooksSection(""),
+      buildNaturalStyleRules("private"),
+      buildAntiRepeatRules({})
     ].join("\n");
   }
 
@@ -200,12 +202,20 @@
       "用户当前人设：",
       source.userContext && source.userContext.persona || "暂无",
       "用户昵称/关系备注：" + valueOrFallback(source.userContext && source.userContext.name) + " / " + valueOrFallback(source.userContext && source.userContext.relationshipName),
-      "世界书命中内容：",
-      source.worldBookContext || "暂无匹配世界书。",
-      source.bodyState ? ["当前身体/状态记录：", JSON.stringify(source.bodyState)].join("\n") : ""
+      source.bodyState ? ["用户身体状态记录（user body state，不是角色身体状态）：", JSON.stringify(source.bodyState)].join("\n") : ""
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
+  }
+
+  function buildMatchedWorldBooksSection(worldBookContext) {
+    return [
+      "",
+      "D. 世界书命中 matchedWorldBooks",
+      worldBookContext || "暂无匹配世界书。",
+      "以上内容是角色当前世界的一部分，不是资料卡；不能说“根据世界书/设定/系统”。若与普通记忆冲突，优先按世界书修正。",
+      "回复必须自然体现命中的关系、规则、禁忌、地点、称呼和世界观；before/前置条目当作当前世界规则，after/后置条目当作补充细节。"
+    ].join("\n");
   }
 
   function buildCurrentTask(mode, options) {
@@ -215,7 +225,7 @@
 
     return [
       "",
-      "D. 本轮任务 currentTask",
+      "F. 本轮任务 currentTask",
       "当前模式：" + label,
       source.regenerateRequest ? "本轮是重回/重新生成：只改写最近一轮角色回复，不重演整段聊天，不跳到下一轮。" : "",
       source.regenerateInstruction ? "用户补充重回要求：" + source.regenerateInstruction : "",
@@ -259,7 +269,7 @@
   }
 
   function buildPrivateMessageSchema(profile) {
-    return "{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}";
+    return "{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[{\"type\":\"blockUser\",\"reason\":\"原因，仅强烈符合人设和剧情时使用\"}],\"thoughts\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}";
   }
 
   function buildGroupMessageSchema() {
@@ -283,6 +293,7 @@
       "统一时序记忆要当作连续关系来用：注意最近消息的时间和间隔，隔了很久要自然反应，但不要像报表一样说明时间线。",
       "回复要像真人在手机里当下发消息：自然、口语、有情绪波动，有停顿和短句，不要写成说明文、读后感或安慰模板。",
       "禁止明显 AI/客服/助手口吻，尤其不要把这些话当成高频开头或模板：好的、当然、我理解你、根据你提供的信息、我们可以一起、请告诉我更多、你可以继续、作为 AI、我可以帮你、如果你需要、这取决于、是否需要我。",
+      "这些高频话术不能当模板开头，也不能高频出现：我理解你、如果你需要、请告诉我更多、作为 AI、根据你提供的信息、我们可以一起、当然可以、好的、我会陪着你、你并不孤单、我一直都在、慢慢来、没关系的、辛苦了、照顾好自己、希望你能、这听起来、我能感受到、你的感受是合理的。",
       "不要总结用户，不要解释设定，不要把世界书或记忆原文复述出来；要把它们融进角色的反应、语气、选择、回避和下意识细节。",
       "每次回复前先抓住角色此刻的亲疏、欲望、防备、委屈、占有欲或玩笑心，再决定说什么；不要从“回答问题”出发，要从“这个人会怎么接这句话”出发。",
       "角色人设里写到的身份、关系、说话方式要直接影响用词和节奏：冷淡的人可以短，黏人的人可以追问，强势的人可以下判断，别把所有角色写成同一种温柔说明腔。",
@@ -325,11 +336,53 @@
       "如果距离上次聊天很久，可以自然提一句，但不要像系统报时间。",
       "如果用户刚退回红包/转账，角色反应必须符合人设：可能嘴硬、尴尬、生气、收回面子、假装不在意、继续施压，不能像系统说明状态。",
       "如果用户收款/领取，角色也要像本人反应，不要说“操作成功”。",
+      "拉黑是关系事件，不是系统通知；角色不能说“你已被拉黑”“系统已处理”“操作成功”“后台显示”。冷淡角色可能不解释，强势角色可能反压，嘴硬角色可能装不在意，黏人角色可能慌。",
+      "actions 里的 blockUser 只能在强烈符合人设和剧情时返回；返回后仍要让消息像角色本人，而不是系统播报。",
       "",
       "JSON 消息节奏规则：",
       "messages 至少 10 条，但每条都必须有内容推进；不要为了凑 10 条拆成废话。",
       "不要连续 10 条都同一种句式，不要连续多条都以同一个称呼开头，不要连续多条都问问题，不要连续多条都解释原因。",
       "红包/转账/图片/位置/语音等特殊消息不计入 10 条普通内容气泡。"
+    ].filter(function (line) {
+      return line !== "";
+    }).join("\n");
+  }
+
+  function buildAntiRepeatRules(options) {
+    var source = options || {};
+    var previous = String(source.previousReplyText || source.lastAssistantText || "").trim();
+    var rejected = String(source.rejectedReplyText || source.oldReplyText || "").trim();
+
+    return [
+      "",
+      "E. 避免复读 antiRepeatRules",
+      "不要重复上一轮已经表达过的核心意思。",
+      "不要连续两轮都用相同句式、相同口头禅、相同推进方式。",
+      "如果上一轮已经批评过、安慰过、提醒过，这一轮要继续推进，而不是换句话复读。",
+      "如果用户没有提供新信息，也要从情绪、态度、动作、安排、反问、追问、转场里推进。",
+      "不要用模板开头顶替真实反应；上一轮用过的称呼、口头禅和句式，本轮要明显错开。",
+      previous ? "上一轮角色回复核心内容（只用于避开重复，不要照抄）：\n" + limitText(previous, 420) : "",
+      rejected ? "本轮重回已删除的旧回复（必须避开高度相似）：\n" + limitText(rejected, 520) : ""
+    ].filter(function (line) {
+      return line !== "";
+    }).join("\n");
+  }
+
+  function buildBlockReactionRules(options) {
+    var source = options || {};
+    var reactionType = String(source.blockReactionType || "");
+    var reason = String(source.blockReason || "").trim();
+
+    if (!source.blockReaction) {
+      return "";
+    }
+
+    return [
+      "本轮是拉黑/拒收关系事件的角色反应。",
+      reactionType === "userBlocked" ? "用户刚把角色拉黑；角色知道自己被挡在外面，只能按本人性格反应。" : "",
+      reactionType === "characterBlocked" ? "角色此前拒收用户消息；用户又发来消息，角色可以冷淡拒绝、嘴硬、警告、沉默式回避或少量回应。" : "",
+      reason ? "拉黑/拒收原因线索：" + reason : "",
+      "不能说系统、操作成功、后台、已处理；也不要像通知。必须像角色本人在关系里被刺到或维持姿态。"
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
@@ -394,10 +447,11 @@
       return "";
     }
 
-    return ["D. 世界书相关内容：命中 " + entries.length + " 条，以下只注入最相关内容，回复时自然融合，不要照抄。"].concat(entries
+    return ["命中 " + entries.length + " 条，以下只注入最相关内容，按重要度排序；回复时自然融合，不要照抄。"].concat(entries
       .slice(0, settings.limit)
       .map(function (entry, index) {
         var content = limitText(entry.content, settings.maxEntryLength);
+        var insertPosition = entry.insertPosition === "after" ? "after / 后置补充" : "before / 前置世界规则";
         totalLength += content.length;
 
         if (totalLength > settings.maxTotalLength) {
@@ -406,6 +460,8 @@
 
         return [
           (index + 1) + ". " + (entry.bookName || "World Book") + " / " + (entry.title || "Entry"),
+          "分组：" + (entry.group || "未分组"),
+          "插入位置：" + insertPosition,
           "关键词：" + (entry.keywords || []).join("、"),
           "命中度：" + (entry.matchScore || entry.priority || 0),
           "内容：" + content
@@ -673,12 +729,14 @@
 
     return [
       "I. 用户身体状态连续记录",
-      "当前身体状态 JSON：",
+      "bodyState 描述的是 user body state / 用户身体状态，不是角色自己的身体状态栏。",
+      "角色只能根据当前剧情、互动、上下文感知、判断、更新用户身体状态；不能把这些字段当成角色自己的状态。",
+      "当前用户身体状态 JSON：",
       JSON.stringify(options.bodyState || {}),
       "本轮必须在同一次 JSON 里返回 bodyState。若没有变化，也返回承接当前状态后的完整状态。",
-      "bodyState 要和剧情一致，记录身体感受、舒适度、恢复建议和各部位状态；可以写体温、破皮/发热风险，但不要做医学诊断，不要渲染低俗露骨细节。",
+      "bodyState 要和剧情一致，记录用户身体感受、舒适度、参考建议和各部位状态；可以写体温、破皮/发热风险，但不要做医学诊断，不要渲染低俗露骨细节。",
       "recoverySuggestion 只作为参考提醒，不要写成强制停止剧情或强行中断互动的命令。",
-      "若角色是陪伴管教型，可让身体状态成为后续关心、监督、休息安排和边界提醒的依据。"
+      "若角色是陪伴管教型，可让用户身体状态成为后续关心、监督、休息安排和边界提醒的依据。"
     ].join("\n");
   }
 
@@ -729,7 +787,7 @@
   }
 
   function buildBodyStateSchemaText() {
-    return "\"bodyState\":{\"overallCondition\":\"正常/疲惫/紧张/放松/酸痛/虚弱\",\"currentNote\":\"当前说明\",\"energy\":80,\"moodInfluence\":\"对情绪的影响\",\"sorenessLevel\":0,\"painLevel\":0,\"rednessLevel\":0,\"bruiseRisk\":\"低/中/高\",\"sittingComfort\":\"正常\",\"walkingComfort\":\"正常\",\"handUseComfort\":\"正常\",\"touchSensitivity\":\"正常\",\"bodyTemperature\":\"正常/偏热/发热风险\",\"feverRisk\":\"低/中/高\",\"skinBreakage\":\"无/轻微/需要处理\",\"restNeeded\":false,\"recoverySuggestion\":\"恢复建议\",\"parts\":{\"手心\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀部\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"大腿\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀腿连接处\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"腰背\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"肩颈\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"膝腿\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"其他受影响区域\":{\"status\":\"正常\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"}}}";
+    return "\"bodyState\":{\"overallCondition\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"currentNote\":\"当前用户身体状态说明\",\"energy\":80,\"moodInfluence\":\"对用户情绪的影响\",\"sorenessLevel\":0,\"painLevel\":0,\"rednessLevel\":0,\"bruiseRisk\":\"低/中/高\",\"sittingComfort\":\"正常\",\"walkingComfort\":\"正常\",\"handUseComfort\":\"正常\",\"touchSensitivity\":\"正常\",\"bodyTemperature\":\"正常/偏热/发热风险\",\"feverRisk\":\"低/中/高\",\"skinBreakage\":\"无/轻微/需要处理\",\"restNeeded\":false,\"recoverySuggestion\":\"参考建议\",\"parts\":{\"手心\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀部\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"大腿\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀腿连接处\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"腰背\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"肩颈\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"膝腿\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"其他受影响区域\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"}}}";
   }
 
   function appendOptionalSchema(schemaText, options) {
@@ -762,7 +820,9 @@
       max: MAX_CHAT_REPLY_COUNT,
       defaultType: "text",
       allowRawFallback: !parsed,
-      fallbackProfile: buildReplyFallbackProfile(character)
+      fallbackProfile: buildReplyFallbackProfile(character),
+      previousReplyText: options && options.previousReplyText,
+      rejectedReplyText: options && options.rejectedReplyText
     });
   }
 
@@ -783,6 +843,7 @@
       }).join("\n");
     var latestUserInput = getLatestUserInputForPrompt(chatHistory);
     var contextText = [
+      latestUserInput,
       userContext.name,
       userContext.persona,
       profile.name,
@@ -805,13 +866,14 @@
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
             longTermMemoryText: formatMemoryList(memories) || "暂无",
             userContext: userContext,
-            worldBookContext: worldBookContext,
             bodyState: requestOptions.bodyState
           }),
+          buildMatchedWorldBooksSection(worldBookContext),
           buildMemorySummaryPrompt(requestOptions),
           buildBodyStatePrompt(requestOptions),
           "",
           buildNaturalStyleRules(requestOptions.regenerateRequest ? "reenter" : "private"),
+          buildAntiRepeatRules(requestOptions),
           buildThoughtGenerationRules("private"),
           "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
           "你可以使用的消息类型：text 普通文字，voice 语音消息，emoji 表情，image 虚拟图片描述卡片，location 虚拟位置，redPacket 模拟红包，transfer 模拟转账。",
@@ -825,7 +887,8 @@
             regenerateInstruction: String(requestOptions.regenerateInstruction || "").trim(),
             schemaText: buildPrivateMessageSchema(profile),
             moneyScope: "私聊",
-            primaryField: "messages"
+            primaryField: "messages",
+            extraRules: buildBlockReactionRules(requestOptions)
           }),
           "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount()
         ].join("\n")
@@ -858,10 +921,11 @@
           return (character.name || character.id) + "：" + (formatMemoryList(sharedMemories && sharedMemories[character.id] || []) || "暂无");
         }).join("\n"),
         userContext: userContext,
-        worldBookContext: requestOptions.worldBookContext || "",
         bodyState: requestOptions.bodyState
       }),
+      buildMatchedWorldBooksSection(requestOptions.worldBookContext || ""),
       buildNaturalStyleRules(requestOptions.regenerateRequest ? "reenterGroup" : "group"),
+      buildAntiRepeatRules(requestOptions),
       "群聊信息",
       "群名称：" + valueOrFallback(group && group.name),
       "群公告：" + valueOrFallback(group && group.settings && group.settings.announcement),
@@ -885,7 +949,8 @@
         regenerateInstruction: String(requestOptions.regenerateInstruction || "").trim(),
         schemaText: buildGroupMessageSchema(),
         moneyScope: "群聊",
-        primaryField: "messages"
+        primaryField: "messages",
+        extraRules: buildBlockReactionRules(requestOptions)
       }),
       "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount(),
       "如果后续旧规则提到可以少回或返回空数组，请忽略；本轮必须保留至少 10 条有真实内容的自然消息。"
@@ -909,7 +974,9 @@
       max: replyLimit,
       defaultType: "text",
       allowRawFallback: !parsed,
-      fallbackProfiles: (characters || []).map(buildReplyFallbackProfile)
+      fallbackProfiles: (characters || []).map(buildReplyFallbackProfile),
+      previousReplyText: options && options.previousReplyText,
+      rejectedReplyText: options && options.rejectedReplyText
     });
 
     if (group && group.settings && group.settings.allowSpecialMessages === false) {
@@ -1048,6 +1115,7 @@
 
   function buildGroupMessages(group, characters, groupHistory, sharedMemories, options) {
     var requestOptions = options || {};
+    var userContext = buildUserContext(group && group.settings || {});
     var worldBookContext;
     var groupSettingsText;
     var contextText;
@@ -1070,6 +1138,9 @@
     contextText = [
       group && group.name,
       group && group.settings && group.settings.announcement,
+      userContext.name,
+      userContext.persona,
+      getLatestUserInputForPrompt(groupHistory),
       (characters || []).map(function (character) {
         return [
           character.name,
@@ -1138,7 +1209,9 @@
       mode: context.mode,
       min: MIN_CHAT_REPLY_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
-      fallbackProfiles: participants.map(buildReplyFallbackProfile)
+      fallbackProfiles: participants.map(buildReplyFallbackProfile),
+      previousReplyText: context.previousReplyText,
+      rejectedReplyText: context.rejectedReplyText
     });
 
     return {
@@ -1162,7 +1235,22 @@
       scene.name ? "场景：" + scene.name : "",
       scene.description ? "场景描述：" + scene.description : ""
     ].filter(Boolean).join("\n");
-    var contextText = [context.userInput || "", sceneText, historyText].join("\n");
+    var contextText = [
+      context.userInput || "",
+      sceneText,
+      historyText,
+      userContext.name,
+      userContext.persona,
+      participants.map(function (character) {
+        return [
+          character && character.name,
+          buildMergedCharacterPersona(character),
+          formatMemoryList(memories && character ? memories[character.id] || [] : [])
+        ].join("\n");
+      }).join("\n"),
+      formatChatMemoryList(chatMemories),
+      context.bodyState ? JSON.stringify(context.bodyState) : ""
+    ].join("\n");
     var worldBookContext = context.worldBookContext || buildWorldBookContext(
       contextText,
       mode === "group" ? "group" : "private",
@@ -1181,10 +1269,11 @@
               return (character.name || character.id) + "：" + (formatMemoryList(memories[character.id] || []) || "暂无");
             }).join("\n"),
             userContext: userContext,
-            worldBookContext: worldBookContext,
             bodyState: context.bodyState
           }),
+          buildMatchedWorldBooksSection(worldBookContext),
           buildNaturalStyleRules("offline"),
+          buildAntiRepeatRules(context),
           sceneText || "场景：未指定，请沿用当前聊天氛围。",
           "你要把用户输入理解为一句话、一个动作或一个场景推进点。",
           "本轮只调用一次 API，必须同一次返回 events、thoughts、memories。",
@@ -1272,7 +1361,9 @@
       mode: context.mode,
       min: MIN_CHAT_REPLY_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
-      fallbackProfiles: participants.map(buildReplyFallbackProfile)
+      fallbackProfiles: participants.map(buildReplyFallbackProfile),
+      previousReplyText: context.previousReplyText,
+      rejectedReplyText: context.rejectedReplyText
     });
 
     return {
@@ -1305,7 +1396,19 @@
         return formatPromptTimePrefix(event.createdAt) + "旁白：" + summarizeMessageForAI(event);
       }).join("\n");
     var worldBookContext = buildWorldBookContext(
-      [context.userInput || "", history].join("\n"),
+      [
+        context.userInput || "",
+        history,
+        participants.map(function (character) {
+          return [
+            character && character.name,
+            buildMergedCharacterPersona(character),
+            formatMemoryList(sharedMemories && character ? sharedMemories[character.id] || [] : [])
+          ].join("\n");
+        }).join("\n"),
+        formatChatMemoryList(chatMemories),
+        context.bodyState ? JSON.stringify(context.bodyState) : ""
+      ].join("\n"),
       context.mode === "group" ? "group" : "private",
       context.targetId || ""
     );
@@ -1323,10 +1426,11 @@
               return (character.name || character.id) + "：" + (formatMemoryList(sharedMemories[character.id] || []) || "暂无");
             }).join("\n"),
             userContext: buildUserContext(context.userSettings || {}),
-            worldBookContext: worldBookContext,
             bodyState: context.bodyState
           }),
+          buildMatchedWorldBooksSection(worldBookContext),
           buildNaturalStyleRules("offline"),
+          buildAntiRepeatRules(context),
           "每次推进形成一小段自然剧情，不要返回空数组。",
           "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
@@ -2062,10 +2166,11 @@
       var source = action && typeof action === "object" ? action : { content: action };
       return {
         type: String(source.type || "narration"),
-        content: normalizeAiMessageText(source.content || source.text || "")
+        content: normalizeAiMessageText(source.content || source.text || source.reason || ""),
+        reason: normalizeAiMessageText(source.reason || source.content || source.text || "")
       };
     }).filter(function (action) {
-      return action.content;
+      return action.type === "blockUser" || action.content;
     }).slice(0, MAX_CHAT_REPLY_COUNT);
   }
 
@@ -2188,6 +2293,13 @@
       });
     }
 
+    if (settings.previousReplyText || settings.rejectedReplyText || settings.lastAssistantText || settings.oldReplyText) {
+      normalized = filterRepeatedContentItems(normalized, [
+        settings.previousReplyText || settings.lastAssistantText || "",
+        settings.rejectedReplyText || settings.oldReplyText || ""
+      ]);
+    }
+
     if (normalized.length < settings.min) {
       normalized = normalized.concat(createFallbackOfflineEvents(settings, normalized.length));
     }
@@ -2263,6 +2375,13 @@
       return reply && reply.content;
     });
 
+    if (settings.previousReplyText || settings.rejectedReplyText || settings.lastAssistantText || settings.oldReplyText) {
+      filtered = filterRepeatedReplies(filtered, [
+        settings.previousReplyText || settings.lastAssistantText || "",
+        settings.rejectedReplyText || settings.oldReplyText || ""
+      ], settings);
+    }
+
     if (countReplyItemsForMinimum(filtered) < settings.min) {
       filtered = expandReplyListToMinimum(filtered, settings);
     }
@@ -2272,6 +2391,99 @@
     }
 
     return filtered.slice(0, settings.max);
+  }
+
+  function filterRepeatedReplies(replies, previousTexts, options) {
+    var settings = Object.assign({
+      min: MIN_CHAT_REPLY_COUNT,
+      max: MAX_CHAT_REPLY_COUNT,
+      defaultType: "text"
+    }, options || {});
+    var previous = (Array.isArray(previousTexts) ? previousTexts : [previousTexts]).map(compactRepeatText).filter(Boolean);
+    var filtered = [];
+
+    (Array.isArray(replies) ? replies : []).forEach(function (reply) {
+      var compact = compactRepeatText(reply && reply.content);
+      var repeated = compact && previous.some(function (text) {
+        return isHighlySimilarText(compact, text);
+      });
+
+      if (!repeated) {
+        filtered.push(reply);
+      }
+    });
+
+    if (countReplyItemsForMinimum(filtered) < settings.min) {
+      filtered = filtered.concat(createFallbackReplyItems(settings, filtered));
+    }
+
+    return filtered.slice(0, settings.max);
+  }
+
+  function filterRepeatedContentItems(items, previousTexts) {
+    var previous = (Array.isArray(previousTexts) ? previousTexts : [previousTexts]).map(compactRepeatText).filter(Boolean);
+
+    if (!previous.length) {
+      return Array.isArray(items) ? items : [];
+    }
+
+    return (Array.isArray(items) ? items : []).filter(function (item) {
+      var compact = compactRepeatText(item && item.content);
+      return !compact || !previous.some(function (text) {
+        return isHighlySimilarText(compact, text);
+      });
+    });
+  }
+
+  function compactRepeatText(text) {
+    return String(text || "")
+      .toLowerCase()
+      .replace(/[^\u4e00-\u9fa5a-z0-9]+/g, "")
+      .trim();
+  }
+
+  function isHighlySimilarText(a, b) {
+    var first = String(a || "");
+    var second = String(b || "");
+    var shortLength = Math.min(first.length, second.length);
+    var longLength = Math.max(first.length, second.length);
+    var shared;
+
+    if (!first || !second) {
+      return false;
+    }
+
+    if (first === second) {
+      return true;
+    }
+
+    if (shortLength >= 12 && (first.indexOf(second) !== -1 || second.indexOf(first) !== -1) && shortLength / longLength > 0.72) {
+      return true;
+    }
+
+    shared = countSharedBigrams(first, second);
+    return longLength >= 14 && shared / Math.max(1, Math.max(first.length, second.length) - 1) > 0.72;
+  }
+
+  function countSharedBigrams(a, b) {
+    var first = {};
+    var count = 0;
+    var index;
+    var token;
+
+    for (index = 0; index < a.length - 1; index += 1) {
+      first[a.slice(index, index + 2)] = true;
+    }
+
+    for (index = 0; index < b.length - 1; index += 1) {
+      token = b.slice(index, index + 2);
+      if (first[token]) {
+        count += 1;
+        delete first[token];
+      }
+    }
+
+    return count;
   }
 
   function expandReplyListToMinimum(replies, settings) {

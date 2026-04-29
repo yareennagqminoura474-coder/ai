@@ -1239,7 +1239,7 @@
       }
 
       (book.entries || []).forEach(function (entry) {
-        var keywords = Array.isArray(entry.keywords) ? entry.keywords : [];
+        var keywords = normalizeWorldBookKeywords(entry);
         var keywordScore = keywords.reduce(function (score, keyword) {
           var value = String(keyword || "").trim().toLowerCase();
 
@@ -1258,19 +1258,21 @@
           return score;
         }, 0);
         var titleScore = entry.title && text.indexOf(String(entry.title).toLowerCase()) !== -1 ? 5 : 0;
+        var groupScore = entry.group && text.indexOf(String(entry.group).toLowerCase()) !== -1 ? 2 : 0;
         var contentScore = contextTokens.reduce(function (score, token) {
           if (!token || token.length < 2) {
             return score;
           }
           return String(entry.content || "").toLowerCase().indexOf(token) !== -1 ? score + 1 : score;
         }, 0);
-        var score = keywordScore + titleScore + Math.min(contentScore, 6) + (Number(entry.priority) || 0);
+        var score = keywordScore + titleScore + groupScore + Math.min(contentScore, 6) + (Number(entry.priority) || 0);
 
         if (entry.enabled && score > 0) {
           matched.push(Object.assign({}, entry, {
             bookName: book.name,
             bookDescription: book.description,
             bookScope: book.scope,
+            keywords: keywords,
             matchScore: score
           }));
         }
@@ -1312,6 +1314,27 @@
     }
 
     return !book.targetIds.length || book.targetIds.indexOf(targetId) !== -1;
+  }
+
+  function normalizeWorldBookKeywords(entry) {
+    var source = entry && typeof entry === "object" ? entry : {};
+    var values = [];
+
+    if (source.keyword) {
+      values = values.concat(String(source.keyword).split(/[,，\s]+/));
+    }
+
+    if (Array.isArray(source.keywords)) {
+      values = values.concat(source.keywords);
+    } else if (source.keywords) {
+      values = values.concat(String(source.keywords).split(/[,，\s]+/));
+    }
+
+    return values.map(function (keyword) {
+      return String(keyword || "").trim();
+    }).filter(Boolean).filter(function (keyword, index, all) {
+      return all.indexOf(keyword) === index;
+    });
   }
 
   function getThoughtStore() {
@@ -3009,15 +3032,20 @@
   function normalizeWorldBookEntry(entry, index) {
     var source = entry && typeof entry === "object" ? entry : {};
     var now = Date.now();
+    var content = String(source.content || "");
+    var keywords = normalizeWorldBookKeywords(source);
+    var keyword = String(source.keyword || keywords[0] || "").trim();
 
     return {
       id: String(source.id || now + index),
       title: String(source.title || "未命名条目"),
-      keywords: Array.isArray(source.keywords)
-        ? source.keywords.map(String).map(function (keyword) { return keyword.trim(); }).filter(Boolean)
-        : String(source.keywords || "").split(/[,，\s]+/).map(function (keyword) { return keyword.trim(); }).filter(Boolean),
-      content: String(source.content || ""),
+      keyword: keyword,
+      keywords: keywords,
+      content: content,
+      insertPosition: source.insertPosition === "after" ? "after" : "before",
+      group: String(source.group || "未分组").trim() || "未分组",
       enabled: source.enabled !== false,
+      summary: String(source.summary || content.slice(0, 90)).trim(),
       priority: Number(source.priority) || 0,
       createdAt: Number(source.createdAt) || now,
       updatedAt: Number(source.updatedAt) || now
@@ -3577,6 +3605,7 @@
     localStorage.removeItem(STORAGE_KEYS.theme);
     localStorage.removeItem(STORAGE_KEYS.photos);
     localStorage.removeItem(STORAGE_KEYS.notes);
+    localStorage.removeItem("myAiApp.apiJobs");
     removeAllPrefixedItems(STORAGE_KEYS.chatPrefix);
     removeAllPrefixedItems(STORAGE_KEYS.groupChatPrefix);
     removeAllPrefixedItems(STORAGE_KEYS.offlinePrefix);

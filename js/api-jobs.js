@@ -120,6 +120,28 @@
     handlers[key] = handler;
   }
 
+  function isTargetRunning(targetType, targetId, modes) {
+    var type = normalizeTargetType(targetType);
+    var id = String(targetId || "");
+    var modeList = Array.isArray(modes) ? modes.map(String) : (modes ? [String(modes)] : []);
+    var jobs = getJobs();
+
+    if (!id) {
+      return false;
+    }
+
+    return jobs.some(function (job) {
+      var normalized = normalizeJob(job);
+      var statusActive = normalized.status === "pending" || normalized.status === "running";
+      var modeMatched = !modeList.length || modeList.indexOf(normalized.mode) !== -1;
+
+      return statusActive
+        && normalized.targetType === type
+        && normalized.targetId === id
+        && modeMatched;
+    });
+  }
+
   async function runJob(input, executor) {
     var job = upsertJob(Object.assign({}, input || {}, {
       status: "running",
@@ -188,7 +210,7 @@
     jobs = jobs.map(function (job) {
       var next = normalizeJob(job);
 
-      if (next.status === "running" && now - next.updatedAt > STALE_RUNNING_MS) {
+      if (next.status === "running" && (!runningJobs[next.id] || now - next.updatedAt > STALE_RUNNING_MS)) {
         next.status = "interrupted";
         next.updatedAt = now;
         changed = true;
@@ -403,6 +425,7 @@
     getJobs: getJobs,
     runJob: runJob,
     registerHandler: registerHandler,
+    isTargetRunning: isTargetRunning,
     resumeInterruptedJobs: resumeInterruptedJobs,
     touchRunningJobs: touchRunningJobs,
     scheduleRenderChat: scheduleRenderChat,

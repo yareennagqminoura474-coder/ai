@@ -56,6 +56,8 @@
     origin: ""
   };
   var noteSearchKeyword = "";
+  var expandedWorldBookIds = {};
+  var expandedWorldEntryIds = {};
   var currentThemeId = "default";
   var currentDesktopPage = 0;
   var desktopTouchStartX = 0;
@@ -3461,15 +3463,30 @@
       id: String(now),
       name: "未命名世界书",
       description: "",
-      entries: [],
+      entries: [{
+        id: String(now + 1),
+        title: "新条目",
+        keyword: "",
+        keywords: [],
+        content: "",
+        insertPosition: "before",
+        group: "未分组",
+        enabled: true,
+        priority: 10,
+        createdAt: now,
+        updatedAt: now
+      }],
       enabled: true,
       scope: "global",
       targetIds: [],
       createdAt: now,
       updatedAt: now
     });
+    expandedWorldBookIds[book.id] = true;
+    if (book.entries && book.entries[0]) {
+      expandedWorldEntryIds[getWorldEntryUiKey(book.id, book.entries[0].id)] = true;
+    }
     renderWorldBookScreen();
-    renderWorldBookEditor(book.id);
   }
 
   function renderWorldBookScreen() {
@@ -3482,6 +3499,7 @@
 
     if (!books.length) {
       content.innerHTML = [
+        renderWorldBookTopBar(books),
         '<div class="empty-state compact-empty">',
         '  <div class="empty-visual" aria-hidden="true"><span class="empty-dot"></span></div>',
         "  <h3>世界书还是空的</h3>",
@@ -3493,30 +3511,67 @@
     }
 
     content.innerHTML = [
-      '<div class="notebook-list">',
+      renderWorldBookTopBar(books),
+      '<div class="notebook-list world-book-list">',
       books.map(renderWorldBookCard).join(""),
       "</div>"
     ].join("");
     bindWorldBookActions(content);
   }
 
-  function renderWorldBookCard(book) {
-    var scopeText = getWorldBookScopeLabel(book);
+  function renderWorldBookTopBar(books) {
+    var entryCount = (books || []).reduce(function (total, book) {
+      return total + (book.entries || []).length;
+    }, 0);
 
     return [
-      '<article class="world-book-card" data-book-id="' + escapeHtml(book.id) + '">',
+      '<section class="world-book-toolbar">',
+      '  <div><strong>世界书</strong><span>' + escapeHtml((books || []).length + " 本 / " + entryCount + " 条") + "</span></div>",
+      '  <div class="world-book-toolbar-actions">',
+      '    <button class="outline-button" type="button" data-world-action="create">新建世界书</button>',
+      '    <button class="outline-button" type="button" data-world-action="import-json">导入 JSON</button>',
+      "  </div>",
+      "</section>"
+    ].join("");
+  }
+
+  function renderWorldBookCard(book) {
+    var scopeText = getWorldBookScopeLabel(book);
+    var expanded = Boolean(expandedWorldBookIds[book.id]);
+    var entries = book.entries || [];
+    var groups = groupWorldBookEntries(entries);
+    var summary = book.description || getWorldBookAutoSummary(book);
+
+    return [
+      '<article class="world-book-card app-fold-card' + (expanded ? " expanded" : "") + '" data-book-id="' + escapeHtml(book.id) + '">',
       '  <div class="world-book-card-head">',
-      "    <h3>" + escapeHtml(book.name || "未命名世界书") + "</h3>",
+      '    <button class="world-book-title-button" type="button" data-world-action="toggle-book">',
+      '      <span class="fold-chevron" aria-hidden="true">' + (expanded ? "⌄" : "›") + "</span>",
+      "      <strong>" + escapeHtml(book.name || "未命名世界书") + "</strong>",
+      "    </button>",
       '    <span class="' + (book.enabled ? "enabled" : "disabled") + '">' + (book.enabled ? "启用" : "停用") + "</span>",
       "  </div>",
-      '  <p>' + escapeHtml(book.description || "暂无描述") + "</p>",
-      '  <div class="world-book-meta"><span>范围：' + escapeHtml(scopeText) + "</span></div>",
-      '  <div class="world-book-actions">',
-      '    <button class="outline-button" type="button" data-world-action="edit-book">展开/编辑</button>',
-      '    <button class="outline-button danger" type="button" data-world-action="delete-book">删除</button>',
+      '  <p class="world-book-summary">' + escapeHtml(summary || "暂无描述") + "</p>",
+      '  <div class="world-book-meta"><span>范围：' + escapeHtml(scopeText) + '</span><span>条目：' + entries.length + '</span><span>分组：' + groups.length + "</span></div>",
+      '  <div class="world-book-actions compact">',
+      '    <button class="outline-button" type="button" data-world-action="toggle-book">' + (expanded ? "收起" : "展开") + "</button>",
+      expanded ? '    <button class="outline-button" type="button" data-world-action="save-book">保存</button>' : '    <button class="outline-button" type="button" data-world-action="add-entry">新条目</button>',
+      expanded ? '    <button class="outline-button" type="button" data-world-action="duplicate-book">复制</button>' : "",
+      expanded ? '    <button class="outline-button" type="button" data-world-action="export-book">导出</button>' : "",
+      expanded ? '    <button class="outline-button danger" type="button" data-world-action="delete-book">删除</button>' : "",
       "  </div>",
+      expanded ? renderWorldBookExpanded(book, groups) : renderWorldBookCollapsedGroups(book, groups),
       "</article>"
     ].join("");
+  }
+
+  function getWorldBookAutoSummary(book) {
+    var entries = book && Array.isArray(book.entries) ? book.entries : [];
+    var first = entries.find(function (entry) {
+      return entry && (entry.summary || entry.content);
+    });
+
+    return first ? getWorldEntrySummary(first) : "暂无描述";
   }
 
   function getWorldBookScopeLabel(book) {
@@ -3535,32 +3590,14 @@
   }
 
   function renderWorldBookEditor(bookId) {
-    var book = window.AppStorage.getWorldBooks().find(function (item) {
-      return item.id === bookId;
-    });
-
-    if (!book) {
-      return;
-    }
-
-    showWeChatSheet([
-      '<div class="wechat-sheet-header">',
-      '  <span></span>',
-      "  <h3>编辑世界书</h3>",
-      '  <button type="button" data-close-sheet>关闭</button>',
-      "</div>",
-      '<div class="wechat-sheet-form world-book-editor-sheet">',
-      renderWorldBookEditorCard(book),
-      "</div>"
-    ].join(""), function (sheet) {
-      bindSheetCloseButtons(sheet);
-      bindWorldBookActions(sheet);
-    });
+    expandedWorldBookIds[bookId] = true;
+    renderWorldBookScreen();
   }
 
-  function renderWorldBookEditorCard(book) {
+  function renderWorldBookExpanded(book, groups) {
     return [
-      '<article class="world-book-card world-book-editor-card" data-book-id="' + escapeHtml(book.id) + '">',
+      '<div class="world-book-expanded">',
+      '  <div class="world-book-detail-grid">',
       '  <div class="field-group">',
       '    <label>名称</label>',
       '    <input data-book-field="name" type="text" value="' + escapeHtml(book.name) + '" maxlength="40">',
@@ -3577,15 +3614,17 @@
       '    <label>指定目标 ID</label>',
       '    <input data-book-field="targetIds" type="text" value="' + escapeHtml((book.targetIds || []).join(", ")) + '" placeholder="私聊角色ID或群聊ID，留空表示该范围全部生效">',
       "  </div>",
-      '  <div class="world-entry-list">',
-      "    " + (book.entries || []).map(renderWorldBookEntry).join(""),
       "  </div>",
-      '  <div class="settings-action-row">',
+      '  <div class="world-book-entry-top">',
+      '    <strong>条目</strong>',
       '    <button class="outline-button" type="button" data-world-action="add-entry">新建条目</button>',
-      '    <button class="outline-button" type="button" data-world-action="save-book">保存世界书</button>',
-      '    <button class="outline-button danger" type="button" data-world-action="delete-book">删除</button>',
       "  </div>",
-      "</article>"
+      '  <div class="world-entry-list">',
+      groups.length ? groups.map(function (group) {
+        return renderWorldEntryGroup(book, group);
+      }).join("") : '<div class="soft-empty">这本世界书还没有条目。</div>',
+      "  </div>",
+      "</div>"
     ].join("");
   }
 
@@ -3597,17 +3636,126 @@
     ].join("");
   }
 
-  function renderWorldBookEntry(entry) {
+  function groupWorldBookEntries(entries) {
+    var map = {};
+
+    (entries || []).forEach(function (entry) {
+      var groupName = entry.group || "未分组";
+      if (!map[groupName]) {
+        map[groupName] = [];
+      }
+      map[groupName].push(entry);
+    });
+
+    return Object.keys(map).sort(function (a, b) {
+      if (a === "未分组") {
+        return -1;
+      }
+      if (b === "未分组") {
+        return 1;
+      }
+      return a.localeCompare(b, "zh-CN");
+    }).map(function (groupName) {
+      return {
+        name: groupName,
+        entries: map[groupName]
+      };
+    });
+  }
+
+  function renderWorldEntryGroup(book, group) {
     return [
-      '<section class="world-entry-card" data-entry-id="' + escapeHtml(entry.id) + '">',
+      '<section class="world-entry-group">',
+      '  <div class="world-entry-group-title">' + escapeHtml(group.name || "未分组") + "（" + group.entries.length + "）</div>",
+      group.entries.map(function (entry) {
+        return renderWorldBookEntry(book, entry);
+      }).join(""),
+      "</section>"
+    ].join("");
+  }
+
+  function renderWorldBookCollapsedGroups(book, groups) {
+    if (!groups.length) {
+      return '<div class="soft-empty">这本世界书还没有条目。</div>';
+    }
+
+    return [
+      '<div class="world-entry-list collapsed-entry-list">',
+      groups.map(function (group) {
+        return [
+          '<section class="world-entry-group">',
+          '  <div class="world-entry-group-title">' + escapeHtml(group.name || "未分组") + "（" + group.entries.length + "）</div>",
+          group.entries.map(function (entry) {
+            return renderWorldBookEntry(book, entry, { forceCollapsed: true });
+          }).join(""),
+          "</section>"
+        ].join("");
+      }).join(""),
+      "</div>"
+    ].join("");
+  }
+
+  function getWorldEntryUiKey(bookId, entryId) {
+    return String(bookId || "") + ":" + String(entryId || "");
+  }
+
+  function getWorldEntrySummary(entry) {
+    var text = String(entry && (entry.summary || entry.content) || "").replace(/\s+/g, " ").trim();
+    return text || "暂无内容";
+  }
+
+  function renderInsertPositionOptions(value) {
+    var position = value === "after" ? "after" : "before";
+
+    return [
+      '<option value="before"' + (position === "before" ? " selected" : "") + ">前</option>",
+      '<option value="after"' + (position === "after" ? " selected" : "") + ">后</option>"
+    ].join("");
+  }
+
+  function renderWorldBookEntry(book, entry, options) {
+    var expanded = !options || !options.forceCollapsed
+      ? Boolean(expandedWorldEntryIds[getWorldEntryUiKey(book.id, entry.id)])
+      : false;
+    var summary = getWorldEntrySummary(entry);
+    var keywordText = entry.keyword || (entry.keywords || []).join(", ");
+    var insertLabel = entry.insertPosition === "after" ? "后" : "前";
+
+    return [
+      '<section class="world-entry-card app-fold-card' + (expanded ? " expanded" : "") + '" data-entry-id="' + escapeHtml(entry.id) + '">',
+      '  <div class="world-entry-overview">',
+      '    <button class="world-entry-title-button" type="button" data-world-action="toggle-entry"><span class="fold-chevron" aria-hidden="true">' + (expanded ? "⌄" : "›") + '</span><strong>' + escapeHtml(entry.title || "未命名条目") + "</strong></button>",
+      '    <span class="' + (entry.enabled ? "enabled" : "disabled") + '">' + (entry.enabled ? "启用" : "停用") + "</span>",
+      "  </div>",
+      '  <p class="world-entry-summary">' + escapeHtml(summary) + "</p>",
+      '  <div class="world-book-meta world-entry-tags">',
+      '    <span>关键词：' + escapeHtml(keywordText || "无") + "</span>",
+      '    <span>插入：' + escapeHtml(insertLabel) + "</span>",
+      '    <span>分组：' + escapeHtml(entry.group || "未分组") + "</span>",
+      "  </div>",
+      '  <div class="world-entry-actions compact">',
+      '    <button class="outline-button" type="button" data-world-action="toggle-entry">' + (expanded ? "收起" : "展开") + "</button>",
+      '    <button class="outline-button" type="button" data-world-action="toggle-entry">编辑</button>',
+      '    <button class="outline-button danger" type="button" data-world-action="delete-entry">删除</button>',
+      '    <button class="outline-button" type="button" data-world-action="duplicate-entry">更多</button>',
+      "  </div>",
+      expanded ? [
+      '  <div class="world-entry-detail">',
       '  <div class="settings-inline-grid">',
       '    <label><span>标题</span><input data-entry-field="title" type="text" value="' + escapeHtml(entry.title) + '" maxlength="60"></label>',
-      '    <label><span>优先级</span><input data-entry-field="priority" type="number" value="' + escapeHtml(entry.priority || 0) + '"></label>',
+      '    <label><span>关键词</span><input data-entry-field="keywords" type="text" value="' + escapeHtml(keywordText) + '" placeholder="学校, 图书馆, 宿舍"></label>',
       "  </div>",
-      '  <label class="switch-row"><input data-entry-field="enabled" type="checkbox"' + (entry.enabled ? " checked" : "") + ">启用条目</label>",
+      '  <div class="settings-inline-grid">',
+      '    <label><span>插入位置</span><select data-entry-field="insertPosition">' + renderInsertPositionOptions(entry.insertPosition) + "</select></label>",
+      '    <label><span>分组</span><input data-entry-field="group" type="text" value="' + escapeHtml(entry.group || "未分组") + '" maxlength="30"></label>',
+      "  </div>",
+      '  <div class="settings-inline-grid">',
+      '    <label><span>优先级</span><input data-entry-field="priority" type="number" value="' + escapeHtml(entry.priority || 0) + '"></label>',
+      '    <label class="switch-row"><input data-entry-field="enabled" type="checkbox"' + (entry.enabled ? " checked" : "") + ">启用条目</label>",
+      "  </div>",
       '  <div class="field-group">',
-      '    <label>关键词</label>',
-      '    <input data-entry-field="keywords" type="text" value="' + escapeHtml((entry.keywords || []).join(", ")) + '" placeholder="学校, 图书馆, 宿舍">',
+      '    <label>摘要</label>',
+      '    <input data-entry-field="summary" type="text" value="' + escapeHtml(entry.summary || "") + '" placeholder="留空则从内容自动截断生成">',
       "  </div>",
       '  <div class="field-group">',
       '    <label>内容</label>',
@@ -3616,8 +3764,10 @@
       '  <div class="settings-action-row compact-action-row world-entry-actions">',
       '    <button class="outline-button" type="button" data-world-action="entry-up">上移</button>',
       '    <button class="outline-button" type="button" data-world-action="entry-down">下移</button>',
-      '    <button class="outline-button danger" type="button" data-world-action="delete-entry">删除</button>',
+      '    <button class="outline-button" type="button" data-world-action="save-book">保存修改</button>',
       "  </div>",
+      "  </div>",
+      ].join("") : "",
       "</section>"
     ].join("");
   }
@@ -3642,33 +3792,45 @@
         return;
       }
 
+      if (button.dataset.worldAction === "import-json") {
+        getElement("worldBookImportInput").click();
+        return;
+      }
+
       if (!book) {
         return;
       }
 
-      if (button.dataset.worldAction === "edit-book") {
-        renderWorldBookEditor(bookId);
+      if (button.dataset.worldAction === "toggle-book" || button.dataset.worldAction === "edit-book") {
+        expandedWorldBookIds[bookId] = !expandedWorldBookIds[bookId];
+        renderWorldBookScreen();
+        return;
+      }
+
+      if (button.dataset.worldAction === "toggle-entry") {
+        expandedWorldBookIds[bookId] = true;
+        expandedWorldEntryIds[getWorldEntryUiKey(bookId, button.closest(".world-entry-card").dataset.entryId)] = !expandedWorldEntryIds[getWorldEntryUiKey(bookId, button.closest(".world-entry-card").dataset.entryId)];
+        renderWorldBookScreen();
         return;
       }
 
       if (button.dataset.worldAction === "save-book") {
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book));
-        closeWeChatSheet();
         renderWorldBookScreen();
         return;
       }
 
       if (button.dataset.worldAction === "add-entry") {
+        expandedWorldBookIds[bookId] = true;
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
           addEntry: true
         }));
-        renderWorldBookEditor(bookId);
+        renderWorldBookScreen();
         return;
       }
 
       if (button.dataset.worldAction === "duplicate-book") {
         duplicateWorldBook(card, book);
-        closeWeChatSheet();
         return;
       }
 
@@ -3681,7 +3843,7 @@
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
           duplicateEntryId: button.closest(".world-entry-card").dataset.entryId
         }));
-        renderWorldBookEditor(bookId);
+        renderWorldBookScreen();
         return;
       }
 
@@ -3690,7 +3852,7 @@
           moveEntryId: button.closest(".world-entry-card").dataset.entryId,
           moveDirection: button.dataset.worldAction === "entry-up" ? -1 : 1
         }));
-        renderWorldBookEditor(bookId);
+        renderWorldBookScreen();
         return;
       }
 
@@ -3698,30 +3860,38 @@
         window.AppStorage.updateWorldBook(bookId, collectWorldBookFromCard(card, book, {
           deleteEntryId: button.closest(".world-entry-card").dataset.entryId
         }));
-        renderWorldBookEditor(bookId);
+        renderWorldBookScreen();
         return;
       }
 
       if (button.dataset.worldAction === "delete-book" && window.confirm("确定删除这本世界书吗？")) {
         window.AppStorage.deleteWorldBook(bookId);
-        closeWeChatSheet();
+        delete expandedWorldBookIds[bookId];
         renderWorldBookScreen();
       }
     };
   }
 
   function collectWorldBookFromCard(card, book, options) {
+    var enabledField = card.querySelector("[data-book-field='enabled']");
+    var entryCards = Array.prototype.slice.call(card.querySelectorAll(".world-entry-card"));
     var next = {
-      name: getScopedFieldValue(card, "[data-book-field='name']") || "未命名世界书",
-      description: getScopedFieldValue(card, "[data-book-field='description']"),
-      enabled: Boolean(card.querySelector("[data-book-field='enabled']").checked),
-      scope: getScopedFieldValue(card, "[data-book-field='scope']") || "global",
-      targetIds: getScopedFieldValue(card, "[data-book-field='targetIds']").split(/[,，\s]+/).map(function (id) { return id.trim(); }).filter(Boolean),
+      name: getScopedFieldValue(card, "[data-book-field='name']") || book.name || "未命名世界书",
+      description: getScopedFieldValue(card, "[data-book-field='description']") || book.description || "",
+      enabled: enabledField ? Boolean(enabledField.checked) : book.enabled !== false,
+      scope: getScopedFieldValue(card, "[data-book-field='scope']") || book.scope || "global",
+      targetIds: (getScopedFieldValue(card, "[data-book-field='targetIds']") || (book.targetIds || []).join(", ")).split(/[,，\s]+/).map(function (id) { return id.trim(); }).filter(Boolean),
       entries: []
     };
 
-    Array.prototype.forEach.call(card.querySelectorAll(".world-entry-card"), function (entryCard) {
+    if (!entryCards.length) {
+      next.entries = (book.entries || []).slice();
+    }
+
+    entryCards.forEach(function (entryCard) {
       var existing;
+      var enabledEntryField;
+      var keywordText;
       var entry;
 
       if (options && options.deleteEntryId === entryCard.dataset.entryId) {
@@ -3729,16 +3899,26 @@
       }
 
       existing = (book.entries || []).find(function (item) { return item.id === entryCard.dataset.entryId; });
+      existing = existing || {};
+      enabledEntryField = entryCard.querySelector("[data-entry-field='enabled']");
+      keywordText = getScopedFieldValue(entryCard, "[data-entry-field='keywords']") || existing.keyword || (existing.keywords || []).join(", ");
       entry = {
         id: entryCard.dataset.entryId,
-        title: getScopedFieldValue(entryCard, "[data-entry-field='title']") || "未命名条目",
-        keywords: getScopedFieldValue(entryCard, "[data-entry-field='keywords']").split(/[,，\s]+/).map(function (keyword) { return keyword.trim(); }).filter(Boolean),
-        content: getScopedFieldValue(entryCard, "[data-entry-field='content']"),
-        enabled: Boolean(entryCard.querySelector("[data-entry-field='enabled']").checked),
-        priority: Number(getScopedFieldValue(entryCard, "[data-entry-field='priority']")) || 0,
+        title: getScopedFieldValue(entryCard, "[data-entry-field='title']") || existing.title || "未命名条目",
+        keyword: keywordText.split(/[,，\s]+/).map(function (keyword) { return keyword.trim(); }).filter(Boolean)[0] || "",
+        keywords: keywordText.split(/[,，\s]+/).map(function (keyword) { return keyword.trim(); }).filter(Boolean),
+        content: getScopedFieldValue(entryCard, "[data-entry-field='content']") || existing.content || "",
+        insertPosition: getScopedFieldValue(entryCard, "[data-entry-field='insertPosition']") === "after" ? "after" : (existing.insertPosition === "after" ? "after" : "before"),
+        group: getScopedFieldValue(entryCard, "[data-entry-field='group']") || existing.group || "未分组",
+        enabled: enabledEntryField ? Boolean(enabledEntryField.checked) : existing.enabled !== false,
+        summary: getScopedFieldValue(entryCard, "[data-entry-field='summary']") || existing.summary || "",
+        priority: Number(getScopedFieldValue(entryCard, "[data-entry-field='priority']") || existing.priority) || 0,
         createdAt: existing && existing.createdAt || Date.now(),
         updatedAt: Date.now()
       };
+      if (!entry.summary && entry.content) {
+        entry.summary = entry.content.replace(/\s+/g, " ").trim().slice(0, 90);
+      }
       next.entries.push(entry);
 
       if (options && options.duplicateEntryId === entryCard.dataset.entryId) {
@@ -3755,8 +3935,12 @@
       next.entries.push({
         id: String(Date.now()),
         title: "新条目",
+        keyword: "",
         keywords: [],
         content: "",
+        insertPosition: "before",
+        group: "未分组",
+        summary: "",
         enabled: true,
         priority: 10,
         createdAt: Date.now(),
@@ -6428,6 +6612,8 @@
           sourceTime: Date.now(),
           type: "auto",
           source: context.targetType === "group" ? "group" : (context.targetType === "offline" ? "offline" : "private"),
+          generationId: context.generationId || "",
+          sourceGenerationId: context.generationId || "",
           createdAt: Date.now()
         });
         savedSummary = true;
@@ -6576,7 +6762,7 @@
     showWeChatSheet([
       '<div class="wechat-sheet-header">',
       '  <span></span>',
-      "  <h3>" + escapeHtml(title || "身体状态") + "</h3>",
+      "  <h3>" + escapeHtml(title || "你的身体状态") + "</h3>",
       '  <button type="button" data-close-sheet>关闭</button>',
       "</div>",
       '<div class="wechat-sheet-form body-state-panel">',
@@ -6641,7 +6827,7 @@
         ].join("");
       }).join(""),
       "</section>",
-      '<section class="body-recovery-card"><strong>恢复建议（参考）</strong><p>' + escapeHtml(state.recoverySuggestion || "当前无明显异常，可按剧情节奏和身体反馈调整。") + "</p></section>"
+      '<section class="body-recovery-card"><strong>参考建议</strong><p>' + escapeHtml(state.recoverySuggestion || "当前无明显异常，可按剧情节奏和身体反馈调整。") + "</p></section>"
     ].join("");
   }
 
@@ -6652,7 +6838,7 @@
   function formatBodyStateText(state) {
     var parts = state.parts || {};
     return [
-      "身体状态：" + (state.overallCondition || "正常"),
+      "用户身体状态：" + (state.overallCondition || "正常"),
       "说明：" + (state.currentNote || "当前无明显异常"),
       "精力：" + (state.energy || 0) + "/100",
       "酸痛/疼痛/泛红：" + (state.sorenessLevel || 0) + "/" + (state.painLevel || 0) + "/" + (state.rednessLevel || 0),
@@ -6728,6 +6914,9 @@
     loadSettingsIntoForm();
     refreshHomeSummary();
     setActivePage("homeScreen");
+    if (window.AppApiJobs && window.AppApiJobs.resumeInterruptedJobs) {
+      window.AppApiJobs.resumeInterruptedJobs();
+    }
   }
 
   window.setActivePage = setActivePage;

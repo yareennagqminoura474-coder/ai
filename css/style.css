@@ -2756,6 +2756,25 @@ textarea::placeholder {
   grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
+.chat-load-more {
+  display: block;
+  width: fit-content;
+  max-width: calc(100% - 32px);
+  margin: 10px auto 14px;
+  padding: 7px 12px;
+  border: 1px solid rgba(244, 186, 202, 0.62);
+  border-radius: 999px;
+  background: rgba(255, 250, 252, 0.92);
+  color: #9b6c7a;
+  font-size: 12px;
+  font-weight: 800;
+  box-shadow: 0 6px 16px rgba(148, 104, 118, 0.08);
+}
+
+.collapsed-entry-list {
+  gap: 8px;
+}
+
 .memory-panel,
 .memory-editor,
 .body-state-panel {
@@ -2867,6 +2886,46 @@ textarea::placeholder {
   gap: 12px;
 }
 
+.world-book-toolbar {
+  margin-bottom: 12px;
+  padding: 12px;
+  border: 1px solid rgba(244, 186, 202, 0.65);
+  border-radius: 8px;
+  background: linear-gradient(180deg, #fff7fa 0%, #ffffff 100%);
+  display: grid;
+  gap: 10px;
+  box-shadow: 0 8px 20px rgba(227, 79, 115, 0.06);
+}
+
+.world-book-toolbar > div:first-child {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.world-book-toolbar strong {
+  color: #49343b;
+  font-size: 16px;
+}
+
+.world-book-toolbar span {
+  color: #9b7b86;
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.world-book-toolbar-actions,
+.world-book-actions.compact,
+.world-entry-actions.compact {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.world-book-list {
+  gap: 10px;
+}
+
 .diary-auto-summary {
   padding: 10px 12px;
   border-radius: 10px;
@@ -2908,13 +2967,16 @@ textarea::placeholder {
 
 .world-entry-card {
   padding: 12px;
-  background: #fbfcfb;
-  border: 1px solid rgba(228, 232, 226, 0.95);
+  background: #fffafb;
+  border: 1px solid rgba(244, 186, 202, 0.54);
 }
 
 .world-book-card {
   display: grid;
   gap: 10px;
+  background: #ffffff;
+  border-color: rgba(244, 186, 202, 0.54);
+  box-shadow: 0 10px 24px rgba(162, 84, 110, 0.07);
 }
 
 .world-book-card-head {
@@ -2929,6 +2991,40 @@ textarea::placeholder {
   min-width: 0;
   overflow-wrap: anywhere;
   font-size: 16px;
+}
+
+.world-book-title-button,
+.world-entry-title-button {
+  min-width: 0;
+  min-height: 34px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: 6px;
+  align-items: center;
+  text-align: left;
+}
+
+.world-book-title-button strong,
+.world-entry-title-button strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 16px;
+}
+
+.world-entry-title-button strong {
+  font-size: 14px;
+}
+
+.fold-chevron {
+  color: #c64a65;
+  font-size: 18px;
+  line-height: 1;
 }
 
 .world-book-card-head span {
@@ -2948,12 +3044,21 @@ textarea::placeholder {
   color: var(--muted);
 }
 
-.world-book-card p {
+.world-book-card p,
+.world-entry-card p {
   margin: 0;
   color: var(--text);
   font-size: 13px;
   line-height: 1.5;
-  white-space: pre-wrap;
+}
+
+.world-book-summary,
+.world-entry-summary {
+  display: -webkit-box;
+  overflow: hidden;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  word-break: break-word;
 }
 
 .world-book-meta {
@@ -2975,6 +3080,67 @@ textarea::placeholder {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 8px;
+}
+
+.world-book-expanded,
+.world-entry-detail {
+  display: grid;
+  gap: 12px;
+  padding-top: 4px;
+}
+
+.world-book-detail-grid {
+  display: grid;
+  gap: 10px;
+}
+
+.world-book-entry-top,
+.world-entry-overview {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.world-book-entry-top strong {
+  color: #49343b;
+  font-size: 14px;
+}
+
+.world-entry-group {
+  display: grid;
+  gap: 8px;
+}
+
+.world-entry-group-title {
+  padding: 4px 2px;
+  color: #9b6c7a;
+  font-size: 13px;
+  font-weight: 900;
+}
+
+.world-entry-overview > span {
+  padding: 3px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 900;
+}
+
+.world-entry-overview > span.enabled {
+  background: rgba(104, 190, 163, 0.14);
+  color: var(--green-dark);
+}
+
+.world-entry-overview > span.disabled {
+  background: rgba(145, 156, 148, 0.14);
+  color: var(--muted);
+}
+
+.world-entry-tags span {
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .world-book-editor-sheet {
