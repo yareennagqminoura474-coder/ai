@@ -5029,7 +5029,7 @@
       }
 
       if (button.dataset.spaceAction === "clear-memory" && window.confirm("确定清空该角色记忆吗？")) {
-        window.AppStorage.clearCharacterMemory(characterSpaceId);
+        window.AppStorage.resetPrivateCharacterState(characterSpaceId);
         renderCharacterSpaceScreen();
         return;
       }

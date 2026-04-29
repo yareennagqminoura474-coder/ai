@@ -3532,14 +3532,21 @@
     }
 
     if (button.dataset.privateAction === "clear-memory" && window.confirm("确定清空该角色记忆吗？")) {
-      window.AppStorage.clearCharacterMemory(activeCharacterId);
-      window.alert("已清空记忆");
+      window.AppStorage.resetPrivateCharacterState(activeCharacterId);
+      window.alert("已清空记忆并恢复默认身体状态");
+      renderPrivateChatSettings(getCharacterById(activeCharacterId));
       return;
     }
 
     if (button.dataset.privateAction === "clear-chat-memory" && window.confirm("确定清空本私聊记忆吗？")) {
-      window.AppStorage.clearChatMemories("private", activeCharacterId);
-      window.alert("已清空本私聊记忆");
+      window.AppStorage.resetPrivateChatState(activeCharacterId);
+      addPrivateSystemMessage(activeCharacterId, "本次私聊状态已重置，已清除本次聊天记忆。");
+      window.alert("已清空本私聊记忆并重置本次会话状态");
+      renderChatMessages(activeCharacterId);
+      if (typeof updateThoughtButton === "function") {
+        updateThoughtButton(activeCharacterId);
+      }
+      renderPrivateChatSettings(getCharacterById(activeCharacterId));
       return;
     }
 

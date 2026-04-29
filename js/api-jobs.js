@@ -340,6 +340,26 @@
     return next;
   }
 
+  function clearJobsForTarget(targetType, targetId) {
+    var type = normalizeTargetType(targetType);
+    var id = String(targetId || "");
+
+    if (!id) {
+      return false;
+    }
+
+    var jobs = getJobs().filter(function (job) {
+      var normalized = normalizeJob(job);
+      return !(normalized.targetType === type && normalized.targetId === id);
+    });
+
+    if (jobs.length !== getJobs().length) {
+      saveJobs(jobs);
+    }
+
+    return true;
+  }
+
   function getHandler(job) {
     return handlers[job.targetType + ":" + job.mode] || handlers[job.mode] || null;
   }
@@ -687,6 +707,7 @@
     saveOfflineSessionDebounced: saveOfflineSessionDebounced,
     flushAll: flushAll,
     cleanupJobs: cleanupJobs,
+    clearJobsForTarget: clearJobsForTarget,
     clearFinishedJobs: function () {
       var jobs = getJobs().filter(function (job) {
         return normalizeJob(job).status !== "done" && normalizeJob(job).status !== "error";

@@ -2975,19 +2975,28 @@
     }
 
     if (button.dataset.groupSettingsAction === "clear-chat-memory" && window.confirm("确定清空本群聊记忆吗？")) {
-      window.AppStorage.clearChatMemories("group", group.id);
-      window.alert("已清空本群聊记忆");
+      window.AppStorage.resetGroupMemoryState(group.id);
+      addGroupSystemMessage(group.id, "本群聊状态已重置，记忆和群聊思想已清除。");
+      window.alert("已清空本群聊记忆并恢复默认群组状态");
+      updateThoughtButton(group.id);
+      scheduleGroupRender(group.id);
+      scheduleGroupListRender();
       return;
     }
 
     if (button.dataset.groupSettingsAction === "clear-group-memory" && window.confirm("确定清空成员的群聊记忆吗？")) {
       (group.memberIds || []).forEach(function (memberId) {
         var kept = window.AppStorage.getCharacterMemory(memberId).filter(function (memory) {
-          return memory.source !== "group";
+          return !(memory.source === "group" && String(memory.targetId || "") === String(group.id));
         });
         window.AppStorage.saveCharacterMemory(memberId, kept);
       });
-      window.alert("已清空群聊记忆");
+      window.AppStorage.resetGroupMemoryState(group.id);
+      addGroupSystemMessage(group.id, "群成员在本群的记忆已清理，群聊状态已重置。");
+      window.alert("已清空成员群聊记忆并恢复默认群组状态");
+      updateThoughtButton(group.id);
+      scheduleGroupRender(group.id);
+      scheduleGroupListRender();
     }
   }
 

@@ -280,7 +280,13 @@
     clearCharacterMemory(characterId);
     clearChatMemories("private", characterId);
     clearBodyState("private", characterId);
+    clearBodyStateSnapshots("private", characterId);
     resetChatRoundCounter("private", characterId);
+    clearBlockState(characterId);
+    deleteOfflineSessionsForTarget("private", characterId);
+    if (window.AppApiJobs && typeof window.AppApiJobs.clearJobsForTarget === "function") {
+      window.AppApiJobs.clearJobsForTarget("private", characterId);
+    }
     clearCharacterThoughts(characterId);
     removeCharacterFromGroups(characterId);
     removeCharacterFromContactGroups(characterId);
@@ -493,10 +499,17 @@
     }));
     deleteGroupChatHistory(groupId);
     clearChatWorldBooks("group", groupId);
+    clearGroupMemory(groupId);
     clearChatMemories("group", groupId);
+    clearGroupThoughts(groupId);
     clearBodyState("group", groupId);
+    clearBodyStateSnapshots("group", groupId);
     resetChatRoundCounter("group", groupId);
     deleteOfflineSession("group-" + groupId);
+    deleteOfflineSessionsForTarget("group", groupId);
+    if (window.AppApiJobs && typeof window.AppApiJobs.clearJobsForTarget === "function") {
+      window.AppApiJobs.clearJobsForTarget("group", groupId);
+    }
   }
 
   function getContactGroups() {
@@ -976,6 +989,111 @@
     saveBodyStateStore(store);
   }
 
+  function clearBodyStateSnapshots(targetType, targetId) {
+    var snapshots = getBodyStateSnapshotStore();
+    var scope = targetType === "group" ? "group" : (targetType === "offline" ? "offline" : "private");
+    var normalizedId = String(targetId || "");
+
+    Object.keys(snapshots).forEach(function (key) {
+      var snapshot = snapshots[key];
+      if (snapshot && snapshot.targetType === scope && snapshot.targetId === normalizedId) {
+        delete snapshots[key];
+      }
+    });
+
+    saveBodyStateSnapshotStore(snapshots);
+  }
+
+  function resetPrivateCharacterState(characterId) {
+    if (!characterId) {
+      return false;
+    }
+
+    clearCharacterMemory(characterId);
+    clearChatMemories("private", characterId);
+    clearCharacterThoughts(characterId);
+    saveBodyState("private", characterId, getDefaultBodyState());
+    clearBodyStateSnapshots("private", characterId);
+    resetChatRoundCounter("private", characterId);
+    return true;
+  }
+
+  function clearChatThoughts(targetType, targetId) {
+    if (!targetId) {
+      return false;
+    }
+
+    var store = getThoughtStore();
+    var normalizedTargetType = targetType === "group" ? "group" : (targetType === "offline" ? "offline" : "private");
+    var normalizedTargetId = String(targetId || "");
+
+    Object.keys(store).forEach(function (characterId) {
+      var thoughts = Array.isArray(store[characterId]) ? store[characterId] : [];
+      var filtered = thoughts.filter(function (thought) {
+        if (!thought) {
+          return true;
+        }
+
+        var thoughtType = String(thought.targetType || thought.source || "").toLowerCase();
+        var thoughtTargetId = String(thought.targetId || thought.chatId || thought.groupId || "");
+
+        if (thoughtType === normalizedTargetType || (!thoughtType && thoughtTargetId === normalizedTargetId)) {
+          return thoughtTargetId !== normalizedTargetId;
+        }
+
+        return true;
+      });
+
+      if (filtered.length !== thoughts.length) {
+        if (filtered.length) {
+          store[characterId] = filtered;
+        } else {
+          delete store[characterId];
+        }
+      }
+    });
+
+    saveThoughtStore(store);
+    return true;
+  }
+
+  function resetPrivateChatState(characterId) {
+    if (!characterId) {
+      return false;
+    }
+
+    clearChatMemories("private", characterId);
+    clearChatThoughts("private", characterId);
+    clearBodyState("private", characterId);
+    clearBodyStateSnapshots("private", characterId);
+    resetChatRoundCounter("private", characterId);
+    return true;
+  }
+
+  function clearGroupThoughts(groupId) {
+    return clearChatThoughts("group", groupId);
+  }
+
+  function resetGroupMemoryState(groupId) {
+    if (!groupId) {
+      return false;
+    }
+
+    clearChatMemories("group", groupId);
+    clearGroupThoughts(groupId);
+    saveBodyState("group", groupId, getDefaultBodyState());
+    clearBodyStateSnapshots("group", groupId);
+    resetChatRoundCounter("group", groupId);
+    return true;
+  }
+
+  function resetAllCharacterMemoryAndStates() {
+    getCharacters().forEach(function (character) {
+      resetPrivateCharacterState(character.id);
+    });
+    return true;
+  }
+
   function clearAllBodyStates() {
     saveBodyStateStore({});
   }
@@ -1104,6 +1222,35 @@
 
   function deleteOfflineSession(sessionId) {
     localStorage.removeItem(STORAGE_KEYS.offlinePrefix + sessionId);
+  }
+
+  function deleteOfflineSessionsForTarget(targetType, targetId) {
+    var identifier = String(targetId || "");
+
+    if (!identifier) {
+      return false;
+    }
+
+    var sessions = getAllOfflineSessions();
+
+    Object.keys(sessions).forEach(function (sessionId) {
+      var session = sessions[sessionId];
+
+      if (!session) {
+        return;
+      }
+
+      if (String(session.targetType || "") === String(targetType || "") && String(session.targetId || "") === identifier) {
+        if (debouncedOfflineTimers[sessionId]) {
+          clearTimeout(debouncedOfflineTimers[sessionId]);
+          delete debouncedOfflineTimers[sessionId];
+        }
+        delete debouncedOfflineSaves[sessionId];
+        localStorage.removeItem(STORAGE_KEYS.offlinePrefix + sessionId);
+      }
+    });
+
+    return true;
   }
 
   function getAllChatHistories() {
@@ -4056,8 +4203,14 @@
     getBodyStateSnapshot: getBodyStateSnapshot,
     restoreBodyStateBeforeGenerationIds: restoreBodyStateBeforeGenerationIds,
     clearBodyState: clearBodyState,
+    clearBodyStateSnapshots: clearBodyStateSnapshots,
     clearAllBodyStates: clearAllBodyStates,
     getDefaultBodyState: getDefaultBodyState,
+    resetPrivateCharacterState: resetPrivateCharacterState,
+    resetPrivateChatState: resetPrivateChatState,
+    clearGroupThoughts: clearGroupThoughts,
+    resetGroupMemoryState: resetGroupMemoryState,
+    resetAllCharacterMemoryAndStates: resetAllCharacterMemoryAndStates,
     getOfflineSession: getOfflineSession,
     saveOfflineSession: saveOfflineSession,
     saveOfflineSessionDebounced: saveOfflineSessionDebounced,

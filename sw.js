@@ -1,4 +1,34 @@
-const CACHE_NAME = "ai-phone-cache-v20260429-23";
+const CACHE_BASE = "ai-phone-cache-v20260429-";
+let CACHE_NAME = CACHE_BASE + "2";
+
+function parseCacheVersion(key) {
+  if (!key || typeof key !== "string") {
+    return null;
+  }
+
+  var match = /^(.+?-v\d{8}-)(\d+)$/.exec(key);
+  if (!match) {
+    return null;
+  }
+
+  var version = Number(match[2]);
+  return Number.isFinite(version) ? { prefix: match[1], version: version } : null;
+}
+
+function getNextCacheName(keys) {
+  var highestVersion = 0;
+  var selectedPrefix = CACHE_BASE;
+
+  (keys || []).forEach(function (key) {
+    var parsed = parseCacheVersion(key);
+    if (parsed && parsed.version > highestVersion) {
+      highestVersion = parsed.version;
+      selectedPrefix = parsed.prefix;
+    }
+  });
+
+  return selectedPrefix + String(highestVersion + 1);
+}
 
 const APP_SHELL = [
   "./index.html",
@@ -23,8 +53,11 @@ function isApiRequest(url) {
 
 self.addEventListener("install", function (event) {
   event.waitUntil(
-    caches.open(CACHE_NAME).then(function (cache) {
-      return cache.addAll(APP_SHELL);
+    caches.keys().then(function (keys) {
+      CACHE_NAME = getNextCacheName(keys);
+      return caches.open(CACHE_NAME).then(function (cache) {
+        return cache.addAll(APP_SHELL);
+      });
     }).then(function () {
       return self.skipWaiting();
     })
