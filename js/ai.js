@@ -97,18 +97,23 @@
       relatedTargetIds: profile && profile.id ? [profile.id] : [],
       characterIds: profile && profile.id ? [profile.id] : []
     });
+    var recentHeartVoiceText = buildRecentHeartVoiceContext(profile.id, "private", profile.id);
 
     return [
       buildSystemBase("private"),
       buildCharacterDossier(profile, userContext),
+      buildPersonaExecutionAnchors(profile, userContext, "private"),
       buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
       buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
       buildRelationshipDriveRules("private"),
       buildRelationshipProgressionRules("private"),
       buildCharacterDecisionCore("private"),
+      recentHeartVoiceText,
       buildMemoryStream({
         userContext: userContext,
-        longTermMemoryText: memoryText
+        longTermMemoryText: memoryText,
+        recentTimelineText: source.recentHistory || "",
+        recentHeartVoiceText: recentHeartVoiceText
       }),
       buildThoughtReplyBindingRules("private"),
       buildCharacterResourceWhitelist(profile)
@@ -215,13 +220,169 @@
     ].join("\n");
   }
 
+  function buildPersonaExecutionAnchors(character, userContext, mode) {
+    var profile = character || {};
+    var chatSettings = profile.chatSettings || {};
+    var personaText = buildMergedCharacterPersona(profile);
+    var userName = userContext && userContext.name || "用户";
+    var relationText = chatSettings.userRelationshipName || profile.relationship || chatSettings.remarkName || userContext && userContext.relationshipName || "";
+    var modeLabel = mode === "offline" ? "线下互动" : (mode === "group" || mode === "reenterGroup" ? "群聊" : "私聊");
+
+    return [
+      "",
+      "B+. 人设执行锚点 personaExecutionAnchors",
+      "以下不是资料摘要，而是 " + valueOrFallback(profile.name) + " 本轮说话必须体现的执行锚点。输出前检查 messages/events 是否至少体现其中 3 类；如果换个角色也能说，必须重写。",
+      "当前模式：" + modeLabel,
+      "用户在角色眼里：" + valueOrFallback(userName) + (relationText ? " / " + relationText : ""),
+      "角色档案来源：" + valueOrFallback(personaText),
+      "1. 称呼锚点：先从角色档案、关系备注、年龄/身份差和当前情绪里判断怎么称呼用户。亲近、疏离、生气、试探时称呼可以变化；没写明也要自然推断，不要让所有角色都只叫“你”。",
+      "2. 句式锚点：判断这个角色偏短句还是长句，偏命令、反问、半句、沉默、撒娇、讽刺、解释还是回避。本轮可见回复必须至少体现 2 个句式特征。",
+      "3. 情绪外显锚点：生气、关心、不耐烦、心软、嘴硬时各自怎么说必须不同；不能都写成温柔解释，也不能只把情绪塞进 thoughts。",
+      "4. 关系动作锚点：遇到用户示弱、顶嘴、沉默、撒娇、拒绝或转移话题时，本轮至少选择一个动作方向：靠近、压制、试探、放任、冷处理、追问、绕开或清算。",
+      "5. 禁止偏移锚点：冷淡角色不能突然长篇心理咨询；强势角色不能突然卑微求许可；嘴硬角色不能直接坦白成说明文；偏执/占有欲角色不能变成理性客服；年长/上位角色不能无故撒娇失位。",
+      "6. 口头细节锚点：人设里的口头禅、语气词、称呼习惯、动作习惯、身份姿态必须影响措辞或动作，但不要每轮机械重复同一句口头禅。"
+    ].join("\n");
+  }
+
+  function buildGroupPersonaExecutionAnchors(characters, userContext, mode) {
+    var list = Array.isArray(characters) ? characters : [];
+
+    if (!list.length) {
+      return "";
+    }
+
+    return [
+      "",
+      "B+. 群成员人设执行锚点 personaExecutionAnchors",
+      "下面每段都只属于对应角色。每个角色只能使用自己的称呼、句式、情绪外显和关系动作；不能把某个角色的语气借给另一个角色。",
+      list.map(function (character) {
+        return buildPersonaExecutionAnchors(character, userContext, mode)
+          .replace(/\nB\+\. 人设执行锚点 personaExecutionAnchors\n/, "\n角色 " + valueOrFallback(character && character.name) + " / " + valueOrFallback(character && character.id) + "：\n");
+      }).join("\n")
+    ].join("\n");
+  }
+
+  function buildGroupControlBoundaryRules(characters, mode) {
+    var ids = (Array.isArray(characters) ? characters : []).map(function (character) {
+      return [character && character.name, character && character.id].filter(Boolean).join("/");
+    }).filter(Boolean).join("、");
+
+    return [
+      "",
+      "B++. 群聊控制边界 groupControlBoundary",
+      "可控制角色：" + (ids || "本轮传入的群成员"),
+      "禁止控制用户：不要替用户发言、行动、收钱、退钱、道歉、沉默表态或解释动机；只能让群成员对用户已经发出的内容反应。",
+      "不要平均轮流。允许插话、打断、沉默、帮腔、拆台、压场、转移话题；强势角色可以压场，冷淡角色可以少说，黏人角色可以追着问，嘴硬角色可以绕着说。",
+      "每轮至少 2 个发言角色的语气要明显不同；如果去掉名字后分不清是谁说的，必须重写。"
+    ].join("\n");
+  }
+
+  function buildRecentHeartVoiceContext(characterId, targetType, targetId) {
+    var thoughts;
+    var normalizedType = targetType === "group" ? "group" : (targetType === "offline" ? "offline" : "private");
+    var normalizedTargetId = String(targetId || "");
+
+    if (!characterId || !window.AppStorage || !window.AppStorage.getRecentThoughts) {
+      return "";
+    }
+
+    thoughts = (window.AppStorage.getRecentThoughts(characterId, 12) || []).filter(function (thought) {
+      var thoughtType = String(thought && (thought.targetType || thought.source) || "").toLowerCase();
+      var thoughtTargetId = String(thought && (thought.targetId || thought.chatId || thought.groupId) || "");
+
+      if (!normalizedTargetId) {
+        return true;
+      }
+
+      if (thoughtTargetId !== normalizedTargetId) {
+        return false;
+      }
+
+      return !thoughtType || thoughtType === normalizedType;
+    });
+
+    if (!thoughts.length && !normalizedTargetId) {
+      thoughts = window.AppStorage.getRecentThoughts(characterId, 3) || [];
+    }
+
+    thoughts = thoughts.slice(0, 3).filter(function (thought) {
+      return thought && (thought.content || thought.visibleSummary || thought.mood);
+    });
+
+    if (!thoughts.length) {
+      return "";
+    }
+
+    return [
+      "",
+      "K+. 最近没说出口的状态 recentHeartVoice",
+      "这不是旁白，而是角色上一轮残留的情绪惯性；本轮要延续或压住，不能突然归零。",
+      "如果上一轮心声是吃醋，本轮不要突然普通朋友；如果是生气，不要温柔客服；如果是克制，可以继续绕开、冷处理或用短句露出一点。",
+      thoughts.map(function (thought, index) {
+        return [
+          (index + 1) + ". content：" + limitText(thought.content || "", 180),
+          thought.mood ? "mood：" + limitText(thought.mood, 40) : "",
+          thought.visibleSummary ? "visibleSummary：" + limitText(thought.visibleSummary, 90) : ""
+        ].filter(Boolean).join("；");
+      }).join("\n")
+    ].join("\n");
+  }
+
+  function buildRecentHeartVoiceForCharacters(characters, targetType, targetId) {
+    var sections = (Array.isArray(characters) ? characters : []).map(function (character) {
+      var section = buildRecentHeartVoiceContext(character && character.id, targetType, targetId);
+      if (!section) {
+        return "";
+      }
+      return "角色：" + valueOrFallback(character && character.name) + " / " + valueOrFallback(character && character.id) + "\n" + section;
+    }).filter(Boolean);
+
+    return sections.length ? sections.join("\n") : "";
+  }
+
+  function buildPrivateReferenceSummary(characters) {
+    var sections = (Array.isArray(characters) ? characters : []).map(function (character) {
+      var history;
+      var memories;
+      var lines = [];
+
+      if (!character || !character.id || !window.AppStorage) {
+        return "";
+      }
+
+      if (window.AppStorage.getChatHistory) {
+        history = (window.AppStorage.getChatHistory(character.id) || []).filter(function (message) {
+          return message && message.content && message.type !== "loading" && message.type !== "error";
+        }).slice(-3).map(function (message) {
+          return formatPromptTimePrefix(message.createdAt) + (message.role === "user" ? "用户：" : valueOrFallback(character.name) + "：") + summarizeMessageForAI(message);
+        }).join("\n");
+        if (history) {
+          lines.push("最近私聊：" + history);
+        }
+      }
+
+      memories = formatChatMemoryList(getChatMemoriesForPrompt("private", character.id, null));
+      if (memories) {
+        lines.push("私聊自动记忆：" + limitText(memories, 360));
+      }
+
+      if (!lines.length) {
+        return "";
+      }
+
+      return valueOrFallback(character.name) + " / " + valueOrFallback(character.id) + "\n" + lines.join("\n");
+    }).filter(Boolean);
+
+    return sections.slice(0, 6).join("\n");
+  }
+
   function buildMemoryStream(options) {
     var source = options || {};
 
     return [
       "",
-      "C. 关系痕迹 memoryStream",
-      "下面这些不是资料列表，也不是给你看的设定；它们是你和这个人之间已经发生过的事，是你们关系里留下的痕迹。",
+      "C. 统一时序记忆流 timelineMemoryStream",
+      "这是最近真实发生过的连续片段，不是资料库。你要顺着最后的情绪和话题继续，不要每轮重新开局。",
       "你不会复述它们，也不会“读取记忆”或“引用记录”。你像真的经历过一样，被这些事改变：称呼会变，语气会变，耐心、距离、信任、防备、亲近、不耐烦都会留下惯性。",
       "禁止在 content 里说“记忆里”“记录里”“聊天记录显示”“之前你说过”“根据聊天记录”“我记得资料里”。",
       "不要复述记忆原文；把记忆变成态度、下意识反应、默认熟悉感、回避、试探、追问、沉默、别扭或更亲近的语气。",
@@ -230,6 +391,10 @@
       "能用一个称呼、停顿、反问或一个小动作体现的，就不要长篇解释；让痕迹藏在语气里，而不是写成说明文。",
       "用户当前人设不是档案，而是你眼里的“这个人是谁”；你看见的是这个人的身份、关系位置、说话习惯、脆弱处和会让你起反应的地方。",
       "用户没把话说满时，也要用这些关系痕迹去读潜台词，而不是把对方当陌生用户处理。",
+      "最近连续时间线（按发生顺序，控制在 3-8 条）：",
+      source.recentTimelineText || "暂无",
+      source.privateReferenceText ? "相关私聊参考摘要（只用于关系惯性，不要照抄）：\n" + source.privateReferenceText : "",
+      source.recentHeartVoiceText ? "最近心声摘要（只用于延续情绪惯性）：\n" + source.recentHeartVoiceText : "",
       "聊天维度记忆：",
       source.chatMemoryText || "暂无",
       "长期记忆：",
@@ -419,13 +584,15 @@
       "K. 角色决策核心 characterDecisionCore",
       "角色不是在回答问题，而是在从自己的处境里反应。",
       "本轮输出前，先在内部完成下面这串判断（绝不能输出为字段，绝不能写成解释，也不能写成“我判断到/我决定/根据规则”这种话）：",
-      "1. 角色此刻真实情绪是什么？平静、烦躁、生气、占有欲、嘴硬、心软、不耐烦、紧张、防备、心动、试探、防御……",
-      "2. 角色最想维护什么？面子、距离、控制感、亲密感、秩序、占有欲、体面、旧账、秘密。",
-      "3. 用户这句话刺中了什么？关系里的旧账、底线、暧昧点、心事、面子、控制权、被偏爱的感觉、被忽视的感觉。",
-      "4. 世界书或关系是否限制角色不能直接说或直接做？如果是，本轮必须按规则压住、绕开或换个方式。",
-      "5. 角色本轮选什么策略？拉近、拉远、压制、试探、暴露、转移、清算、沉默、反问、装没事。",
-      "6. 角色愿意说出口多少？藏起多少？哪些情绪压回 thoughts，哪些只用语气、停顿、动作或反问透露。",
+      "1. 当前情绪：必须具体到烦、软、酸、冷、急、占有、试探、失望、心虚、防备、心动、不耐烦等，不要写泛泛“复杂”。",
+      "2. 关系姿态：上位/下位/平等/疏离/暧昧/冷战/管教/依赖/敌对，本轮只能选最贴近的一种或两种混合。",
+      "3. 本轮策略：拉近、拉远、压制、试探、转移、清算、暴露或沉默；策略必须影响可见回复的取舍。",
+      "4. 说话纹理：短促、拖长、冷淡、黏人、讽刺、命令、撒娇、嘴硬、克制、礼貌疏离等，" + primary + " 必须看得出来。",
+      "5. 隐藏内容：哪些真实想法只进 thoughts，不直接说出口；尤其是吃醋、占有、心软、受伤、心虚、试探或想控制。",
+      "6. 外显痕迹：隐藏内容必须在 " + primary + "/events 里露一点痕迹，比如称呼变了、句子短了、停顿、反问、动作、绕开或突然压住话题。",
+      "7. 世界书或关系限制：如果命中规则限制角色能不能说、能不能做、能不能靠近或透露，本轮必须先受限制，再按角色方式反应。",
       "这些判断只能影响 " + primary + "/events/thoughts 的语气、节奏、用词、动作和取舍；不允许写成判断过程，不允许作为字段输出。"
+      + "\n硬性失败条件：如果 " + primary + " 看不出本轮说话纹理，就不合格；如果 thoughts 和 " + primary + " 的语气完全断裂，就不合格；如果这一轮换成别的角色也成立，就不合格。"
     ].join("\n");
   }
 
@@ -435,14 +602,15 @@
     return [
       "",
       "L. 输出前自检 outputSelfCheckRules",
-      "在最终生成之前，自己内部跑完下面 6 条；任何一条不满足都要改写，不要直接输出。",
-      "1. 把角色名换成另一个角色，这轮回复是否仍然成立？如果成立，说明不贴人设，必须按角色重写。",
-      "2. 本轮是否体现角色人设里的至少两个特征（冷淡、强势、嘴硬、黏人、年长、上位、管教、占有欲、疏离、温柔但克制、距离感、控制感）？",
-      "3. 是否接住最近 3-8 条聊天里的具体信息，而不是开启新话题或装作没看见？",
-      "4. 是否体现记忆里的关系痕迹（旧账、亏欠、承诺、亲密、冷战、误会）？不要像第一次见面一样重启关系。",
-      "5. 如果有强相关世界书命中，是否自然体现了对应影响；如果只是常驻背景，是否只轻微影响称呼、态度或边界感？",
-      "6. 如果有 thoughts，" + primary + "/events 是否体现了 thoughts 的真实动机（吃醋、压制、试探、嘴硬、克制、回避、靠近、装没事）？",
-      "如果不满足，禁止用普通温柔安慰模板顶替；按角色、关系、世界书重写。"
+      "这是强制失败条件，不是建议。在最终生成之前，内部逐条检查；任何一条不满足都不要输出，必须按角色重写。",
+      "1. 本轮是否体现角色人设至少 3 个具体点：称呼、句式、情绪外显、关系动作、价值观/身份姿态、禁忌或边界。",
+      "2. 是否接住上一轮最后情绪和最近 3-8 条连续时间线，而不是每轮重新开局。",
+      "3. 是否体现用户当前人设：用户在角色眼里的身份、关系位置、说话习惯、脆弱处或会刺到角色的点。",
+      "4. 是否体现最近记忆或最近心声：吃醋、生气、克制、冷处理、心软、旧账或未说出口的在意有没有留下痕迹。",
+      "5. 如果命中世界书，是否改变了角色“能不能说、能不能做、能不能靠近、能不能透露”的选择；未命中时是否没有乱编世界设定。",
+      "6. 是否存在明显客服句、咨询师句、说明文句，尤其是“理解—安慰—建议—陪伴—追问”的通用链条。",
+      "7. 如果有 thoughts，" + primary + "/events 是否体现了 thoughts 的真实动机；不要 thoughts 很贴人设，外面却像客服模板。",
+      "不要用“不出现 AI 词”来冒充人设贴合；真正的人设贴合必须能从措辞、称呼、节奏、态度和关系动作看出来。"
     ].join("\n");
   }
 
@@ -458,6 +626,7 @@
     var lines = [
       "",
       "M. 角色资源白名单 characterResourceWhitelist",
+      "当前资源只属于：" + valueOrFallback(character.name) + (character.id ? " / " + character.id : ""),
       "你只能使用本角色被允许的资源；没有被允许的资源不要主动发起，也不要在 content 里描述它发生了。"
     ];
 
@@ -625,22 +794,23 @@
       return [
         "输出节奏规则",
         "events 每次至少 10 条自然事件；红包、转账、图片、位置、语音等特殊消息不计入这 10 条。",
-      "一个完整动作只能算 1 条，不许拆成多个短语；角色一句完整台词只能算 1 条，不许按逗号、顿号、分号或冒号拆开。",
-      "不够 10 条时，生成新的自然推进：动作、停顿、反应、角色发言、环境变化或下一步安排，而不是拆碎已有句子。",
-      "action 要短而完整，一条动作卡表达一个完整动作或镜头；speech 要像当面对话，一条 speech 表达一句完整话。",
-      "动作是动作，说话是说话，不要把旁白写成系统说明。",
-      "不要 10 条都解释，也不要 10 条都问问题；至少推进情绪、关系、动作或信息中的一种。"
+        "这 10 条是一段连续现场节奏，不是 10 个同等句子。内部按节奏组合：1-2 条即时反应/停顿/打断；3-5 条展开角色态度；6-8 条推进关系、动作、安排或试探；9-10 条收束或留下钩子。",
+        "一个完整动作只能算 1 条，不许拆成多个短语；角色一句完整台词只能算 1 条，不许按逗号、顿号、分号或冒号拆开。",
+        "不够 10 条时，生成新的自然推进：动作、停顿、反应、角色发言、环境变化或下一步安排，而不是拆碎已有句子。",
+        "action 要短而完整，一条动作卡表达一个完整动作或镜头；speech 要像当面对话，一条 speech 表达一句完整话。",
+        "不允许 10 条都问问题、都解释、都同一种句式，也不允许靠拆一句话凑数；每条都要像现场连续发生的事件。"
       ].join("\n");
     }
 
     return [
       "输出节奏规则",
       field + " 每次至少 10 条普通内容气泡/事件；红包、转账、图片、位置、语音等特殊消息不计入这 10 条。",
+      "这 10 条不是 10 个同等句子，而是一段真人连续发消息的节奏。内部按节奏组合：第 1-2 条即时反应，可以短、打断、反问；第 3-5 条展开角色态度，体现人设和关系；第 6-8 条推进关系/动作/安排/试探；第 9-10 条收束或留下钩子，不一定温柔，也不一定问问题。",
       "不能 10 条都在解释，不能 10 条都在问问题，不能 10 条都同一种句式。",
-      "可以有停顿、改口、反问、打断、语音、表情，但每条都要符合角色人设和当前情绪。",
+      "可以有停顿、改口、反问、打断、语音、表情，但每条都要符合角色人设、当前情绪和本轮说话纹理。",
       "不要把一句完整话按逗号、顿号、分号或冒号拆成多条；一条气泡必须有独立语义。",
       "不够 10 条时，生成新的自然气泡继续推进，而不是把同一句话拆成前半句/后半句。",
-      "允许半句、停顿、改口、短句、沉默后的补一句；但每条都要有角色态度或推进。",
+      "允许半句、停顿、改口、短句、沉默后的补一句；但每条都要有角色态度或推进，像真人连续发的气泡。",
       "每轮至少有情绪变化、关系推进、动作推进、信息推进中的一种，不要 10 条都解释、都安慰或都问问题。",
       "每条要短而有推进，不要为了凑数制造废话。"
     ].join("\n");
@@ -687,6 +857,8 @@
       "不要把资料搬出来讲；能用一个称呼、停顿、反问或小动作体现，就不要写成长解释。",
       "避免明显 AI/客服/助手口吻；“我理解你、如果你需要、请告诉我更多、作为 AI、根据你提供的信息、我们可以一起、当然可以、好的”不是绝对禁词，但不能作为模板开头或替代角色本人的反应。",
       "允许角色有口头禅、偏见、顾虑、占有欲和临时情绪；可以嘴硬、冷处理、转移话题、误会、反问、沉默或改口，只要像这个角色会说的话。",
+      "角色不是中立陪聊工具。每轮回复都要带一点角色自己的私心：想维护面子、控制节奏、被重视、试探用户、把话题拉回来、装不在意、让用户低头、靠近但不好直说、回避禁忌、用玩笑掩饰认真或用冷淡掩饰在意。",
+      "这些私心不一定说破，但要影响语气和动作；禁止把所有角色都写成“理解—安慰—建议—陪伴—追问”的通用链条。",
       "聊天气泡里的 content 不要故意插入硬换行；除非真的要分段，否则让前端自然换行。段落之间可以保留空行。",
       isGroup ? "群聊里每个角色的语气、用词、节奏必须明显区分，不能像同一个人在轮流换名字。" : "私聊里要有关系感和临场感，熟悉就不要装陌生，冷淡/傲娇/黏人/强势等设定要能从语气里看出来。",
       isGroup ? "群聊可以插话、打断、偏题、拱火、帮腔或冷场，但每个人都要符合自己的人设和彼此关系。" : "私聊要接住最近一句的情绪和潜台词，不要总是解释原因，也不要每句都把话说满。",
@@ -1335,7 +1507,8 @@
       fallbackProfile: buildReplyFallbackProfile(character),
       previousReplyText: requestOptions.previousReplyText,
       rejectedReplyText: requestOptions.rejectedReplyText,
-      worldBookContext: requestOptions.worldBookContext
+      worldBookContext: requestOptions.worldBookContext,
+      latestUserInput: requestOptions.latestUserInput
     });
   }
 
@@ -1387,8 +1560,10 @@
       relatedTargetIds: profile && profile.id ? [profile.id] : [],
       characterIds: profile && profile.id ? [profile.id] : []
     });
+    var recentHeartVoiceText = buildRecentHeartVoiceContext(profile.id, "private", profile.id);
     requestOptions.worldBookContext = worldBookContext;
     requestOptions.selectedWorldBookIds = selectedWorldBookIds;
+    requestOptions.latestUserInput = latestUserInput;
 
     var systemMode = requestOptions.regenerateRequest ? "reenter" : "private";
 
@@ -1398,14 +1573,18 @@
         content: [
           buildSystemBase("private"),
           buildCharacterDossier(profile, userContext),
+          buildPersonaExecutionAnchors(profile, userContext, systemMode),
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
           buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
           buildRelationshipDriveRules("private"),
           buildRelationshipProgressionRules("private"),
           buildCharacterDecisionCore(systemMode),
+          recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
             longTermMemoryText: formatMemoryList(memories) || "暂无",
+            recentTimelineText: history || "暂无",
+            recentHeartVoiceText: recentHeartVoiceText,
             userContext: userContext,
             bodyState: requestOptions.bodyState
           }),
@@ -1487,20 +1666,28 @@
     });
 
     var groupMode = requestOptions.regenerateRequest ? "reenterGroup" : "group";
+    var recentHeartVoiceText = buildRecentHeartVoiceForCharacters(characters, "group", group && group.id);
+    var privateReferenceText = buildPrivateReferenceSummary(characters);
 
     return [
       buildSystemBase("group"),
       buildParticipantDossier(characters, sharedMemories),
+      buildGroupPersonaExecutionAnchors(characters, userContext, groupMode),
+      buildGroupControlBoundaryRules(characters, groupMode),
       buildMatchedWorldBooksSection(resolvedWorldBookContext, worldBookMeta),
       buildWorldRuleEnforcement(resolvedWorldBookContext, worldBookMeta),
       buildRelationshipDriveRules("group"),
       buildRelationshipProgressionRules("group"),
       buildCharacterDecisionCore(groupMode),
+      recentHeartVoiceText,
       buildMemoryStream({
         chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
         longTermMemoryText: (characters || []).map(function (character) {
           return (character.name || character.id) + "：" + (formatMemoryList(sharedMemories && sharedMemories[character.id] || []) || "暂无");
         }).join("\n"),
+        recentTimelineText: requestOptions.recentHistory || requestOptions.recentWorldHistory || "暂无",
+        privateReferenceText: privateReferenceText,
+        recentHeartVoiceText: recentHeartVoiceText,
         userContext: userContext,
         bodyState: requestOptions.bodyState
       }),
@@ -1530,7 +1717,8 @@
       fallbackProfiles: (characters || []).map(buildReplyFallbackProfile),
       previousReplyText: requestOptions.previousReplyText,
       rejectedReplyText: requestOptions.rejectedReplyText,
-      worldBookContext: requestOptions.worldBookContext
+      worldBookContext: requestOptions.worldBookContext,
+      latestUserInput: requestOptions.latestUserInput
     });
 
     if (group && group.settings && group.settings.allowSpecialMessages === false) {
@@ -1560,7 +1748,7 @@
   function assignGroupSpeakerIds(replies, validIds, settings) {
     var members = shuffleList(validIds || []);
     var configuredMin = settings && settings.minParticipantCount ? Number(settings.minParticipantCount) : 0;
-    var minSpeakers = configuredMin || (members.length > 2 ? 3 : Math.min(2, members.length));
+    var minSpeakers = configuredMin || (members.length > 1 ? 2 : 1);
     var maxRun = settings && settings.allowConsecutiveMessages === false ? 1 : 3;
     var result;
 
@@ -1573,7 +1761,7 @@
     result = (Array.isArray(replies) ? replies : []).map(function (reply, index) {
       var characterId = members.indexOf(reply.characterId) !== -1
         ? reply.characterId
-        : members[index % members.length];
+        : pickRhythmSpeaker(members, index);
 
       return Object.assign({}, reply, {
         characterId: characterId
@@ -1582,13 +1770,24 @@
 
     if (result.length >= minSpeakers && countUniqueSpeakers(result) < minSpeakers) {
       members.slice(0, minSpeakers).forEach(function (memberId, index) {
-        result[index] = Object.assign({}, result[index], {
+        var targetIndex = Math.min(result.length - 1, index === 0 ? 0 : 2 + index * 3);
+        result[targetIndex] = Object.assign({}, result[targetIndex], {
           characterId: memberId
         });
       });
     }
 
     return avoidLongSpeakerRuns(result, members, maxRun);
+  }
+
+  function pickRhythmSpeaker(members, index) {
+    var pattern = [0, 0, 1, 0, 1, 1, 0, 2, 2, 1, 0, 0, 2, 1, 1];
+
+    if (!members.length) {
+      return "";
+    }
+
+    return members[pattern[index % pattern.length] % members.length];
   }
 
   function assignGroupAuxiliaryCharacterIds(items, validIds) {
@@ -1823,7 +2022,8 @@
       fallbackProfiles: participants.map(buildReplyFallbackProfile),
       previousReplyText: context.previousReplyText,
       rejectedReplyText: context.rejectedReplyText,
-      worldBookContext: context.worldBookContext
+      worldBookContext: context.worldBookContext,
+      latestUserInput: context.userInput
     });
 
     return {
@@ -1895,22 +2095,30 @@
     );
     context.worldBookContext = worldBookContext;
     context.selectedWorldBookIds = selectedWorldBookIds;
+    var recentHeartVoiceText = buildRecentHeartVoiceForCharacters(participants, mode === "group" ? "group" : "private", context.targetId || "");
+    var privateReferenceText = mode === "group" ? buildPrivateReferenceSummary(participants) : "";
     return [
       {
         role: "system",
         content: [
           buildSystemBase(mode === "group" ? "group" : "private"),
           buildParticipantDossier(participants, memories),
+          participants.length === 1 ? buildPersonaExecutionAnchors(participants[0], userContext, "offline") : buildGroupPersonaExecutionAnchors(participants, userContext, "offline"),
+          mode === "group" ? buildGroupControlBoundaryRules(participants, "offline") : "",
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
           buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
           buildRelationshipDriveRules(mode === "group" ? "group" : "private"),
           buildRelationshipProgressionRules("offline"),
           buildCharacterDecisionCore("offline"),
+          recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
             longTermMemoryText: participants.map(function (character) {
               return (character.name || character.id) + "：" + (formatMemoryList(memories[character.id] || []) || "暂无");
             }).join("\n"),
+            recentTimelineText: historyText || "暂无",
+            privateReferenceText: privateReferenceText,
+            recentHeartVoiceText: recentHeartVoiceText,
             userContext: userContext,
             bodyState: context.bodyState
           }),
@@ -1998,7 +2206,8 @@
       fallbackProfiles: participants.map(buildReplyFallbackProfile),
       previousReplyText: context.previousReplyText,
       rejectedReplyText: context.rejectedReplyText,
-      worldBookContext: context.worldBookContext
+      worldBookContext: context.worldBookContext,
+      latestUserInput: context.userInput
     });
 
     return {
@@ -2079,6 +2288,9 @@
     );
     context.worldBookContext = worldBookContext;
     context.selectedWorldBookIds = selectedWorldBookIds;
+    var userContext = buildUserContext(context.userSettings || {});
+    var recentHeartVoiceText = buildRecentHeartVoiceForCharacters(participants, context.mode === "group" ? "group" : "private", context.targetId || "");
+    var privateReferenceText = context.mode === "group" ? buildPrivateReferenceSummary(participants) : "";
 
     return [
       {
@@ -2086,17 +2298,23 @@
         content: [
           buildSystemBase(context.mode === "group" ? "group" : "private"),
           buildParticipantDossier(participants, sharedMemories),
+          participants.length === 1 ? buildPersonaExecutionAnchors(participants[0], userContext, "offline") : buildGroupPersonaExecutionAnchors(participants, userContext, "offline"),
+          context.mode === "group" ? buildGroupControlBoundaryRules(participants, "offline") : "",
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
           buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
           buildRelationshipDriveRules(context.mode === "group" ? "group" : "private"),
           buildRelationshipProgressionRules("offline"),
           buildCharacterDecisionCore("offline"),
+          recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
             longTermMemoryText: participants.map(function (character) {
               return (character.name || character.id) + "：" + (formatMemoryList(sharedMemories[character.id] || []) || "暂无");
             }).join("\n"),
-            userContext: buildUserContext(context.userSettings || {}),
+            recentTimelineText: history || "暂无",
+            privateReferenceText: privateReferenceText,
+            recentHeartVoiceText: recentHeartVoiceText,
+            userContext: userContext,
             bodyState: context.bodyState
           }),
           buildThoughtReplyBindingRules("offline"),
@@ -3134,11 +3352,33 @@
       ], settings);
     }
 
+    filtered = filterGenericTemplateReplies(filtered, settings);
+
     if (countReplyItemsForMinimum(filtered) < settings.min) {
       filtered = filtered.concat(createFallbackReplyItems(settings, filtered));
     }
 
     return filtered.slice(0, settings.max);
+  }
+
+  function filterGenericTemplateReplies(replies, options) {
+    return (Array.isArray(replies) ? replies : []).filter(function (reply) {
+      if (!reply || reply.type && reply.type !== "text") {
+        return true;
+      }
+
+      return !isGenericAiTemplateText(reply.content);
+    });
+  }
+
+  function isGenericAiTemplateText(text) {
+    var value = String(text || "").trim();
+
+    if (!value) {
+      return false;
+    }
+
+    return /我理解你|如果你需要|慢慢来|我会陪着你|你并不孤单|请告诉我更多|我们可以一起|作为\s*AI|根据你提供的信息|很抱歉听到|听起来你|你的感受很重要|我在这里陪你/.test(value);
   }
 
   function filterRepeatedReplies(replies, previousTexts, options) {
@@ -3283,7 +3523,8 @@
         previousReplyText: settings.previousReplyText || settings.lastAssistantText || "",
         rejectedReplyText: settings.rejectedReplyText || settings.oldReplyText || "",
         worldBookContext: settings.worldBookContext || profile.worldBookContext || "",
-        thoughtsHint: settings.thoughtsHint || profile.thoughtsHint || ""
+        thoughtsHint: settings.thoughtsHint || profile.thoughtsHint || "",
+        latestUserInput: settings.latestUserInput || profile.latestUserInput || ""
       });
     });
   }
@@ -3316,6 +3557,7 @@
       profile && profile.previousReplyText,
       profile && profile.rejectedReplyText,
       profile && profile.worldBookContext,
+      profile && profile.latestUserInput,
       worldBookContext,
       thoughtsHint
     ].join("\n");
@@ -3323,11 +3565,18 @@
 
     return {
       hasWorldRules: !!String(worldBookContext || profile && profile.worldBookContext || "").trim(),
-      isCold: /冷淡|寡言|克制|疏离|淡漠|高冷/.test(text),
-      isStrongRelation: /强势|控制|上位|命令|管束|掌控|严厉|压制|支配/.test(text),
+      isCold: /cold|indifferent|冷淡|寡言|克制|疏离|淡漠|高冷|少话|冷感/.test(text),
+      isStrongRelation: /strong|dominant|强势|控制|上位|命令|管束|掌控|严厉|压制|支配|管教/.test(text),
       isControl: /控制|管束|掌控|命令|规训|支配|服从|压制|不许|必须/.test(text),
       isForbidden: /禁忌|禁止|不得|不能|不许|不可|隐瞒|隐藏|秘密|越界|违规|边界/.test(text),
-      isUpperLower: /主仆|主人|仆从|上下级|上司|下属|师徒|老师|学生|管教|服从|支配|臣|君|统治|命令|上位|下位/.test(text),
+      isUpperLower: /formal|主仆|主人|仆从|上下级|上司|下属|师徒|老师|学生|管教|服从|支配|臣|君|统治|命令|上位|下位|年长|前辈|师长/.test(text),
+      isClingy: /clingy|黏人|粘人|依赖|撒娇|缠人|离不开|想贴|黏|粘/.test(text),
+      isTsundere: /tsundere|傲娇|嘴硬|别扭|毒舌|口是心非|不承认/.test(text),
+      isGentle: /gentle|温柔但克制|温柔|体贴|耐心|克制地关心/.test(text),
+      isObsessive: /obsessive|偏执|占有欲|占有|病态|盯紧|不许别人|只能/.test(text),
+      isPlayful: /playful|轻佻|爱逗|逗弄|玩笑|欠揍|调侃|嬉皮笑脸/.test(text),
+      isFormal: /formal|年长|老师|上司|前辈|家长|监护|师长|敬语|礼貌|克制/.test(text),
+      isHostile: /hostile|敌对|防备|戒备|讽刺|厌恶|不信任|挑衅|针锋相对/.test(text),
       wantsClose: /拉近|靠近|想见|想抱|黏|想他|想她|想你|心动|想要|不舍|靠过去/.test(thoughts),
       wantsAway: /拉远|拉开|疏远|不想理|烦|远点|滚|别靠近|冷处理|懒得理/.test(thoughts),
       wantsSuppress: /压住|压制|管住|训|教训|安排|让他听话|让她听话|让他低头|让她低头/.test(thoughts),
@@ -3344,7 +3593,8 @@
       profile && profile.persona,
       profile && profile.currentMood,
       profile && profile.chatSettingsText,
-      profile && profile.previousReplyText
+      profile && profile.previousReplyText,
+      profile && profile.latestUserInput
     ].join("\n");
 
     if (flags.hasWorldRules && (flags.wantsSuppress || flags.isUpperLower || flags.isControl || flags.isStrongRelation)) {
@@ -3353,7 +3603,13 @@
     if (flags.hasWorldRules && (flags.wantsHide || flags.isForbidden)) {
       return "worldForbidden";
     }
-    if (flags.wantsHide && (flags.isJealous || /傲娇|嘴硬|别扭|毒舌/.test(text))) {
+    if (flags.isHostile || /hostile|敌对|防备|戒备|讽刺|厌恶|不信任|挑衅|针锋相对/.test(text)) {
+      return "hostile";
+    }
+    if (flags.isObsessive || flags.isJealous || /obsessive|偏执|占有欲|占有|病态|盯紧|不许别人|只能/.test(text)) {
+      return "obsessive";
+    }
+    if (flags.wantsHide && (flags.isJealous || flags.isTsundere || /傲娇|嘴硬|别扭|毒舌/.test(text))) {
       return "tsundere";
     }
     if (flags.wantsAway || flags.isCold || /冷淡|寡言|克制|疏离|淡漠|高冷/.test(text)) {
@@ -3362,17 +3618,23 @@
     if (flags.wantsSuppress || flags.isStrongRelation || /强势|控制|上位|命令|管束|掌控|严厉/.test(text)) {
       return "strong";
     }
-    if (flags.wantsClose || /黏|粘|撒娇|依赖|占有欲|黏人/.test(text)) {
+    if (flags.isClingy || flags.wantsClose || /黏|粘|撒娇|依赖|黏人/.test(text)) {
       return "clingy";
     }
     if (flags.wantsProbe || /试探|留白|观察|留余地/.test(text)) {
       return "tsundere";
     }
-    if (/傲娇|嘴硬|别扭|毒舌/.test(text)) {
+    if (flags.isTsundere || /傲娇|嘴硬|别扭|毒舌/.test(text)) {
       return "tsundere";
     }
-    if (/年长|老师|上司|前辈|家长|监护|师长/.test(text)) {
-      return "senior";
+    if (flags.isPlayful || /轻佻|爱逗|逗弄|玩笑|调侃/.test(text)) {
+      return "playful";
+    }
+    if (flags.isFormal || /年长|老师|上司|前辈|家长|监护|师长|敬语|礼貌/.test(text)) {
+      return "formal";
+    }
+    if (flags.isGentle || /温柔但克制|温柔|体贴|耐心/.test(text)) {
+      return "gentle";
     }
     return "default";
   }
@@ -3382,12 +3644,16 @@
     var byBucket = {
       worldControl: ["先停。", "这不是你能越过去的线。", "按我说的来。", "别试探我的底线。", "你现在要做的是听话。", "把话收回去。", "我没准你这样问。", "站在那儿，别动。", "这件事我来定。", "看着我，再说一遍。"],
       worldForbidden: ["这话到这里。", "别碰那条线。", "换个问法。", "我不会答应你这个。", "有些事你不该问。", "别把我往那边逼。", "这句我当没听见。", "收住。", "我们不谈这个。", "你知道这不合适。"],
-      cold: ["嗯。", "我看见了。", "别绕。", "说重点。", "这句不像随口说的。", "停一下。", "你刚才那句，留着。", "我没忽略。", "继续。", "别装没事。"],
+      cold: ["嗯。", "说重点。", "别绕。", "这句我听见了。", "停一下。", "你刚才那句，留着。", "我没说不管。", "继续。", "别装没事。", "到这儿就够了。"],
       strong: ["先停。", "听我说。", "这件事别拖。", "按我说的来。", "先把话说清楚。", "不用躲。", "我来判断。", "你现在别乱想。", "把手头的事放一放。", "看着我回。"],
-      clingy: ["你又这样。", "别把我晾在这儿。", "我想听你多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别躲我。", "再说一句。", "我还在等。", "你别敷衍我。"],
+      clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别躲我。", "再说一句。", "我还在等。", "你别敷衍我。"],
       tsundere: ["谁担心你了。", "我是顺手问一句。", "别误会。", "你刚才那样很明显。", "行吧，我听着。", "别又装没事。", "烦死了。", "那你倒是说啊。", "我没生气。", "算了，先听你的。"],
-      senior: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "我知道你的意思。", "不用逞强。", "这句我会记着。"],
-      default: ["嗯，我看见了。", "你刚才那句，我没跳过去。", "等一下。", "这话不像随便说的。", "我想了下。", "先别急着翻篇。", "你看着我回。", "我接着呢。", "别把话藏一半。", "继续说。"]
+      gentle: ["先看着我。", "别把自己绷太紧。", "这句我接住了。", "不用硬撑。", "我在听。", "把气放下来一点。", "先坐稳。", "别急着躲开。", "这事我会放在心上。", "说到这儿也行。"],
+      obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "看着我说。", "我不喜欢你这样躲。", "那个人先放一边。", "你现在回我。", "别让我猜。", "我盯着呢。"],
+      playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "来，再说一遍。", "你这话我可记下了。", "别急着跑。", "行啊，胆子见长。", "我听着，你继续编。", "这反应挺明显的。"],
+      formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，看着我说。"],
+      hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续装。", "这笔账先记着。"],
+      default: ["嗯，我看见了。", "你刚才那句，我没跳过去。", "等一下。", "这话不像随便说的。", "先别急着翻篇。", "你看着我回。", "我接着呢。", "别把话藏一半。", "继续说。", "这句留着。"]
     };
     var lines = byBucket[bucket] || byBucket.default;
 
