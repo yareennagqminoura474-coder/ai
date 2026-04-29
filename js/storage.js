@@ -1169,20 +1169,27 @@
     }));
   }
 
-  function getMatchedWorldBookEntries(contextText, scope, targetId) {
+  function getMatchedWorldBookEntries(contextText, scope, targetId, options) {
     var rawText = String(contextText || "");
     var text = rawText.toLowerCase();
     var target = String(targetId || "");
+    var source = options || {};
+    var relatedTargetIds = normalizeWorldBookTargetIds(source.relatedTargetIds || source.characterIds || source.memberIds || []);
     var matched = [];
     var contextTokens = extractWorldBookTokens(rawText);
 
     getWorldBooks().forEach(function (book) {
-      if (!book.enabled || !isWorldBookInScope(book, scope, target)) {
+      if (!book.enabled || !isWorldBookInScope(book, scope, target, relatedTargetIds)) {
         return;
       }
 
       (book.entries || []).forEach(function (entry) {
+        if (!entry.enabled || !isWorldBookEntryInScope(entry, scope, target, relatedTargetIds)) {
+          return;
+        }
+
         var keywords = normalizeWorldBookKeywords(entry);
+        var alwaysActive = isWorldBookEntryAlwaysActive(entry, book);
         var keywordScore = keywords.reduce(function (score, keyword) {
           var value = String(keyword || "").trim().toLowerCase();
 
@@ -1208,19 +1215,29 @@
           }
           return String(entry.content || "").toLowerCase().indexOf(token) !== -1 ? score + 1 : score;
         }, 0);
-        var score = keywordScore + titleScore + groupScore + Math.min(contentScore, 6) + (Number(entry.priority) || 0);
+        var baseScore = keywordScore + titleScore + groupScore + Math.min(contentScore, 6);
+        var priority = Number(entry.priority) || 0;
+        var score = baseScore + priority + (alwaysActive ? 100 : 0);
+        var shouldInclude = alwaysActive || baseScore > 0 || (!keywords.length && priority >= 8);
 
-        if (entry.enabled && score > 0) {
+        if (shouldInclude) {
           matched.push(Object.assign({}, entry, {
             bookName: book.name,
             bookDescription: book.description,
             bookScope: book.scope,
+            bookTargetIds: book.targetIds.slice(),
             keywords: keywords,
+            alwaysActive: Boolean(alwaysActive),
+            matchType: alwaysActive ? "常驻现实规则" : (baseScore > 0 ? "关键词/上下文命中" : "高优先级命中"),
             matchScore: score
           }));
         }
       });
     });
+
+    if (!matched.length) {
+      matched = getFallbackWorldBookEntries(scope, target, relatedTargetIds);
+    }
 
     return matched.sort(function (a, b) {
       var scoreGap = (Number(b.matchScore) || 0) - (Number(a.matchScore) || 0);
@@ -1231,6 +1248,48 @@
 
       return (Number(b.priority) || 0) - (Number(a.priority) || 0);
     }).slice(0, 10);
+  }
+
+  function getFallbackWorldBookEntries(scope, targetId, relatedTargetIds) {
+    var fallback = [];
+
+    getWorldBooks().forEach(function (book) {
+      if (!book.enabled || !isWorldBookFallbackEligible(book, scope, targetId, relatedTargetIds)) {
+        return;
+      }
+
+      (book.entries || []).forEach(function (entry) {
+        var priority = Number(entry.priority) || 0;
+        var alwaysActive = isWorldBookEntryAlwaysActive(entry, book);
+
+        if (!entry.enabled || !isWorldBookEntryInScope(entry, scope, targetId, relatedTargetIds)) {
+          return;
+        }
+
+        if (!alwaysActive && priority < 8) {
+          return;
+        }
+
+        fallback.push(Object.assign({}, entry, {
+          bookName: book.name,
+          bookDescription: book.description,
+          bookScope: book.scope,
+          bookTargetIds: book.targetIds.slice(),
+          keywords: normalizeWorldBookKeywords(entry),
+          alwaysActive: Boolean(alwaysActive),
+          matchType: alwaysActive ? "常驻现实规则" : "高优先级兜底",
+          matchScore: (alwaysActive ? 80 : 40) + priority
+        }));
+      });
+    });
+
+    return fallback.sort(function (a, b) {
+      var pinnedGap = Number(Boolean(b.alwaysActive)) - Number(Boolean(a.alwaysActive));
+      if (pinnedGap) {
+        return pinnedGap;
+      }
+      return (Number(b.priority) || 0) - (Number(a.priority) || 0);
+    }).slice(0, 3);
   }
 
   function extractWorldBookTokens(text) {
@@ -1247,16 +1306,82 @@
     }).slice(0, 80);
   }
 
-  function isWorldBookInScope(book, scope, targetId) {
-    if (book.scope === "global") {
+  function isWorldBookInScope(book, scope, targetId, relatedTargetIds) {
+    var ids = normalizeWorldBookTargetIds(relatedTargetIds);
+
+    if (book.scope === "global" || book.scope === "all") {
       return true;
     }
 
     if (book.scope !== scope) {
-      return false;
+      return scope === "group"
+        && book.scope === "private"
+        && book.targetIds.length
+        && ids.some(function (id) {
+          return book.targetIds.indexOf(id) !== -1;
+        });
     }
 
-    return !book.targetIds.length || book.targetIds.indexOf(targetId) !== -1;
+    return !book.targetIds.length
+      || book.targetIds.indexOf(targetId) !== -1
+      || ids.some(function (id) {
+        return book.targetIds.indexOf(id) !== -1;
+      });
+  }
+
+  function isWorldBookFallbackEligible(book, scope, targetId, relatedTargetIds) {
+    if (book.scope === "global" || book.scope === "all" || book.alwaysActive || book.pinned) {
+      return true;
+    }
+
+    return isWorldBookInScope(book, scope, targetId, relatedTargetIds) && book.targetIds.length > 0;
+  }
+
+  function isWorldBookEntryInScope(entry, scope, targetId, relatedTargetIds) {
+    var entryScope = String(entry.scope || "").trim();
+    var ids = normalizeWorldBookTargetIds(relatedTargetIds);
+
+    if (entryScope && entryScope !== "global" && entryScope !== "all" && entryScope !== scope) {
+      if (!(scope === "group" && entryScope === "private" && entry.targetIds && entry.targetIds.length && ids.some(function (id) {
+        return entry.targetIds.indexOf(id) !== -1;
+      }))) {
+      return false;
+      }
+    }
+
+    if (!entry.targetIds || !entry.targetIds.length) {
+      return true;
+    }
+
+    return entry.targetIds.indexOf(targetId) !== -1
+      || ids.some(function (id) {
+        return entry.targetIds.indexOf(id) !== -1;
+      });
+  }
+
+  function isWorldBookEntryAlwaysActive(entry, book) {
+    return Boolean(entry && (entry.alwaysActive || entry.pinned || entry.isPinned || entry.constant || entry.常驻 || entry["常驻"]))
+      || Boolean(book && (book.alwaysActive || book.pinned || book.isPinned || book.constant || book.常驻 || book["常驻"]));
+  }
+
+  function normalizeWorldBookScope(scope) {
+    var value = String(scope || "").toLowerCase();
+
+    if (value === "private" || value === "group" || value === "global" || value === "all") {
+      return value;
+    }
+
+    return "global";
+  }
+
+  function normalizeWorldBookTargetIds(value) {
+    var list = Array.isArray(value) ? value : (value ? String(value).split(/[,，\s]+/) : []);
+
+    return list.map(function (item) {
+      return String(item || "").trim();
+    }).filter(Boolean).filter(function (item, index, all) {
+      return all.indexOf(item) === index;
+    });
   }
 
   function normalizeWorldBookKeywords(entry) {
@@ -2965,8 +3090,10 @@
       description: String(source.description || ""),
       entries: Array.isArray(source.entries) ? source.entries.map(normalizeWorldBookEntry) : [],
       enabled: source.enabled !== false,
-      scope: source.scope === "private" || source.scope === "group" ? source.scope : "global",
-      targetIds: Array.isArray(source.targetIds) ? source.targetIds.map(String) : [],
+      scope: normalizeWorldBookScope(source.scope),
+      targetIds: normalizeWorldBookTargetIds(source.targetIds || source.targetId || source.characterIds || source.groupIds),
+      alwaysActive: Boolean(source.alwaysActive || source.pinned || source.isPinned || source.constant || source.常驻 || source["常驻"]),
+      pinned: Boolean(source.pinned || source.isPinned),
       createdAt: Number(source.createdAt) || now,
       updatedAt: Number(source.updatedAt) || now
     };
@@ -2988,6 +3115,10 @@
       insertPosition: source.insertPosition === "after" ? "after" : "before",
       group: String(source.group || "未分组").trim() || "未分组",
       enabled: source.enabled !== false,
+      scope: source.scope ? normalizeWorldBookScope(source.scope) : "",
+      targetIds: normalizeWorldBookTargetIds(source.targetIds || source.targetId || source.characterIds || source.groupIds),
+      alwaysActive: Boolean(source.alwaysActive || source.pinned || source.isPinned || source.constant || source.常驻 || source["常驻"]),
+      pinned: Boolean(source.pinned || source.isPinned),
       summary: String(source.summary || content.slice(0, 90)).trim(),
       priority: Number(source.priority) || 0,
       createdAt: Number(source.createdAt) || now,
