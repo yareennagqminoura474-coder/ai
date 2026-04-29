@@ -13,6 +13,8 @@
   var selectedPrivateMessageIds = [];
   var INITIAL_PRIVATE_RENDER_LIMIT = 60;
   var privateVisibleMessageCounts = {};
+  var privateInputDrafts = {};
+  var currentChatRenderToken = "";
 
   function getElement(id) {
     return document.getElementById(id);
@@ -769,8 +771,29 @@
     text.classList.remove("hidden");
   }
 
+  function saveActivePrivateInputDraft() {
+    var input = getElement("chatInput");
+
+    if (input && activeCharacterId) {
+      privateInputDrafts[activeCharacterId] = input.value || "";
+    }
+  }
+
+  function restorePrivateInputDraft(characterId) {
+    var input = getElement("chatInput");
+
+    if (input) {
+      input.value = privateInputDrafts[characterId] || "";
+    }
+  }
+
+  function handlePrivateInputDraftChange() {
+    saveActivePrivateInputDraft();
+  }
+
   function openChatScreen(characterId) {
     var character = getCharacterById(characterId);
+    var token;
 
     if (!character) {
       renderCharacterList();
@@ -778,19 +801,31 @@
       return;
     }
 
+    saveActivePrivateInputDraft();
     activeCharacterId = characterId;
+    if (window.GroupManager && window.GroupManager.deactivateActiveGroup) {
+      window.GroupManager.deactivateActiveGroup();
+    }
+    token = Date.now() + "_" + Math.random().toString(36).slice(2) + "_" + characterId;
+    currentChatRenderToken = token;
     isPrivateMessageSelectionMode = false;
     selectedPrivateMessageIds = [];
+    privateVisibleMessageCounts[characterId] = INITIAL_PRIVATE_RENDER_LIMIT;
     updateChatHeader(character);
+    renderChatOpeningPlaceholder(character);
+    restorePrivateInputDraft(characterId);
     updateInlineOfflineUi();
     updatePrivateBlockUi(characterId);
     closeAllMenus();
     ensureOpeningMessage(character);
     window.setActivePage("chatScreen");
-    updateThoughtButton();
-    window.setTimeout(function () {
+    updateThoughtButton(characterId);
+    requestAnimationFrame(function () {
+      if (currentChatRenderToken !== token || activeCharacterId !== characterId) {
+        return;
+      }
       renderChatMessages(characterId);
-    }, 0);
+    });
   }
 
   function updateChatHeader(character) {
@@ -809,6 +844,25 @@
     avatar.innerHTML = character.avatar
       ? '<img src="' + escapeHtml(character.avatar) + '" alt="">'
       : escapeHtml(getAvatarText(character));
+  }
+
+  function renderChatOpeningPlaceholder(character) {
+    var messagesWrap = getElement("chatMessages");
+    var settings = getPrivateChatSettings(character);
+
+    if (!messagesWrap) {
+      return;
+    }
+
+    messagesWrap.classList.remove("selection-mode");
+    applyChatBackground(messagesWrap, settings.chatBackground);
+    messagesWrap.innerHTML = [
+      '<div class="chat-opening-placeholder" aria-live="polite">',
+      '  <span class="chat-opening-dot"></span>',
+      "  <em>正在打开聊天...</em>",
+      "</div>"
+    ].join("");
+    messagesWrap.scrollTop = 0;
   }
 
   function ensureOpeningMessage(character) {
@@ -870,6 +924,10 @@
   }
 
   function renderChatMessages(characterId, options) {
+    if (characterId !== activeCharacterId) {
+      return;
+    }
+
     var messagesWrap = getElement("chatMessages");
     var messages = window.AppStorage.getChatHistory(characterId);
     var character = getCharacterById(characterId);
@@ -882,7 +940,7 @@
     });
     var selectableCount = getSelectablePrivateMessages(messages).length;
 
-    if (!messagesWrap) {
+    if (!messagesWrap || !character) {
       return;
     }
 
@@ -912,7 +970,10 @@
         window.AppApiJobs.scheduleScrollToBottom(messagesWrap);
       } else {
         requestAnimationFrame(function () {
-        messagesWrap.scrollTop = messagesWrap.scrollHeight;
+          if (characterId !== activeCharacterId) {
+            return;
+          }
+          messagesWrap.scrollTop = messagesWrap.scrollHeight;
         });
       }
     }
@@ -1735,6 +1796,9 @@
       window.AppApiJobs.scheduleScrollToBottom(wrap);
     } else {
       requestAnimationFrame(function () {
+        if (activeCharacterId !== characterId) {
+          return;
+        }
         wrap.scrollTop = wrap.scrollHeight;
       });
     }
@@ -1775,6 +1839,7 @@
 
     if (input) {
       input.value = "";
+      privateInputDrafts[activeCharacterId] = "";
       input.focus();
     }
 
@@ -3327,6 +3392,16 @@
     }
   }
 
+  function openActiveChatWorldBookSelector() {
+    var character = activeCharacterId ? getCharacterById(activeCharacterId) : null;
+
+    closeAllMenus();
+
+    if (character && window.AppExtras && window.AppExtras.openChatWorldBookSelector) {
+      window.AppExtras.openChatWorldBookSelector("private", character.id);
+    }
+  }
+
   function openActiveBodyState() {
     var character = activeCharacterId ? getCharacterById(activeCharacterId) : null;
 
@@ -3694,8 +3769,19 @@
     window.setActivePage("characterListScreen");
   }
 
-  function resetState() {
+  function deactivateActiveCharacter() {
+    saveActivePrivateInputDraft();
     activeCharacterId = "";
+    currentChatRenderToken = "";
+    isPrivateMessageSelectionMode = false;
+    selectedPrivateMessageIds = [];
+    closeAllMenus();
+  }
+
+  function resetState() {
+    saveActivePrivateInputDraft();
+    activeCharacterId = "";
+    currentChatRenderToken = "";
     createReturnPage = "characterListScreen";
     formMode = "create";
     editingCharacterId = "";
@@ -3749,6 +3835,7 @@
     updateInlineOfflineUi: updateInlineOfflineUi,
     openActivePrivateSettings: openActivePrivateSettings,
     openActiveChatMemory: openActiveChatMemory,
+    openActiveChatWorldBookSelector: openActiveChatWorldBookSelector,
     openActiveBodyState: openActiveBodyState,
     openActiveRegenerateReply: openActiveRegenerateReply,
     savePrivateChatSettings: savePrivateChatSettings,
@@ -3760,6 +3847,8 @@
     },
     openActiveChatSearch: openActiveChatSearch,
     deleteCharacterWithConfirm: deleteCharacterWithConfirm,
+    handlePrivateInputDraftChange: handlePrivateInputDraftChange,
+    deactivateActiveCharacter: deactivateActiveCharacter,
     resetState: resetState
   };
 })(window, document);

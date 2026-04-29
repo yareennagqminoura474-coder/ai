@@ -11,6 +11,8 @@
   var selectedGroupMessageIds = [];
   var INITIAL_GROUP_RENDER_LIMIT = 60;
   var groupVisibleMessageCounts = {};
+  var groupInputDrafts = {};
+  var currentGroupRenderToken = "";
   var collapsedAnnouncements = {};
 
   function getElement(id) {
@@ -366,6 +368,7 @@
 
     if (ids.indexOf(activeGroupId) !== -1) {
       activeGroupId = "";
+      currentGroupRenderToken = "";
     }
 
     isGroupSelectionMode = false;
@@ -554,8 +557,29 @@
     }
   }
 
+  function saveActiveGroupInputDraft() {
+    var input = getElement("groupChatInput");
+
+    if (input && activeGroupId) {
+      groupInputDrafts[activeGroupId] = input.value || "";
+    }
+  }
+
+  function restoreGroupInputDraft(groupId) {
+    var input = getElement("groupChatInput");
+
+    if (input) {
+      input.value = groupInputDrafts[groupId] || "";
+    }
+  }
+
+  function handleGroupInputDraftChange() {
+    saveActiveGroupInputDraft();
+  }
+
   function openGroupChatScreen(groupId) {
     var group = getGroupById(groupId);
+    var token;
 
     if (!group) {
       renderGroupList();
@@ -563,20 +587,70 @@
       return;
     }
 
+    saveActiveGroupInputDraft();
     activeGroupId = groupId;
+    if (window.CharacterManager && window.CharacterManager.deactivateActiveCharacter) {
+      window.CharacterManager.deactivateActiveCharacter();
+    }
+    token = Date.now() + "_" + Math.random().toString(36).slice(2) + "_" + groupId;
+    currentGroupRenderToken = token;
     isGroupMessageSelectionMode = false;
     selectedGroupMessageIds = [];
-    getElement("groupChatTitle").textContent = group.name;
+    groupVisibleMessageCounts[groupId] = INITIAL_GROUP_RENDER_LIMIT;
+    updateGroupChatHeader(group);
+    renderGroupOpeningPlaceholder(group);
+    restoreGroupInputDraft(groupId);
     updateInlineOfflineUi();
     closeAllMenus();
     window.setActivePage("groupChatScreen");
     updateThoughtButton(groupId);
-    window.setTimeout(function () {
+    requestAnimationFrame(function () {
+      if (currentGroupRenderToken !== token || activeGroupId !== groupId) {
+        return;
+      }
       renderGroupChatMessages(groupId);
-    }, 0);
+    });
+  }
+
+  function updateGroupChatHeader(group) {
+    var title = getElement("groupChatTitle");
+    var avatar = getElement("groupChatHeaderAvatar");
+    var members = group && Array.isArray(group.memberIds) ? group.memberIds : [];
+
+    if (title) {
+      title.textContent = group && group.name || "群聊";
+    }
+
+    if (avatar) {
+      avatar.textContent = members.length ? String(members.length) : "群";
+      avatar.setAttribute("title", (group && group.name || "群聊") + "，" + members.length + " 人");
+    }
+  }
+
+  function renderGroupOpeningPlaceholder(group) {
+    var wrap = getElement("groupChatMessages");
+    var settings = getGroupSettings(group);
+
+    if (!wrap) {
+      return;
+    }
+
+    wrap.classList.remove("selection-mode");
+    applyGroupChatBackground(wrap, settings.background);
+    wrap.innerHTML = [
+      '<div class="chat-opening-placeholder" aria-live="polite">',
+      '  <span class="chat-opening-dot"></span>',
+      "  <em>正在打开聊天...</em>",
+      "</div>"
+    ].join("");
+    wrap.scrollTop = 0;
   }
 
   function renderGroupChatMessages(groupId, options) {
+    if (groupId !== activeGroupId) {
+      return;
+    }
+
     var wrap = getElement("groupChatMessages");
     var group = getGroupById(groupId);
     var settings = getGroupSettings(group);
@@ -660,6 +734,9 @@
         window.AppApiJobs.scheduleScrollToBottom(wrap);
       } else {
         requestAnimationFrame(function () {
+          if (groupId !== activeGroupId) {
+            return;
+          }
           wrap.scrollTop = wrap.scrollHeight;
         });
       }
@@ -1494,6 +1571,7 @@
 
     window.AppStorage.saveGroupChatHistory(group.id, messages);
     input.value = "";
+    groupInputDrafts[group.id] = "";
     input.focus();
     closeToolPanel();
     renderGroupChatMessages(group.id);
@@ -2760,6 +2838,16 @@
     }
   }
 
+  function openActiveGroupWorldBookSelector() {
+    var group = activeGroupId ? getGroupById(activeGroupId) : null;
+
+    closeAllMenus();
+
+    if (group && window.AppExtras && window.AppExtras.openChatWorldBookSelector) {
+      window.AppExtras.openChatWorldBookSelector("group", group.id);
+    }
+  }
+
   function openActiveGroupBodyState() {
     var group = activeGroupId ? getGroupById(activeGroupId) : null;
 
@@ -2946,7 +3034,7 @@
     };
 
     window.AppStorage.updateGroup(group.id, next);
-    getElement("groupChatTitle").textContent = next.name;
+    updateGroupChatHeader(getGroupById(group.id));
     renderGroupChatMessages(group.id);
     renderGroupList();
     window.setActivePage("groupChatScreen");
@@ -3057,6 +3145,15 @@
     }
   }
 
+  function deactivateActiveGroup() {
+    saveActiveGroupInputDraft();
+    activeGroupId = "";
+    currentGroupRenderToken = "";
+    isGroupMessageSelectionMode = false;
+    selectedGroupMessageIds = [];
+    closeAllMenus();
+  }
+
   function getActiveGroupId() {
     return activeGroupId;
   }
@@ -3093,6 +3190,7 @@
     updateInlineOfflineUi: updateInlineOfflineUi,
     openActiveGroupSettings: openActiveGroupSettings,
     openActiveGroupMemory: openActiveGroupMemory,
+    openActiveGroupWorldBookSelector: openActiveGroupWorldBookSelector,
     openActiveGroupBodyState: openActiveGroupBodyState,
     openActiveGroupRegenerateReply: openActiveGroupRegenerateReply,
     saveGroupSettings: saveGroupSettings,
@@ -3100,6 +3198,8 @@
     openActiveGroupThoughtsDrawer: openActiveGroupThoughtsDrawer,
     updateThoughtButton: updateThoughtButton,
     openActiveGroupSearch: openActiveGroupSearch,
+    handleGroupInputDraftChange: handleGroupInputDraftChange,
+    deactivateActiveGroup: deactivateActiveGroup,
     getActiveGroupId: getActiveGroupId
   };
 })(window, document);

@@ -12,6 +12,7 @@
     bodyStates: "myAiApp.bodyStates",
     emojiPacks: "myAiApp.emojiPacks",
     worldBooks: "myAiApp.worldBooks",
+    chatWorldBooks: "myAiApp.chatWorldBooks",
     thoughts: "myAiApp.thoughts",
     blockRelations: "myAiApp.blockRelations",
     bodyStateSnapshots: "myAiApp.bodyStateSnapshots",
@@ -275,6 +276,7 @@
 
     saveCharacters(characters);
     deleteChatHistory(characterId);
+    clearChatWorldBooks("private", characterId);
     clearCharacterMemory(characterId);
     clearChatMemories("private", characterId);
     clearBodyState("private", characterId);
@@ -490,6 +492,7 @@
       return group.id !== groupId;
     }));
     deleteGroupChatHistory(groupId);
+    clearChatWorldBooks("group", groupId);
     clearChatMemories("group", groupId);
     clearBodyState("group", groupId);
     resetChatRoundCounter("group", groupId);
@@ -1167,6 +1170,131 @@
     saveWorldBooks(getWorldBooks().filter(function (book) {
       return book.id !== bookId;
     }));
+    removeWorldBookFromChatBindings(bookId);
+  }
+
+  function getChatWorldBookStore() {
+    return normalizeChatWorldBookStore(parseJson(localStorage.getItem(STORAGE_KEYS.chatWorldBooks), {}));
+  }
+
+  function saveChatWorldBookStore(store) {
+    localStorage.setItem(STORAGE_KEYS.chatWorldBooks, JSON.stringify(normalizeChatWorldBookStore(store || {})));
+  }
+
+  function getChatWorldBookKey(targetType, targetId) {
+    return (targetType === "group" ? "group" : "private") + ":" + String(targetId || "");
+  }
+
+  function getLegacyChatWorldBookIds(targetType, targetId) {
+    var id = String(targetId || "");
+    var target;
+
+    if (!id) {
+      return [];
+    }
+
+    if (targetType === "group") {
+      target = getGroups().find(function (group) {
+        return group.id === id;
+      });
+      return normalizeWorldBookIdList(target && target.settings && target.settings.worldBookIds || []);
+    }
+
+    target = getCharacters().find(function (character) {
+      return character.id === id;
+    });
+    return normalizeWorldBookIdList(target && target.chatSettings && target.chatSettings.worldBookIds || []);
+  }
+
+  function getChatWorldBookIds(targetType, targetId) {
+    var key = getChatWorldBookKey(targetType, targetId);
+    var store = getChatWorldBookStore();
+
+    if (Object.prototype.hasOwnProperty.call(store, key)) {
+      return store[key].slice();
+    }
+
+    return getLegacyChatWorldBookIds(targetType === "group" ? "group" : "private", targetId);
+  }
+
+  function setChatWorldBookIds(targetType, targetId, ids) {
+    var key = getChatWorldBookKey(targetType, targetId);
+    var store = getChatWorldBookStore();
+    var normalized = normalizeWorldBookIdList(ids);
+
+    if (!String(targetId || "")) {
+      return [];
+    }
+
+    if (normalized.length) {
+      store[key] = normalized;
+    } else {
+      delete store[key];
+    }
+
+    saveChatWorldBookStore(store);
+    return normalized.slice();
+  }
+
+  function clearChatWorldBooks(targetType, targetId) {
+    setChatWorldBookIds(targetType, targetId, []);
+  }
+
+  function toggleChatWorldBook(targetType, targetId, bookId) {
+    var ids = getChatWorldBookIds(targetType, targetId);
+    var id = String(bookId || "");
+    var index;
+
+    if (!id) {
+      return ids;
+    }
+
+    index = ids.indexOf(id);
+    if (index === -1) {
+      ids.push(id);
+    } else {
+      ids.splice(index, 1);
+    }
+
+    return setChatWorldBookIds(targetType, targetId, ids);
+  }
+
+  function getSelectedWorldBooksForChat(targetType, targetId) {
+    var selectedIds = getChatWorldBookIds(targetType, targetId);
+
+    return getWorldBooks().filter(function (book) {
+      return selectedIds.indexOf(book.id) !== -1;
+    });
+  }
+
+  function removeWorldBookFromChatBindings(bookId) {
+    var id = String(bookId || "");
+    var store;
+    var changed = false;
+
+    if (!id) {
+      return;
+    }
+
+    store = getChatWorldBookStore();
+    Object.keys(store).forEach(function (key) {
+      var next = store[key].filter(function (item) {
+        return item !== id;
+      });
+
+      if (next.length !== store[key].length) {
+        changed = true;
+        if (next.length) {
+          store[key] = next;
+        } else {
+          delete store[key];
+        }
+      }
+    });
+
+    if (changed) {
+      saveChatWorldBookStore(store);
+    }
   }
 
   function getMatchedWorldBookEntries(contextText, scope, targetId, options) {
@@ -1174,11 +1302,22 @@
     var text = rawText.toLowerCase();
     var target = String(targetId || "");
     var source = options || {};
+    var hasSelectedFilter = Object.prototype.hasOwnProperty.call(source, "selectedWorldBookIds")
+      || Object.prototype.hasOwnProperty.call(source, "allowedBookIds");
+    var selectedWorldBookIds = normalizeWorldBookIdList(source.selectedWorldBookIds || source.allowedBookIds || []);
     var relatedTargetIds = normalizeWorldBookTargetIds(source.relatedTargetIds || source.characterIds || source.memberIds || []);
     var matched = [];
     var contextTokens = extractWorldBookTokens(rawText);
 
+    if (hasSelectedFilter && !selectedWorldBookIds.length) {
+      return [];
+    }
+
     getWorldBooks().forEach(function (book) {
+      if (hasSelectedFilter && selectedWorldBookIds.indexOf(book.id) === -1) {
+        return;
+      }
+
       if (!book.enabled || !isWorldBookInScope(book, scope, target, relatedTargetIds)) {
         return;
       }
@@ -1236,7 +1375,7 @@
     });
 
     if (!matched.length) {
-      matched = getFallbackWorldBookEntries(scope, target, relatedTargetIds);
+      matched = getFallbackWorldBookEntries(scope, target, relatedTargetIds, hasSelectedFilter ? selectedWorldBookIds : null);
     }
 
     return matched.sort(function (a, b) {
@@ -1250,10 +1389,15 @@
     }).slice(0, 10);
   }
 
-  function getFallbackWorldBookEntries(scope, targetId, relatedTargetIds) {
+  function getFallbackWorldBookEntries(scope, targetId, relatedTargetIds, allowedBookIds) {
     var fallback = [];
+    var selectedWorldBookIds = Array.isArray(allowedBookIds) ? allowedBookIds : null;
 
     getWorldBooks().forEach(function (book) {
+      if (selectedWorldBookIds && selectedWorldBookIds.indexOf(book.id) === -1) {
+        return;
+      }
+
       if (!book.enabled || !isWorldBookFallbackEligible(book, scope, targetId, relatedTargetIds)) {
         return;
       }
@@ -1375,6 +1519,16 @@
   }
 
   function normalizeWorldBookTargetIds(value) {
+    var list = Array.isArray(value) ? value : (value ? String(value).split(/[,，\s]+/) : []);
+
+    return list.map(function (item) {
+      return String(item || "").trim();
+    }).filter(Boolean).filter(function (item, index, all) {
+      return all.indexOf(item) === index;
+    });
+  }
+
+  function normalizeWorldBookIdList(value) {
     var list = Array.isArray(value) ? value : (value ? String(value).split(/[,，\s]+/) : []);
 
     return list.map(function (item) {
@@ -2535,6 +2689,7 @@
       blockRelations: getBlockRelations(),
       emojiPacks: getEmojiPacks(),
       worldBooks: getWorldBooks(),
+      chatWorldBooks: getChatWorldBookStore(),
       thoughts: getThoughtStore(),
       diaries: getDiaries(),
       diarySettings: getCharacters().reduce(function (settings, character) {
@@ -2584,6 +2739,7 @@
     saveBlockRelations(normalized.blockRelations);
     saveEmojiPacks(normalized.emojiPacks);
     saveWorldBooks(normalized.worldBooks);
+    saveChatWorldBookStore(normalized.chatWorldBooks);
     saveThoughtStore(normalized.thoughts);
     saveDiaries(normalized.diaries);
     saveUserProfile(normalized.userProfile);
@@ -2649,6 +2805,7 @@
       blockRelations: normalizeBlockRelations(data.blockRelations || {}),
       emojiPacks: normalizeEmojiPacks(data.emojiPacks || []),
       worldBooks: normalizeWorldBooks(data.worldBooks || []),
+      chatWorldBooks: normalizeChatWorldBookStore(data.chatWorldBooks || data.chatWorldBookBindings || {}),
       thoughts: normalizeThoughts(data.thoughts || {}),
       diaries: normalizeDiaries(data.diaries || []),
       userProfile: normalizeUserProfile(data.userProfile || {}),
@@ -2836,6 +2993,7 @@
       patAction: String(source.patAction || ""),
       chatBackground: String(source.chatBackground || ""),
       familyCardId: String(source.familyCardId || ""),
+      worldBookIds: normalizeWorldBookIdList(source.worldBookIds || []),
       userPersonaId: String(source.userPersonaId || ""),
       userPersonaOverride: {
         name: String(persona.name || ""),
@@ -2867,6 +3025,7 @@
       minParticipantCount: Math.max(1, Number(source.minParticipantCount) || 2),
       allowConsecutiveMessages: source.allowConsecutiveMessages !== false,
       allowSpecialMessages: source.allowSpecialMessages !== false,
+      worldBookIds: normalizeWorldBookIdList(source.worldBookIds || []),
       userPersonaId: String(source.userPersonaId || ""),
       userPersonaOverride: {
         name: String(persona.name || ""),
@@ -3078,6 +3237,20 @@
 
   function normalizeWorldBooks(books) {
     return Array.isArray(books) ? books.map(normalizeWorldBook) : [];
+  }
+
+  function normalizeChatWorldBookStore(store) {
+    var normalized = {};
+
+    if (!store || typeof store !== "object" || Array.isArray(store)) {
+      return normalized;
+    }
+
+    Object.keys(store).forEach(function (key) {
+      normalized[String(key)] = normalizeWorldBookIdList(store[key]);
+    });
+
+    return normalized;
   }
 
   function normalizeWorldBook(book, index) {
@@ -3664,6 +3837,7 @@
     localStorage.removeItem(STORAGE_KEYS.blockRelations);
     localStorage.removeItem(STORAGE_KEYS.emojiPacks);
     localStorage.removeItem(STORAGE_KEYS.worldBooks);
+    localStorage.removeItem(STORAGE_KEYS.chatWorldBooks);
     localStorage.removeItem(STORAGE_KEYS.thoughts);
     localStorage.removeItem(STORAGE_KEYS.diaries);
     localStorage.removeItem(STORAGE_KEYS.userProfile);
@@ -3898,6 +4072,10 @@
     addWorldBook: addWorldBook,
     updateWorldBook: updateWorldBook,
     deleteWorldBook: deleteWorldBook,
+    getChatWorldBookIds: getChatWorldBookIds,
+    setChatWorldBookIds: setChatWorldBookIds,
+    toggleChatWorldBook: toggleChatWorldBook,
+    getSelectedWorldBooksForChat: getSelectedWorldBooksForChat,
     getMatchedWorldBookEntries: getMatchedWorldBookEntries,
     getCharacterThoughts: getCharacterThoughts,
     saveCharacterThoughts: saveCharacterThoughts,

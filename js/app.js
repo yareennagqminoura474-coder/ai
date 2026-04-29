@@ -58,6 +58,7 @@
   var noteSearchKeyword = "";
   var expandedWorldBookIds = {};
   var expandedWorldEntryIds = {};
+  var collapsedChatWorldBookGroups = {};
   var apiJobResumeRetryTimer = null;
   var currentThemeId = "default";
   var currentDesktopPage = 0;
@@ -2267,6 +2268,12 @@
       window.CharacterManager.sendUserMessage();
     });
 
+    getElement("chatInput").addEventListener("input", function () {
+      if (window.CharacterManager && window.CharacterManager.handlePrivateInputDraftChange) {
+        window.CharacterManager.handlePrivateInputDraftChange();
+      }
+    });
+
     getElement("chatPlusBtn").addEventListener("click", function (event) {
       event.stopPropagation();
       if (window.GroupManager && window.GroupManager.closeToolPanel) {
@@ -2318,6 +2325,12 @@
     getElement("groupChatComposer").addEventListener("submit", function (event) {
       event.preventDefault();
       window.GroupManager.sendGroupUserMessage();
+    });
+
+    getElement("groupChatInput").addEventListener("input", function () {
+      if (window.GroupManager && window.GroupManager.handleGroupInputDraftChange) {
+        window.GroupManager.handleGroupInputDraftChange();
+      }
     });
 
     getElement("groupPlusBtn").addEventListener("click", function (event) {
@@ -2451,6 +2464,7 @@
     }
 
     getElement("chatSettingsBtn").addEventListener("click", window.CharacterManager.openActivePrivateSettings);
+    addClick("chatWorldBookBtn", window.CharacterManager.openActiveChatWorldBookSelector);
     getElement("chatMemoryBtn").addEventListener("click", window.CharacterManager.openActiveChatMemory);
     getElement("chatSearchBtn").addEventListener("click", window.CharacterManager.openActiveChatSearch);
     getElement("chatBatchSelectBtn").addEventListener("click", window.CharacterManager.openPrivateMessageSelectionMode);
@@ -2488,6 +2502,7 @@
     }
 
     getElement("groupSettingsBtn").addEventListener("click", window.GroupManager.openActiveGroupSettings);
+    addClick("groupWorldBookBtn", window.GroupManager.openActiveGroupWorldBookSelector);
     getElement("groupMemoryBtn").addEventListener("click", window.GroupManager.openActiveGroupMemory);
     getElement("groupSearchBtn").addEventListener("click", window.GroupManager.openActiveGroupSearch);
     getElement("groupBatchMessageSelectBtn").addEventListener("click", window.GroupManager.openGroupMessageSelectionMode);
@@ -4032,6 +4047,226 @@
       }
     };
     reader.readAsText(file);
+  }
+
+  function openChatWorldBookSelector(targetType, targetId) {
+    var type = targetType === "group" ? "group" : "private";
+    var id = String(targetId || "");
+    var checkedIds = window.AppStorage && window.AppStorage.getChatWorldBookIds
+      ? window.AppStorage.getChatWorldBookIds(type, id)
+      : [];
+    var searchText = "";
+
+    if (!id || !window.AppStorage || !window.AppStorage.getWorldBooks) {
+      return;
+    }
+
+    function syncCheckedIds(sheet) {
+      var inputs = Array.prototype.slice.call(sheet.querySelectorAll("[data-chat-world-book-id]"));
+      var visibleIds = inputs.map(function (input) {
+        return input.dataset.chatWorldBookId;
+      }).filter(Boolean);
+      var next = checkedIds.filter(function (id) {
+        return visibleIds.indexOf(id) === -1;
+      });
+
+      inputs.forEach(function (input) {
+        var id = input.dataset.chatWorldBookId;
+        if (id && input.checked && next.indexOf(id) === -1) {
+          next.push(id);
+        }
+      });
+
+      checkedIds = next;
+    }
+
+    function renderSelectorBody(sheet) {
+      var body = sheet.querySelector("#chatWorldBookSelectorBody");
+      var counter = sheet.querySelector("#chatWorldBookSelectedCount");
+      var notice = sheet.querySelector("#chatWorldBookEmptyNotice");
+      var books = window.AppStorage.getWorldBooks().filter(function (book) {
+        return book && book.enabled !== false;
+      });
+      var filtered = filterChatWorldBooks(books, searchText);
+      var groups = groupChatWorldBooksByScope(filtered);
+
+      if (counter) {
+        counter.textContent = "已选 " + checkedIds.length + " 本";
+      }
+
+      if (notice) {
+        notice.textContent = checkedIds.length
+          ? "AI 只会读取本聊天已勾选的世界书。"
+          : "未绑定世界书，AI 不会读取世界书。";
+        notice.classList.toggle("is-empty", !checkedIds.length);
+      }
+
+      if (!body) {
+        return;
+      }
+
+      if (!books.length) {
+        body.innerHTML = '<div class="soft-empty">还没有启用的世界书。</div>';
+        return;
+      }
+
+      if (!filtered.length) {
+        body.innerHTML = '<div class="soft-empty">没有匹配的世界书。</div>';
+        return;
+      }
+
+      body.innerHTML = groups.map(function (group) {
+        var key = type + ":" + id + ":" + group.key;
+        var collapsed = Boolean(collapsedChatWorldBookGroups[key]);
+
+        return [
+          '<section class="chat-world-book-group" data-chat-world-group="' + escapeHtml(group.key) + '">',
+          '  <button class="chat-world-book-group-head" type="button" data-chat-world-action="toggle-group">',
+          '    <span><i aria-hidden="true">' + (collapsed ? "›" : "⌄") + '</i><strong>' + escapeHtml(group.label) + '</strong></span>',
+          '    <em>' + group.books.length + " 本</em>",
+          "  </button>",
+          collapsed ? "" : '<div class="chat-world-book-list">' + group.books.map(function (book) {
+            return renderChatWorldBookOption(book, checkedIds);
+          }).join("") + "</div>",
+          "</section>"
+        ].join("");
+      }).join("");
+    }
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header chat-world-book-header">',
+      '  <span></span>',
+      "  <h3>当前聊天的世界书</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<div class="wechat-sheet-form chat-world-book-selector">',
+      '  <div class="chat-world-book-status">',
+      '    <strong id="chatWorldBookSelectedCount">已选 ' + checkedIds.length + " 本</strong>",
+      '    <span id="chatWorldBookEmptyNotice" class="' + (checkedIds.length ? "" : "is-empty") + '">' + (checkedIds.length ? "AI 只会读取本聊天已勾选的世界书。" : "未绑定世界书，AI 不会读取世界书。") + "</span>",
+      "  </div>",
+      '  <label class="wechat-sheet-field chat-world-book-search"><span>搜索</span><input id="chatWorldBookSearchInput" type="search" placeholder="搜索名称、简介、条目或分组" maxlength="40"></label>',
+      '  <div id="chatWorldBookSelectorBody" class="chat-world-book-selector-body"></div>',
+      '  <div class="wechat-sheet-actions chat-world-book-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button id="saveChatWorldBooksBtn" type="button" class="full-button">保存</button></div>',
+      "</div>"
+    ].join(""), function (sheet) {
+      var input = sheet.querySelector("#chatWorldBookSearchInput");
+
+      bindSheetCloseButtons(sheet);
+      renderSelectorBody(sheet);
+
+      if (input) {
+        input.addEventListener("input", function () {
+          syncCheckedIds(sheet);
+          searchText = input.value.trim().toLowerCase();
+          renderSelectorBody(sheet);
+          input = sheet.querySelector("#chatWorldBookSearchInput");
+          if (input) {
+            input.value = searchText;
+            input.focus();
+          }
+        });
+      }
+
+      sheet.addEventListener("change", function (event) {
+        if (event.target && event.target.matches("[data-chat-world-book-id]")) {
+          syncCheckedIds(sheet);
+          renderSelectorBody(sheet);
+        }
+      });
+
+      sheet.addEventListener("click", function (event) {
+        var button = event.target.closest("[data-chat-world-action]");
+        var section;
+        var key;
+
+        if (button && button.dataset.chatWorldAction === "toggle-group") {
+          section = button.closest("[data-chat-world-group]");
+          key = section ? type + ":" + id + ":" + section.dataset.chatWorldGroup : "";
+          if (key) {
+            syncCheckedIds(sheet);
+            collapsedChatWorldBookGroups[key] = !collapsedChatWorldBookGroups[key];
+            renderSelectorBody(sheet);
+          }
+          return;
+        }
+
+        if (event.target && event.target.id === "saveChatWorldBooksBtn") {
+          syncCheckedIds(sheet);
+          window.AppStorage.setChatWorldBookIds(type, id, checkedIds);
+          closeWeChatSheet();
+          showToast("世界书绑定已保存");
+        }
+      });
+    });
+  }
+
+  function filterChatWorldBooks(books, keyword) {
+    var word = String(keyword || "").trim().toLowerCase();
+
+    if (!word) {
+      return books;
+    }
+
+    return books.filter(function (book) {
+      var entries = Array.isArray(book.entries) ? book.entries : [];
+      var haystack = [
+        book.name,
+        book.description,
+        getWorldBookScopeLabel(book),
+        entries.map(function (entry) {
+          return [entry.title, entry.summary, entry.content, entry.group, entry.keyword, (entry.keywords || []).join(" ")].join(" ");
+        }).join(" ")
+      ].join(" ").toLowerCase();
+
+      return haystack.indexOf(word) !== -1;
+    });
+  }
+
+  function groupChatWorldBooksByScope(books) {
+    var map = {};
+
+    (books || []).forEach(function (book) {
+      var key = book.scope || "global";
+
+      if (!map[key]) {
+        map[key] = {
+          key: key,
+          label: key === "global" ? "全局 / all" : (key === "group" ? "群聊范围" : "私聊范围"),
+          books: []
+        };
+      }
+
+      map[key].books.push(book);
+    });
+
+    return ["global", "private", "group"].filter(function (key) {
+      return map[key];
+    }).map(function (key) {
+      return map[key];
+    });
+  }
+
+  function renderChatWorldBookOption(book, checkedIds) {
+    var entries = Array.isArray(book.entries) ? book.entries : [];
+    var groups = groupWorldBookEntries(entries);
+    var checked = checkedIds.indexOf(book.id) !== -1;
+    var description = book.description || getWorldBookAutoSummary(book);
+
+    return [
+      '<label class="chat-world-book-option' + (checked ? " selected" : "") + '">',
+      '  <input type="checkbox" data-chat-world-book-id="' + escapeHtml(book.id) + '"' + (checked ? " checked" : "") + ">",
+      '  <span class="chat-world-book-check" aria-hidden="true"></span>',
+      '  <span class="chat-world-book-main">',
+      '    <strong>' + escapeHtml(book.name || "未命名世界书") + "</strong>",
+      '    <em>' + escapeHtml(description || "暂无简介") + "</em>",
+      '    <span class="chat-world-book-meta">',
+      '      <i>' + entries.length + " 条</i>",
+      '      <i>' + escapeHtml(getWorldBookScopeLabel(book)) + "</i>",
+      groups.length ? '      <i>' + escapeHtml(groups.map(function (group) { return group.name; }).join(" / ")) + "</i>" : "",
+      "    </span>",
+      "  </span>",
+      "</label>"
+    ].join("");
   }
 
   function applySavedTheme() {
@@ -6636,6 +6871,7 @@
     return Object.assign({
       targetType: targetType,
       targetId: targetId,
+      selectedWorldBookIds: window.AppStorage.getChatWorldBookIds ? window.AppStorage.getChatWorldBookIds(targetType, targetId) : [],
       chatMemories: window.AppStorage.getChatMemories ? window.AppStorage.getChatMemories(targetType, targetId) : [],
       bodyStateEnabled: bodyEnabled,
       bodyState: bodyEnabled && window.AppStorage.getBodyState ? window.AppStorage.getBodyState(targetType, targetId) : null,
@@ -6983,6 +7219,7 @@
     openVoiceSheet: openVoiceSheet,
     showMessageDetail: showMessageDetail,
     openChatSearchSheet: openChatSearchSheet,
+    openChatWorldBookSelector: openChatWorldBookSelector,
     openOfflineSceneSheet: openOfflineSceneSheet,
     showSheet: showWeChatSheet,
     close: closeWeChatSheet
@@ -7013,6 +7250,7 @@
     buildChatGenerationContext: buildChatGenerationContext,
     finalizeChatGenerationContext: finalizeChatGenerationContext,
     openChatMemoryPanel: openChatMemoryPanel,
+    openChatWorldBookSelector: openChatWorldBookSelector,
     openBodyStatePanel: openBodyStatePanel,
     openRegenerateReplySheet: openRegenerateReplySheet,
     insertBracketIntoInput: insertBracketIntoInput,
