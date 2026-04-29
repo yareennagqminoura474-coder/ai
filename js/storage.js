@@ -1490,6 +1490,7 @@
     if (source.role !== "user") {
       source.received = Boolean(source.received);
       source.walletRecorded = Boolean(source.walletRecorded || source.walletLedgerId);
+      source.status = source.status || "pending";
       return source;
     }
 
@@ -1526,6 +1527,11 @@
 
     if (record) {
       source.walletLedgerId = record.id;
+      source.walletRecorded = true;
+      source.paidAt = record.createdAt;
+      if (!source.status || source.status === "sent") {
+        source.status = "pending";
+      }
     }
 
     return source;
@@ -1542,9 +1548,7 @@
       return source;
     }
 
-    if (source.received || source.walletRecorded || source.walletLedgerId) {
-      source.received = true;
-      source.walletRecorded = true;
+    if (isMoneyMessageClosed(source)) {
       return source;
     }
 
@@ -1576,6 +1580,138 @@
     }
 
     return source;
+  }
+
+  function returnMoneyMessage(message, context) {
+    var source = message && typeof message === "object" ? message : null;
+    var info = context || {};
+    var amount;
+    var record;
+
+    if (!source || source.role === "user" || (source.type !== "redPacket" && source.type !== "transfer")) {
+      return source;
+    }
+
+    if (isMoneyMessageClosed(source)) {
+      return source;
+    }
+
+    amount = normalizePositiveAmount(source.amount);
+    if (amount) {
+      record = addWalletLedger({
+        type: source.type === "redPacket" ? "redpacket_return" : "transfer_return",
+        amount: amount,
+        direction: "expense",
+        sourceType: info.sourceType || "private",
+        sourceId: info.sourceId || "",
+        characterId: info.characterId || source.characterId || "",
+        groupId: info.groupId || "",
+        note: "已退回，未入账：" + (source.note || source.content || (source.type === "redPacket" ? "红包" : "转账")),
+        createdAt: Date.now()
+      }, {
+        skipBalance: true
+      });
+    }
+
+    source.status = "returned";
+    source.returnedAt = record ? record.createdAt : Date.now();
+    source.returnLedgerId = record ? record.id : "";
+    source.received = false;
+    source.walletRecorded = false;
+    return source;
+  }
+
+  function settleOutgoingMoneyMessage(message, decision, context) {
+    var source = message && typeof message === "object" ? message : null;
+    var info = context || {};
+    var normalizedDecision = normalizeMoneyDecision(decision);
+    var amount;
+    var record;
+
+    if (!source || source.role !== "user" || (source.type !== "redPacket" && source.type !== "transfer")) {
+      return source;
+    }
+
+    if (!normalizedDecision || isOutgoingMoneyClosed(source)) {
+      return source;
+    }
+
+    amount = normalizePositiveAmount(source.amount);
+    if (normalizedDecision === "accept") {
+      source.status = source.type === "redPacket" ? "received" : "accepted";
+      source.acceptedAt = Date.now();
+      return source;
+    }
+
+    if (amount && !source.refundLedgerId && (source.walletLedgerId || source.walletRecorded)) {
+      record = addWalletLedger({
+        type: source.type === "redPacket" ? "redpacket_refund" : "transfer_refund",
+        amount: amount,
+        direction: "income",
+        sourceType: info.sourceType || "private",
+        sourceId: info.sourceId || "",
+        characterId: info.characterId || source.characterId || "",
+        groupId: info.groupId || "",
+        note: "对方退回：" + (source.note || source.content || (source.type === "redPacket" ? "红包" : "转账")),
+        createdAt: Date.now()
+      });
+    }
+
+    source.status = "returned";
+    source.refunded = Boolean(record || source.refundLedgerId);
+    source.returnedAt = record ? record.createdAt : Date.now();
+    source.refundLedgerId = record ? record.id : (source.refundLedgerId || "");
+    return source;
+  }
+
+  function applyMoneyDecision(message, decision, context) {
+    var source = message && typeof message === "object" ? message : null;
+    var normalizedDecision = normalizeMoneyDecision(decision);
+
+    if (!source || !normalizedDecision) {
+      return source;
+    }
+
+    if (source.role === "user") {
+      return settleOutgoingMoneyMessage(source, normalizedDecision, context);
+    }
+
+    return normalizedDecision === "accept"
+      ? receiveMoneyMessage(source, context)
+      : returnMoneyMessage(source, context);
+  }
+
+  function normalizeMoneyDecision(decision) {
+    var value = String(decision || "").toLowerCase();
+    if (value === "accept" || value === "accepted" || value === "receive" || value === "received") {
+      return "accept";
+    }
+    if (value === "reject" || value === "rejected" || value === "return" || value === "refund" || value === "refuse") {
+      return "reject";
+    }
+    return "";
+  }
+
+  function isMoneyMessageClosed(message) {
+    var status = message && message.status ? String(message.status) : "";
+    return Boolean(message && (
+      message.received
+      || message.walletLedgerId
+      || status === "accepted"
+      || status === "received"
+      || status === "returned"
+      || status === "rejected"
+      || status === "refunded"
+    ));
+  }
+
+  function isOutgoingMoneyClosed(message) {
+    var status = message && message.status ? String(message.status) : "";
+    return status === "accepted"
+      || status === "received"
+      || status === "returned"
+      || status === "rejected"
+      || status === "refunded";
   }
 
   function getAllPrefixedItems(prefix) {
@@ -2777,6 +2913,9 @@
     spendFamilyCard: spendFamilyCard,
     recordMoneyMessage: recordMoneyMessage,
     receiveMoneyMessage: receiveMoneyMessage,
+    returnMoneyMessage: returnMoneyMessage,
+    settleOutgoingMoneyMessage: settleOutgoingMoneyMessage,
+    applyMoneyDecision: applyMoneyDecision,
     exportAllData: exportAllData,
     importAllData: importAllData,
     clearAllData: clearAllData

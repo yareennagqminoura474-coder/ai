@@ -2879,7 +2879,7 @@
           type: "redPacket",
           content: text || "恭喜发财，大吉大利",
           amount: amount,
-          status: "sent"
+          status: "pending"
         });
       }
     });
@@ -3263,12 +3263,12 @@
     }
 
     if (message.type === "redPacket") {
-      showMoneyDetail("红包详情", message.content || "恭喜发财，大吉大利", "¥" + (message.amount || "0.00"), "已发送");
+      showMoneyDetail("红包详情", message.content || "恭喜发财，大吉大利", "¥" + (message.amount || "0.00"), getMoneyMessageStatusText(message));
       return;
     }
 
     if (message.type === "transfer") {
-      showMoneyDetail("转账详情", message.note || "转账", "¥" + (message.amount || "0.00"), message.status === "pending" ? "待收款" : "已发送");
+      showMoneyDetail("转账详情", message.note || "转账", "¥" + (message.amount || "0.00"), getMoneyMessageStatusText(message));
       return;
     }
 
@@ -3290,6 +3290,26 @@
       '  <button type="button" class="full-button" data-close-sheet>关闭</button>',
       "</div>"
     ].join(""), bindSheetCloseButtons);
+  }
+
+  function getMoneyMessageStatusText(message) {
+    var status = message && message.status ? String(message.status) : "";
+    if (status === "accepted") {
+      return "已收款";
+    }
+    if (status === "received") {
+      return "已领取";
+    }
+    if (status === "returned" || status === "rejected" || status === "refunded") {
+      return "已退回";
+    }
+    if (message && message.role === "character" && (message.received || message.walletRecorded || message.walletLedgerId)) {
+      return message.type === "redPacket" ? "已领取" : "已收款";
+    }
+    if (message && message.role === "user") {
+      return message.type === "redPacket" ? "待对方领取" : "待对方收款";
+    }
+    return message && message.type === "redPacket" ? "待领取" : "待收款";
   }
 
   function showLocationDetail(location) {
@@ -5767,8 +5787,12 @@
       recharge: "+",
       transfer_in: "转",
       transfer_out: "转",
+      transfer_refund: "退",
+      transfer_return: "退",
       redpacket_in: "福",
       redpacket_out: "福",
+      redpacket_refund: "退",
+      redpacket_return: "退",
       familycard_pay: "亲",
       shopping: "购",
       gift: "礼",
@@ -5782,8 +5806,12 @@
       recharge: "充值",
       transfer_in: "收到转账",
       transfer_out: "转账支出",
+      transfer_refund: "转账退款",
+      transfer_return: "转账退回",
       redpacket_in: "收到红包",
       redpacket_out: "红包支出",
+      redpacket_refund: "红包退款",
+      redpacket_return: "红包退回",
       familycard_pay: "亲属卡支付",
       shopping: "购物消费",
       gift: "礼物",

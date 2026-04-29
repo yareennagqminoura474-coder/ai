@@ -4147,6 +4147,7 @@ textarea::placeholder {
   font: inherit;
   box-shadow: 0 8px 20px rgba(31, 38, 34, 0.1);
   overflow: hidden;
+  cursor: pointer;
 }
 
 .red-packet-card,
@@ -4215,6 +4216,31 @@ textarea::placeholder {
   color: #ffffff;
   font-size: 12px;
   font-weight: 800;
+}
+
+.money-card-actions {
+  justify-self: start;
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.money-card-actions button {
+  min-width: 44px;
+  min-height: 26px;
+  padding: 4px 9px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.24);
+  color: #ffffff;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 900;
+  cursor: pointer;
+}
+
+.money-card-actions button:last-child {
+  background: rgba(255, 255, 255, 0.14);
 }
 
 .message-special-wrapper.received .money-card-action {

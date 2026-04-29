@@ -41,7 +41,7 @@
   function normalizeReplyItemsForDisplay(replies) {
     if (window.AIService && window.AIService.normalizeReplyList) {
       return window.AIService.normalizeReplyList("", replies, {
-        min: 0,
+        min: 10,
         max: 50,
         defaultType: "text",
         allowRawFallback: false
@@ -911,38 +911,84 @@
   }
 
   function renderRedPacketMessage(message) {
-    var canReceive = message.role === "character";
-    var received = isMoneyMessageReceived(message);
+    var canOperate = canOperateIncomingMoneyMessage(message);
+    var closed = isMoneyMessageClosed(message);
     return [
-      '<button class="message-special-wrapper red-packet-card message-detail-trigger' + (received ? " received" : "") + '" type="button" data-message-id="' + escapeHtml(message.id || "") + '"' + (canReceive && !received ? ' data-money-claim="redPacket"' : "") + '>',
+      '<div class="message-special-wrapper red-packet-card message-detail-trigger' + (closed ? " received" : "") + '" role="button" tabindex="0" data-message-id="' + escapeHtml(message.id || "") + '">',
       '  <span class="money-card-icon">福</span>',
       '  <span class="money-card-main">',
       "    <strong>" + escapeHtml(message.content || "恭喜发财，大吉大利") + "</strong>",
       "    <em>微信红包</em>",
-      canReceive ? '    <small class="money-card-action">' + (received ? "已领取" : "领取红包") + "</small>" : "",
+      renderMoneyStatusOrActions(message, canOperate, "领取"),
       "  </span>",
-      "</button>"
+      "</div>"
     ].join("");
   }
 
   function renderTransferMessage(message) {
-    var canReceive = message.role === "character";
-    var received = isMoneyMessageReceived(message);
+    var canOperate = canOperateIncomingMoneyMessage(message);
+    var closed = isMoneyMessageClosed(message);
     return [
-      '<button class="message-special-wrapper transfer-message-card message-detail-trigger' + (received ? " received" : "") + '" type="button" data-message-id="' + escapeHtml(message.id || "") + '"' + (canReceive && !received ? ' data-money-claim="transfer"' : "") + '>',
+      '<div class="message-special-wrapper transfer-message-card message-detail-trigger' + (closed ? " received" : "") + '" role="button" tabindex="0" data-message-id="' + escapeHtml(message.id || "") + '">',
       '  <span class="money-card-icon">¥</span>',
       '  <span class="money-card-main">',
       "    <strong>¥" + escapeHtml(message.amount || "0.00") + "</strong>",
       "    <em>" + escapeHtml(message.note || "转账") + "</em>",
       "    <small>微信转账</small>",
-      canReceive ? '    <small class="money-card-action">' + (received ? "已收款" : "收款") + "</small>" : "",
+      renderMoneyStatusOrActions(message, canOperate, "收款"),
       "  </span>",
-      "</button>"
+      "</div>"
     ].join("");
   }
 
-  function isMoneyMessageReceived(message) {
-    return Boolean(message && (message.received || message.walletRecorded || message.walletLedgerId));
+  function renderMoneyStatusOrActions(message, canOperate, acceptLabel) {
+    if (canOperate) {
+      return [
+        '    <span class="money-card-actions">',
+        '      <button type="button" data-money-action="accept">' + escapeHtml(acceptLabel) + "</button>",
+        '      <button type="button" data-money-action="reject">退回</button>',
+        "    </span>"
+      ].join("");
+    }
+
+    return '    <small class="money-card-action">' + escapeHtml(getMoneyMessageStatusText(message)) + "</small>";
+  }
+
+  function canOperateIncomingMoneyMessage(message) {
+    return Boolean(message && message.role === "character" && !isMoneyMessageClosed(message));
+  }
+
+  function isMoneyMessageClosed(message) {
+    var status = message && message.status ? String(message.status) : "";
+    return Boolean(message && (
+      message.received
+      || (message.role === "character" && (message.walletRecorded || message.walletLedgerId))
+      || status === "accepted"
+      || status === "received"
+      || status === "returned"
+      || status === "rejected"
+      || status === "refunded"
+    ));
+  }
+
+  function getMoneyMessageStatusText(message) {
+    var status = message && message.status ? String(message.status) : "";
+    if (status === "accepted") {
+      return "已收款";
+    }
+    if (status === "received") {
+      return "已领取";
+    }
+    if (status === "returned" || status === "rejected" || status === "refunded") {
+      return "已退回";
+    }
+    if (message && message.role === "character" && (message.received || message.walletRecorded || message.walletLedgerId)) {
+      return message.type === "redPacket" ? "已领取" : "已收款";
+    }
+    if (message && message.role === "user") {
+      return message.type === "redPacket" ? "待对方领取" : "待对方收款";
+    }
+    return message && message.type === "redPacket" ? "待领取" : "待收款";
   }
 
   function bindGroupMessageActions(container, messages) {
@@ -1020,6 +1066,7 @@
       button.addEventListener("click", function (event) {
         var message = messageMap[button.dataset.messageId];
         var row = button.closest(".message-action-target");
+        var moneyActionButton = event.target && event.target.closest ? event.target.closest("[data-money-action]") : null;
 
         event.preventDefault();
         event.stopPropagation();
@@ -1029,8 +1076,8 @@
           return;
         }
 
-        if (message && button.dataset.moneyClaim) {
-          receiveGroupMoneyMessage(message.id);
+        if (message && moneyActionButton) {
+          handleGroupMoneyMessage(message.id, moneyActionButton.dataset.moneyAction);
           return;
         }
 
@@ -1041,12 +1088,13 @@
     });
   }
 
-  function receiveGroupMoneyMessage(messageId) {
+  function handleGroupMoneyMessage(messageId, action) {
     var group = activeGroupId ? getGroupById(activeGroupId) : null;
     var messages;
     var changed = false;
+    var toastText = action === "reject" ? "已退回。" : "已存入钱包。";
 
-    if (!group || !window.AppStorage.receiveMoneyMessage) {
+    if (!group || !window.AppStorage.receiveMoneyMessage || !window.AppStorage.returnMoneyMessage) {
       return;
     }
 
@@ -1056,7 +1104,7 @@
       }
 
       changed = true;
-      return window.AppStorage.receiveMoneyMessage(Object.assign({}, message), {
+      return (action === "reject" ? window.AppStorage.returnMoneyMessage : window.AppStorage.receiveMoneyMessage)(Object.assign({}, message), {
         sourceType: "group",
         sourceId: group.id,
         groupId: group.id,
@@ -1070,7 +1118,7 @@
       renderGroupChatMessages(group.id);
       renderGroupList();
       if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("已存入钱包。");
+        window.AppExtras.showToast(toastText);
       }
     }
   }
@@ -1783,7 +1831,7 @@
 
   function normalizeGroupAiResult(result) {
     if (Array.isArray(result)) {
-      return { replies: normalizeReplyItemsForDisplay(result), actions: [], thoughts: [], memories: [], memorySummary: null, bodyState: null };
+      return { replies: normalizeReplyItemsForDisplay(result), actions: [], thoughts: [], memories: [], moneyDecisions: [], memorySummary: null, bodyState: null };
     }
 
     result = result && typeof result === "object" ? result : {};
@@ -1792,9 +1840,105 @@
       actions: Array.isArray(result.actions) ? result.actions : [],
       thoughts: Array.isArray(result.thoughts) ? result.thoughts : [],
       memories: Array.isArray(result.memories) ? result.memories : [],
+      moneyDecisions: Array.isArray(result.moneyDecisions) ? result.moneyDecisions : collectReplyMoneyDecisions(result.replies),
       memorySummary: result.memorySummary || null,
       bodyState: result.bodyState || null
     };
+  }
+
+  function collectReplyMoneyDecisions(replies) {
+    var decisions = [];
+
+    (Array.isArray(replies) ? replies : []).forEach(function (reply) {
+      if (!reply || typeof reply !== "object") {
+        return;
+      }
+      if (reply.transferDecision) {
+        decisions.push({ type: "transfer", decision: reply.transferDecision, messageId: reply.messageId || "", characterId: reply.characterId || "" });
+      }
+      if (reply.redPacketDecision || reply.redpacketDecision) {
+        decisions.push({ type: "redPacket", decision: reply.redPacketDecision || reply.redpacketDecision, messageId: reply.messageId || "", characterId: reply.characterId || "" });
+      }
+      if (reply.moneyDecision && typeof reply.moneyDecision === "object") {
+        decisions.push(reply.moneyDecision);
+      }
+    });
+
+    return decisions;
+  }
+
+  function applyGroupMoneyDecisions(messages, group, aiResult) {
+    var decisions = Array.isArray(aiResult && aiResult.moneyDecisions) ? aiResult.moneyDecisions : [];
+
+    if (!decisions.length || !window.AppStorage.applyMoneyDecision) {
+      return messages;
+    }
+
+    decisions.forEach(function (decision) {
+      var index = findPendingOutgoingMoneyMessageIndex(messages, decision);
+      if (index === -1) {
+        return;
+      }
+      messages[index] = window.AppStorage.applyMoneyDecision(Object.assign({}, messages[index]), decision.decision, {
+        sourceType: "group",
+        sourceId: group.id,
+        groupId: group.id,
+        characterId: decision.characterId || "",
+        sourceName: group.name
+      }) || messages[index];
+    });
+
+    return messages;
+  }
+
+  function findPendingOutgoingMoneyMessageIndex(messages, decision) {
+    var type = normalizeMoneyDecisionType(decision && decision.type);
+    var messageId = decision && decision.messageId ? String(decision.messageId) : "";
+    var index;
+
+    if (!type) {
+      return -1;
+    }
+
+    if (messageId) {
+      index = messages.findIndex(function (message) {
+        return message.id === messageId && isPendingOutgoingMoneyMessage(message, type);
+      });
+      if (index !== -1) {
+        return index;
+      }
+    }
+
+    for (index = messages.length - 1; index >= 0; index -= 1) {
+      if (isPendingOutgoingMoneyMessage(messages[index], type)) {
+        return index;
+      }
+    }
+
+    return -1;
+  }
+
+  function isPendingOutgoingMoneyMessage(message, type) {
+    var status = message && message.status ? String(message.status) : "pending";
+    return Boolean(message
+      && message.role === "user"
+      && message.type === type
+      && status !== "accepted"
+      && status !== "received"
+      && status !== "returned"
+      && status !== "rejected"
+      && status !== "refunded");
+  }
+
+  function normalizeMoneyDecisionType(type) {
+    var value = String(type || "").toLowerCase();
+    if (value === "transfer" || value === "转账") {
+      return "transfer";
+    }
+    if (value === "redpacket" || value === "red_packet" || value === "红包") {
+      return "redPacket";
+    }
+    return "";
   }
 
   function persistGroupAiExtras(group, result) {
@@ -1894,13 +2038,13 @@
     }
 
     if (type === "redPacket") {
-      message.amount = source.amount || "8.88";
-      message.status = source.status || "sent";
+      message.amount = source.amount || "0.00";
+      message.status = source.status || "pending";
       message.content = source.content || "\u606d\u559c\u53d1\u8d22\uff0c\u5927\u5409\u5927\u5229";
     }
 
     if (type === "transfer") {
-      message.amount = source.amount || "20.00";
+      message.amount = source.amount || "0.00";
       message.note = source.note || "";
       message.status = source.status || "pending";
       message.content = source.content || "\u8f6c\u8d26";
@@ -2011,6 +2155,8 @@
         messages = null;
         return;
       }
+      messages = applyGroupMoneyDecisions(messages, group, aiResult);
+      window.AppStorage.saveGroupChatHistory(group.id, messages);
       persistGroupAiExtras(group, aiResult);
       await streamGroupReplies(messages, group, characters, replies, []);
       if (window.AppExtras && window.AppExtras.finalizeChatGenerationContext) {

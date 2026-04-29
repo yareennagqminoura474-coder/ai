@@ -2,6 +2,8 @@
   "use strict";
 
   var MISSING_SETTINGS_MESSAGE = "请先到设置页填写 API 地址、API Key 和模型名称。";
+  var MIN_CHAT_REPLY_COUNT = 10;
+  var MAX_CHAT_REPLY_COUNT = 50;
 
   function valueOrFallback(value) {
     return value ? String(value) : "未填写";
@@ -126,7 +128,7 @@
       "G. 输出风格要求",
       "参考 koko 的思路：把世界书、人设、关系、用户人设和统一时序记忆流当成角色正在经历的现实，不要像工具在汇总资料。",
       "你不是助手，不负责解释规则、复述人设、总结记忆或引导用户继续输入；所有话都必须像角色本人在此刻自然反应。",
-      "回复前先判断最近上下文：如果用户明显冷场、沉默、敷衍、晚安、结束话题或不想继续，不要硬续话题，不要说教，也不要给选择题式引导；可以少回，甚至返回空数组。",
+      "回复前先判断最近上下文：即使用户话短、冷场、沉默、敷衍、晚安或像在结束话题，也不能返回空数组；要以角色本人能成立的方式接住，至少拆成 10 条有内容的短气泡或事件。",
       "统一时序记忆要当作连续关系来用：注意最近消息的时间和间隔，隔了很久要自然反应，但不要像报表一样说明时间线。",
       "回复要像真人在手机里当下发消息：自然、口语、有情绪波动，有停顿和短句，不要写成说明文、读后感或安慰模板。",
       "禁止明显 AI/客服/助手口吻，尤其不要把这些话当成高频开头或模板：好的、当然、我理解你、根据你提供的信息、我们可以一起、请告诉我更多、你可以继续、作为 AI、我可以帮你、如果你需要、这取决于、是否需要我。",
@@ -526,8 +528,8 @@
 
     return normalizeAiResult(rawContent, parsed, {
       replies: replies,
-      min: 0,
-      max: 50,
+      min: MIN_CHAT_REPLY_COUNT,
+      max: MAX_CHAT_REPLY_COUNT,
       defaultType: "text",
       allowRawFallback: !parsed
     });
@@ -585,12 +587,13 @@
           "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
           "",
           buildAuxiliaryReturnRule(requestOptions),
-          "messages 是显示给用户的手机聊天气泡，按真实需要返回 0 到 12 条，安全上限 50 条；每条要短，多条之间自然衔接，不要为了凑数硬聊。",
+          "messages 是显示给用户的手机聊天气泡，本轮必须至少 10 条；每条要短，多条之间自然衔接，接住最近上下文，不要因为用户话短就只回 1 到 3 条。",
           "你可以使用的消息类型：text 普通文字，voice 语音消息，emoji 表情，image 虚拟图片描述卡片，location 虚拟位置，redPacket 模拟红包，transfer 模拟转账。",
-          "普通聊天以 text 为主，只有剧情/语境合适时才使用特殊消息。红包和转账只是模拟 UI，不涉及真实支付，金额不要夸张。",
+          "普通聊天以 text 为主，只有剧情/语境合适时才使用特殊消息。红包和转账只是模拟 UI，不涉及真实支付；金额必须是正数，并由角色人设、关系、剧情和钱包语境决定。",
+          "如果最近用户发给角色红包或转账，角色必须按本人性格和关系决定收下或退回；在 JSON 顶层返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
           "发表情时优先使用默认 emoji 或用户已导入的图片表情；如果没有可用图片表情，就用文本 emoji。",
           "发图片时只返回图片描述卡片，不生成真实图片。",
-          buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"text\",\"content\":\"第二条\"}],\"actions\":[],\"thoughts\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
+          buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"text\",\"content\":\"第二条\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
           "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount()
         ].join("\n")
       },
@@ -598,7 +601,7 @@
         role: "user",
         content: [
           "用户信息：" + userContext.name + "；" + (userContext.persona || "无补充资料"),
-          "请以 " + valueOrFallback(profile.name) + " 本人身份接住最近一句；如果无话可接或对方明显结束，就少回或返回空数组。",
+          "请以 " + valueOrFallback(profile.name) + " 本人身份接住最近一句；即使无话可接或对方明显结束，也要按角色关系给出至少 10 条短气泡，不要返回空数组。",
           "最近聊天：",
           history || "暂无历史消息"
         ].join("\n")
@@ -646,19 +649,20 @@
       buildBodyStatePrompt(requestOptions),
       "",
       "群聊生成规则",
-      "一次性生成 0 到 12 条连续群聊消息，只调用一次 API；冷场、无人想接或话题结束时可以返回空数组。",
+      "一次性生成至少 10 条连续群聊消息，只调用一次 API；冷场、无人想接或话题结束时也不能返回空数组，要让角色按各自人设自然接住。",
       "消息必须按真实聊天顺序排列，后一条要接住上一条。有多人自然参与即可，不要为了凑人数强行发言。",
       "不要固定轮流，不要让同一个角色包揽全部消息。允许同一个角色连续说 1 到 3 条，但随后要有其他角色接话。",
       "可以只有部分角色发言，不一定所有角色都要说话；允许同一个角色连续说 1 到 3 条，但不要让同一个角色包揽所有消息。",
       "每个角色都必须保持自己的人设，不要混淆角色身份。",
       "可以插话、接话、反驳、补充、转移话题，内容要像真实群聊，每条 content 控制在手机气泡长度。",
       "可用消息类型：text、voice、emoji、image、location、redPacket、transfer。普通聊天以 text 为主，特殊消息只在语境合适时使用。",
-      "红包和转账只是模拟 UI，不涉及真实支付；发图片只返回图片描述卡片，不生成真实图片。",
+      "红包和转账只是模拟 UI，不涉及真实支付；金额必须是正数，并由角色人设、群内关系、剧情和钱包语境决定；发图片只返回图片描述卡片，不生成真实图片。",
+      "如果最近用户在群里发了红包或转账，群成员要按各自人设决定收下或退回；可在 JSON 顶层返回 moneyDecisions 数组，也可返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
       buildThoughtGenerationRules("group"),
       buildAuxiliaryReturnRule(requestOptions),
-      buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"}],\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
+      buildJsonOnlyRule(appendOptionalSchema("{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}", requestOptions)),
       "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount(),
-      "如果后续旧规则提到必须凑够条数，请忽略；本轮只保留有真实内容的自然消息。"
+      "如果后续旧规则提到可以少回或返回空数组，请忽略；本轮必须保留至少 10 条有真实内容的自然消息。"
     ].join("\n");
   }
 
@@ -666,6 +670,7 @@
     var messages = buildGroupMessages(group, characters, groupHistory, sharedMemories, options || {});
     var rawContent = await sendConfiguredChatMessages(messages);
     var parsed = parseJsonFromText(rawContent);
+    var replyLimit = getGroupReplyLimit(group);
     var validIds = (characters || []).map(function (character) {
       return character.id;
     });
@@ -674,8 +679,8 @@
 
     result = normalizeAiResult(rawContent, parsed, {
       replies: replies,
-      min: 0,
-      max: group && group.settings && group.settings.maxReplyCount ? group.settings.maxReplyCount : 50,
+      min: MIN_CHAT_REPLY_COUNT,
+      max: replyLimit,
       defaultType: "text",
       allowRawFallback: !parsed
     });
@@ -688,12 +693,20 @@
 
     result.replies = assignGroupSpeakerIds(result.replies, validIds, group && group.settings).filter(function (reply) {
       return reply.characterId && reply.content;
-    }).slice(0, group && group.settings && group.settings.maxReplyCount ? group.settings.maxReplyCount : 50);
+    }).slice(0, replyLimit);
 
     result.thoughts = assignGroupAuxiliaryCharacterIds(result.thoughts, validIds);
     result.memories = assignGroupAuxiliaryCharacterIds(result.memories, validIds);
 
     return result;
+  }
+
+  function getGroupReplyLimit(group) {
+    var configured = group && group.settings && group.settings.maxReplyCount ? Number(group.settings.maxReplyCount) : MAX_CHAT_REPLY_COUNT;
+    if (!Number.isFinite(configured) || configured <= 0) {
+      configured = MAX_CHAT_REPLY_COUNT;
+    }
+    return Math.max(MIN_CHAT_REPLY_COUNT, configured);
   }
 
   function assignGroupSpeakerIds(replies, validIds, settings) {
@@ -893,8 +906,8 @@
       validIds: validIds,
       fallbackId: fallbackId,
       mode: context.mode,
-      min: 0,
-      max: 50
+      min: MIN_CHAT_REPLY_COUNT,
+      max: MAX_CHAT_REPLY_COUNT
     });
 
     return {
@@ -957,13 +970,13 @@
           formatChatMemoryList(chatMemories) || "暂无",
           buildMemorySummaryPrompt(context),
           buildBodyStatePrompt(context),
-          "events 按真实需要返回 0 到 12 条，安全上限 50 条。action 是旁白/动作描写，speech 是角色说话；不要为了推进而硬凑。",
-          "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":20,\"direction\":\"income|expense\",\"note\":\"备注\"}。",
+          "events 本轮必须至少返回 10 条，安全上限 50 条。action 是旁白/动作描写，speech 是角色说话；用自然动作、停顿和接话推进，不要返回空数组。",
+          "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":37.5,\"direction\":\"income|expense\",\"note\":\"备注\"}；金额必须是正数，由人设、关系和剧情决定。",
           "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           "动作描写要短而有画面感；角色发言要像真实当面对话，不要写成长作文。",
           buildThoughtGenerationRules(mode === "group" ? "group" : "private"),
           "memories 是长期记忆，不要为了心声或记忆额外调用 API。",
-          buildJsonOnlyRule(appendOptionalSchema("{\"events\":[{\"type\":\"action\",\"content\":\"动作描写\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"说的话\",\"money\":{\"type\":\"transfer\",\"amount\":20,\"direction\":\"income\",\"note\":\"补偿\"}}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}", context)),
+          buildJsonOnlyRule(appendOptionalSchema("{\"events\":[{\"type\":\"action\",\"content\":\"动作描写\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"说的话\",\"money\":{\"type\":\"transfer\",\"amount\":37.5,\"direction\":\"income\",\"note\":\"补偿\"}}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}", context)),
           "",
           "D. 世界书相关内容",
           worldBookContext || "暂无匹配世界书。",
@@ -1036,8 +1049,8 @@
       validIds: validIds,
       fallbackId: fallbackId,
       mode: context.mode,
-      min: 0,
-      max: 50
+      min: MIN_CHAT_REPLY_COUNT,
+      max: MAX_CHAT_REPLY_COUNT
     });
 
     return {
@@ -1095,8 +1108,8 @@
           "B/C. 参与角色信息",
           participantLines.join("\n"),
           "",
-          "每次推进按真实需要生成 0 到 12 条 events，安全上限 50 条；形成一小段自然剧情，不要硬凑。",
-          "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":20,\"direction\":\"income|expense\",\"note\":\"备注\"}。",
+          "每次推进必须生成至少 10 条 events，安全上限 50 条；形成一小段自然剧情，不要返回空数组。",
+          "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":12.66,\"direction\":\"income|expense\",\"note\":\"备注\"}；金额必须是正数，由人设、关系和剧情决定。",
           "后一个动作或发言要接住前一个事件，角色顺序要自然随机，不要固定轮流。",
           "角色说话不要太长，动作描写像小说旁白但不要冗长。",
           "私聊模式只围绕当前角色和用户互动；群聊模式中多个角色可以自然互动。",
@@ -1642,6 +1655,7 @@
       actions: normalizeActionList(parsed && parsed.actions),
       thoughts: normalizeThoughtList(getThoughtPayload(parsed)),
       memories: normalizeMemoryList(parsed && parsed.memories),
+      moneyDecisions: normalizeMoneyDecisionList(parsed),
       memorySummary: normalizeMemorySummaryResult(parsed && parsed.memorySummary),
       bodyState: normalizeBodyStateResult(parsed && parsed.bodyState)
     };
@@ -1677,6 +1691,86 @@
     }
 
     return parsed.thoughts || parsed.whisper || parsed.whispers || parsed.innerVoice || parsed.innerVoices || [];
+  }
+
+  function normalizeMoneyDecisionList(parsed) {
+    var decisions = [];
+    var source;
+
+    if (!parsed || typeof parsed !== "object") {
+      return decisions;
+    }
+
+    function pushDecision(type, decision, item) {
+      var normalizedDecision = normalizeMoneyDecision(decision);
+      var normalizedType = normalizeMoneyDecisionType(type);
+
+      if (!normalizedType || !normalizedDecision) {
+        return;
+      }
+
+      decisions.push({
+        type: normalizedType,
+        decision: normalizedDecision,
+        messageId: item && item.messageId ? String(item.messageId) : "",
+        characterId: item && item.characterId ? String(item.characterId) : "",
+        note: item && item.note ? String(item.note) : ""
+      });
+    }
+
+    if (Array.isArray(parsed.moneyDecisions)) {
+      parsed.moneyDecisions.forEach(function (item) {
+        source = item && typeof item === "object" ? item : {};
+        pushDecision(source.type || source.moneyType, source.decision || source.value || source.action, source);
+      });
+    }
+
+    if (parsed.moneyDecision && typeof parsed.moneyDecision === "object") {
+      source = parsed.moneyDecision;
+      pushDecision(source.type || source.moneyType, source.decision || source.value || source.action, source);
+    }
+
+    pushDecision("transfer", parsed.transferDecision, {
+      messageId: parsed.transferMessageId || parsed.messageId,
+      characterId: parsed.transferCharacterId || parsed.characterId
+    });
+    pushDecision("redPacket", parsed.redPacketDecision || parsed.redpacketDecision, {
+      messageId: parsed.redPacketMessageId || parsed.redpacketMessageId || parsed.messageId,
+      characterId: parsed.redPacketCharacterId || parsed.redpacketCharacterId || parsed.characterId
+    });
+
+    getOutputMessages(parsed).forEach(function (message) {
+      var item = message && typeof message === "object" ? message : {};
+      pushDecision("transfer", item.transferDecision, item);
+      pushDecision("redPacket", item.redPacketDecision || item.redpacketDecision, item);
+      if (item.moneyDecision && typeof item.moneyDecision === "object") {
+        pushDecision(item.moneyDecision.type || item.moneyDecision.moneyType, item.moneyDecision.decision || item.moneyDecision.value || item.moneyDecision.action, item.moneyDecision);
+      }
+    });
+
+    return decisions;
+  }
+
+  function normalizeMoneyDecisionType(type) {
+    var value = String(type || "").toLowerCase();
+    if (value === "transfer" || value === "转账") {
+      return "transfer";
+    }
+    if (value === "redpacket" || value === "red_packet" || value === "redPacket" || value === "红包") {
+      return "redPacket";
+    }
+    return "";
+  }
+
+  function normalizeMoneyDecision(decision) {
+    var value = String(decision || "").toLowerCase();
+    if (value === "accept" || value === "accepted" || value === "receive" || value === "received" || value === "收" || value === "收下" || value === "领取") {
+      return "accept";
+    }
+    if (value === "reject" || value === "rejected" || value === "return" || value === "refund" || value === "refuse" || value === "退回" || value === "拒收") {
+      return "reject";
+    }
+    return "";
   }
 
   function normalizeThoughtList(thoughts) {
@@ -1756,7 +1850,7 @@
       };
     }).filter(function (action) {
       return action.content;
-    }).slice(0, 20);
+    }).slice(0, MAX_CHAT_REPLY_COUNT);
   }
 
   function normalizeBodyStateResult(bodyState) {
@@ -1835,15 +1929,18 @@
       fallbackId: "",
       mode: "private",
       min: 10,
-      max: 20
+      max: MAX_CHAT_REPLY_COUNT
     }, options || {});
     var validIds = settings.validIds || [];
     var normalized = [];
 
+    settings.min = Math.max(0, Number(settings.min) || 0);
+    settings.max = Math.max(settings.min || 1, Number(settings.max) || MAX_CHAT_REPLY_COUNT);
+
     (Array.isArray(events) ? events : []).forEach(function (event, index) {
       var source = event && typeof event === "object" ? event : { content: event };
       var type = source.type === "speech" ? "speech" : "action";
-      var contentParts = splitTextContent(source.content).filter(Boolean);
+      var contentParts = splitTextContentForTopUp(source.content).filter(Boolean);
 
       if (!contentParts.length && source.content) {
         contentParts = [String(source.content).trim()];
@@ -1863,7 +1960,7 @@
     });
 
     if (normalized.length < settings.min && rawContent) {
-      splitTextContent(rawContent).forEach(function (content, index) {
+      splitTextContentForTopUp(rawContent).forEach(function (content, index) {
         if (normalized.length >= settings.min) {
           return;
         }
@@ -1895,11 +1992,15 @@
   function normalizeReplyList(rawContent, parsedReplies, options) {
     var settings = Object.assign({
       min: 1,
-      max: 50,
+      max: MAX_CHAT_REPLY_COUNT,
       defaultType: "text",
       allowRawFallback: true
     }, options || {});
     var replies = [];
+    var filtered;
+
+    settings.min = Math.max(0, Number(settings.min) || 0);
+    settings.max = Math.max(settings.min || 1, Number(settings.max) || MAX_CHAT_REPLY_COUNT);
 
     if (Array.isArray(parsedReplies)) {
       parsedReplies.forEach(function (reply) {
@@ -1915,9 +2016,49 @@
       replies = splitReplyContent(replies[0], settings);
     }
 
-    return replies.filter(function (reply) {
+    filtered = replies.filter(function (reply) {
       return reply && reply.content;
-    }).slice(0, settings.max);
+    });
+
+    if (filtered.length < settings.min) {
+      filtered = expandReplyListToMinimum(filtered, settings);
+    }
+
+    return filtered.slice(0, settings.max);
+  }
+
+  function expandReplyListToMinimum(replies, settings) {
+    var result = [];
+    var source = Array.isArray(replies) ? replies : [];
+    var target = Math.min(Number(settings.max) || MAX_CHAT_REPLY_COUNT, Math.max(Number(settings.min) || 0, 0));
+
+    source.forEach(function (reply) {
+      var parts;
+
+      if (result.length >= target) {
+        result.push(reply);
+        return;
+      }
+
+      if (!reply || reply.type !== "text") {
+        result.push(reply);
+        return;
+      }
+
+      parts = splitTextContentForTopUp(reply.content);
+      if (parts.length <= 1) {
+        result.push(reply);
+        return;
+      }
+
+      parts.forEach(function (content) {
+        result.push(Object.assign({}, reply, {
+          content: content
+        }));
+      });
+    });
+
+    return result;
   }
 
   function normalizeReplyItem(reply, options) {
@@ -1956,11 +2097,11 @@
       content = content || "[图片]";
     } else if (type === "redPacket") {
       content = content || "恭喜发财，大吉大利";
-      reply.amount = normalizeAiAmount(source.amount || "8.88");
+      reply.amount = normalizeAiAmount(source.amount || source.moneyAmount || source.value);
       reply.status = source.status ? String(source.status) : "sent";
     } else if (type === "transfer") {
       content = content || "转账";
-      reply.amount = normalizeAiAmount(source.amount || "20.00");
+      reply.amount = normalizeAiAmount(source.amount || source.moneyAmount || source.value);
       reply.note = String(source.note || "");
       reply.status = source.status ? String(source.status) : "pending";
     }
@@ -2014,10 +2155,10 @@
 
   function normalizeAiAmount(amount) {
     var value = Number(amount);
-    if (!value || value <= 0) {
-      value = 8.88;
+    if (!Number.isFinite(value) || value <= 0) {
+      return "0.00";
     }
-    return Math.min(value, 200).toFixed(2);
+    return value.toFixed(2);
   }
 
   function estimateVoiceDuration(text) {
@@ -2072,6 +2213,31 @@
     return parts.length || isInvalidAiMessageText(cleaned) ? parts : [cleaned];
   }
 
+  function splitTextContentForTopUp(text) {
+    var cleaned = normalizeAiMessageText(text);
+    var parts;
+
+    if (!cleaned || cleaned.length < 18) {
+      return cleaned ? [cleaned] : [];
+    }
+
+    parts = splitTextContent(cleaned);
+    if (parts.length > 1) {
+      return parts;
+    }
+
+    parts = cleaned
+      .split(/(?<=[，,、；;：:])|(?:\s{2,})/g)
+      .map(function (part) {
+        return normalizeAiMessageText(part);
+      })
+      .filter(function (part) {
+        return part && part.length >= 3;
+      });
+
+    return parts.length > 1 ? parts : [cleaned];
+  }
+
   function summarizeMessageForAI(message) {
     var type = message && message.type ? message.type : "text";
     var image;
@@ -2106,11 +2272,11 @@
     }
 
     if (type === "redPacket") {
-      return "[红包] 祝福语：" + (message.content || "恭喜发财，大吉大利") + "，金额：¥" + (message.amount || "0.00");
+      return "[红包] 祝福语：" + (message.content || "恭喜发财，大吉大利") + "，金额：¥" + (message.amount || "0.00") + "，状态：" + getMoneyStatusText(message);
     }
 
     if (type === "transfer") {
-      return "[转账] 金额：¥" + (message.amount || "0.00") + "，备注：" + (message.note || "转账");
+      return "[转账] 金额：¥" + (message.amount || "0.00") + "，备注：" + (message.note || "转账") + "，状态：" + getMoneyStatusText(message);
     }
 
     if (type === "pat") {
@@ -2130,6 +2296,26 @@
     }
 
     return String(message && message.content || "");
+  }
+
+  function getMoneyStatusText(message) {
+    var status = message && message.status ? String(message.status) : "";
+    if (status === "accepted") {
+      return "已收款";
+    }
+    if (status === "received") {
+      return "已领取";
+    }
+    if (status === "returned" || status === "rejected" || status === "refunded") {
+      return "已退回";
+    }
+    if (message && message.role === "character" && (message.received || message.walletRecorded || message.walletLedgerId)) {
+      return message.type === "redPacket" ? "已领取" : "已收款";
+    }
+    if (message && message.role === "user") {
+      return message.type === "redPacket" ? "待对方领取" : "待对方收款";
+    }
+    return message && message.type === "redPacket" ? "待领取" : "待收款";
   }
 
   function getImportedEmojiCount() {

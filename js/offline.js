@@ -819,7 +819,7 @@
       participantMap[character.id] = character;
     });
 
-    (events || []).slice(0, 20).forEach(function (event, index) {
+    (events || []).slice(0, 50).forEach(function (event, index) {
       var now = Date.now() + index;
       var character = event.characterId ? participantMap[event.characterId] : null;
       var speechCharacter = event.type === "speech"
