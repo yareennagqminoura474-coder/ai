@@ -685,6 +685,10 @@
           return renderGroupOfflineActionMessage(message, selectCheck);
         }
 
+        if (message.type === "offlineUserAction") {
+          return renderGroupOfflineUserActionMessage(message, group, settings, selectCheck);
+        }
+
         if (message.role === "user") {
           if (isStandaloneMessage(message)) {
             return [
@@ -936,11 +940,12 @@
     return '<button class="select-check ' + (selected ? "active" : "") + '" type="button" data-group-message-select="' + escapeHtml(message.id || "") + '" aria-label="选择消息"></button>';
   }
 
-  function renderGroupOfflineUserActionMessage(message, selectCheck) {
+  function renderGroupOfflineUserActionMessage(message, group, settings, selectCheck) {
     return [
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
       '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + "</div>",
+      renderGroupUserMessageAvatar(group, settings),
       "</div>"
     ].join("");
   }

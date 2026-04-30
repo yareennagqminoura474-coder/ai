@@ -34,6 +34,13 @@
     return String(text || "").trim();
   }
 
+  function getOfflineAiServiceMethod(name) {
+    if (!window.AIService || !window.AIService[name]) {
+      throw new Error("AI 服务未加载，请刷新或清缓存");
+    }
+    return window.AIService[name];
+  }
+
   function showEmptyAiReplyToast() {
     if (window.AppExtras && window.AppExtras.showToast) {
       window.AppExtras.showToast("这次没回出来，重试一下", true);
@@ -419,7 +426,7 @@
       })
       : requestSnapshot;
 
-    aiResult = await window.AIService.sendOfflineRequest({
+    aiResult = await getOfflineAiServiceMethod("sendOfflineRequest")({
       mode: session.mode,
       targetId: session.targetId,
       userInput: latestUserInput,
@@ -1194,7 +1201,7 @@
       })
       : requestSnapshot;
 
-    aiResult = await window.AIService.sendInlineOfflineRequest({
+    aiResult = await getOfflineAiServiceMethod("sendInlineOfflineRequest")({
       mode: "private",
       targetId: character.id,
       participants: [character],
@@ -1288,7 +1295,7 @@
       })
       : requestSnapshot;
 
-    aiResult = await window.AIService.sendInlineOfflineRequest({
+    aiResult = await getOfflineAiServiceMethod("sendInlineOfflineRequest")({
       mode: "group",
       targetId: group.id,
       participants: participants,

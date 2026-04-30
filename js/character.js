@@ -1169,6 +1169,7 @@
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
       '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + "</div>",
+      renderPrivateUserMessageAvatar(getCharacterById(activeCharacterId)),
       "</div>"
     ].join("");
   }
