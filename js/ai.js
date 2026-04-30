@@ -1686,7 +1686,7 @@
       return message && message.role !== "user";
     }).map(summarizeMessageForAI)[0] || "";
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(recentHistory, profile.id, 8));
-    var timeGapText = detectRecentTimeGapText(recentHistory);
+    var timeGapInfo = detectRecentTimeGapText(recentHistory);
     var chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, null));
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, {});
     var contextText = buildWorldBookDecisionContext({
@@ -1716,8 +1716,8 @@
       worldBookContext: worldBookContext,
       previousReplyText: previousReplyText,
       recentCharacterLinesText: recentCharacterLinesText,
-      timeGapText: timeGapText,
-      timeGapInfo: timeGapText
+      timeGapText: timeGapInfo,
+      timeGapInfo: timeGapInfo
     };
 
     return [
@@ -1729,8 +1729,8 @@
           recentHistory: worldHistory,
           previousReplyText: previousReplyText,
           recentCharacterLinesText: recentCharacterLinesText,
-          timeGapText: timeGapText,
-          timeGapInfo: timeGapText,
+          timeGapText: timeGapInfo,
+          timeGapInfo: timeGapInfo,
           chatMemoryText: chatMemoryText,
           selectedWorldBookIds: selectedWorldBookIds,
           worldBookContext: worldBookContext
@@ -2244,7 +2244,7 @@
       return formatPromptTimePrefix(message.createdAt) + (message.role === "user" ? userContext.name + "：" : (profile.name || "角色") + "：") + summarizeMessageForAI(message);
     }).join("\n");
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages, profile.id, 8));
-    var timeGapText = detectRecentTimeGapText(promptMessages);
+    var timeGapInfo = detectRecentTimeGapText(promptMessages);
     var latestUserInput = getLatestUserInputForPrompt(chatHistory);
     var contextText = buildWorldBookDecisionContext({
       modeLabel: requestOptions.regenerateRequest ? "线上私聊重回" : (requestOptions.blockReaction ? "线上私聊 blockReaction" : "线上私聊"),
@@ -2281,8 +2281,8 @@
     requestOptions.recentHeartVoiceText = recentHeartVoiceText;
     requestOptions.thoughtsHint = recentHeartVoiceText;
     requestOptions.recentCharacterLinesText = recentCharacterLinesText;
-    requestOptions.timeGapText = timeGapText;
-    requestOptions.timeGapInfo = timeGapText;
+    requestOptions.timeGapText = timeGapInfo;
+    requestOptions.timeGapInfo = timeGapInfo;
 
     var systemMode = requestOptions.regenerateRequest ? "reenter" : "private";
 
@@ -2637,7 +2637,7 @@
     var worldHistory = promptMessages.slice(-5).map(formatGroupWorldMessage).join("\n");
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages, "", 8));
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(characters, promptMessages);
-    var timeGapText = detectRecentTimeGapText(promptMessages);
+    var timeGapInfo = detectRecentTimeGapText(promptMessages);
     latestUserInput = getLatestUserInputForPrompt(groupHistory);
     chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("group", group && group.id, requestOptions.chatMemories));
     contextText = buildWorldBookDecisionContext({
@@ -2688,8 +2688,8 @@
     requestOptions.latestUserInput = latestUserInput;
     requestOptions.recentCharacterLinesText = recentCharacterLinesText;
     requestOptions.recentCharacterLinesMap = recentCharacterLinesMap;
-    requestOptions.timeGapText = timeGapText;
-    requestOptions.timeGapInfo = timeGapText;
+    requestOptions.timeGapText = timeGapInfo;
+    requestOptions.timeGapInfo = timeGapInfo;
     groupSettingsText = group && group.settings
       ? [
         "群公告：" + (group.settings.announcement || "暂无"),
@@ -2797,7 +2797,7 @@
     var worldHistoryText = formatInlineOfflineHistory(context.history, 5);
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(context.history, "", 8));
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(participants, context.history);
-    var timeGapText = detectRecentTimeGapText(context.history);
+    var timeGapInfo = detectRecentTimeGapText(context.history);
     var scene = context.scene || {};
     var userContext = buildUserContext(context.userSettings || {});
     var sceneText = [
@@ -2853,8 +2853,8 @@
     context.selectedWorldBookIds = selectedWorldBookIds;
     context.recentCharacterLinesText = recentCharacterLinesText;
     context.recentCharacterLinesMap = recentCharacterLinesMap;
-    context.timeGapText = timeGapText;
-    context.timeGapInfo = timeGapText;
+    context.timeGapText = timeGapInfo;
+    context.timeGapInfo = timeGapInfo;
     var recentHeartVoiceText = mode === "group"
       ? buildRecentHeartVoiceForCharacters(participants, "group", context.targetId || "")
       : (participants.length === 1
@@ -3032,7 +3032,7 @@
     var worldHistory = offlineEvents.slice(-5).map(formatOfflineWorldEvent).join("\n");
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(offlineEvents, "", 8));
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(participants, offlineEvents);
-    var timeGapText = detectRecentTimeGapText(offlineEvents);
+    var timeGapInfo = detectRecentTimeGapText(offlineEvents);
     var selectedWorldBookIds = getSelectedWorldBookIds(context.mode === "group" ? "group" : "private", context.targetId || "", context);
     var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
     var worldBookContext = buildWorldBookContext(
@@ -3078,8 +3078,8 @@
     context.selectedWorldBookIds = selectedWorldBookIds;
     context.recentCharacterLinesText = recentCharacterLinesText;
     context.recentCharacterLinesMap = recentCharacterLinesMap;
-    context.timeGapText = timeGapText;
-    context.timeGapInfo = timeGapText;
+    context.timeGapText = timeGapInfo;
+    context.timeGapInfo = timeGapInfo;
     var userContext = buildUserContext(context.userSettings || {});
     var recentHeartVoiceText = context.mode === "group"
       ? buildRecentHeartVoiceForCharacters(participants, "group", context.targetId || "")
@@ -4185,6 +4185,7 @@
     var voiceInfoForSummary;
 
     settings.replyTextureStats = stats;
+    settings.replyTextureDebugSeen = settings.replyTextureDebugSeen || {};
     settings.min = Math.max(0, Number(settings.min) || 0);
     settings.max = Math.max(settings.min || 1, Number(settings.max) || MAX_CHAT_REPLY_COUNT);
 
@@ -4229,7 +4230,14 @@
       countAfter: finalList.length,
       latestUserInput: settings.latestUserInput,
       primaryTag: voiceInfoForSummary.primaryTag,
-      tags: voiceInfoForSummary.tags
+      tags: voiceInfoForSummary.tags,
+      outputPreview: isReplyTextureDebugEnabled() ? finalList.slice(0, 5).map(function (reply) {
+        return {
+          type: reply && reply.type || "text",
+          content: limitText(reply && reply.content || "", 40),
+          characterId: reply && reply.characterId || ""
+        };
+      }) : undefined
     });
 
     return finalList;
@@ -4270,10 +4278,34 @@
       phase: data.phase || "",
       countBefore: data.countBefore,
       countAfter: data.countAfter,
-      stats: data.stats ? summarizeReplyTextureStats(data.stats) : undefined
+      stats: data.stats ? summarizeReplyTextureStats(data.stats) : undefined,
+      outputPreview: Array.isArray(data.outputPreview) ? data.outputPreview.map(function (reply) {
+        return {
+          type: reply && reply.type || "text",
+          content: shortenReplyDebugText(reply && reply.content),
+          characterId: reply && reply.characterId || ""
+        };
+      }) : undefined
     };
 
     console.debug("[replyTexture]", safePayload);
+  }
+
+  function shouldLogReplyTextureShouldRewrite(options, index, reason, content) {
+    var settings = options || {};
+    var seen = settings.replyTextureDebugSeen;
+    var key;
+
+    if (!seen) {
+      return true;
+    }
+
+    key = String(index == null ? "" : index) + ":" + String(reason || "rewrite") + ":" + compactRepeatText(content);
+    if (seen[key]) {
+      return false;
+    }
+    seen[key] = true;
+    return true;
   }
 
   function hasReplyActionOrPauseText(text) {
@@ -4717,6 +4749,7 @@
     var isActionLike = type === "action" || hasPauseOrAction;
     var highQualityReply = isHighQualityPersonaReply(source, profile, options);
     var reason = "";
+    var canRewriteType;
     var shouldRewrite;
 
     if (!tooQuestionLike && !roleQuestion && !hasCharacterAttitude && !hasPersonaVoice && questionMarks >= 2 && customerQuestionRun >= 3 && !hasPersonaTexture) {
@@ -4782,8 +4815,13 @@
       }
     }
 
-    shouldRewrite = isTextureRewriteType(type) && !!(tooAssistantLike || tooGeneric || tooExplanatory || tooQuestionLike || tooLong || lacksPersonaTexture);
-    if (shouldRewrite) {
+    if (type === "action" && tooExplanatory && !hasPauseOrAction) {
+      reason = "explanatory";
+    }
+
+    canRewriteType = isTextureRewriteType(type) || (type === "action" && tooExplanatory && !hasPauseOrAction);
+    shouldRewrite = canRewriteType && !!(tooAssistantLike || tooGeneric || tooExplanatory || tooQuestionLike || tooLong || lacksPersonaTexture);
+    if (shouldRewrite && shouldLogReplyTextureShouldRewrite(options, options.textureIndex, reason, text)) {
       debugReplyTexture("analyzeReplyTexture.shouldRewrite", {
         index: options.textureIndex,
         reason: reason,
@@ -4846,7 +4884,9 @@
     var guard = 0;
     var line;
 
-    if (!isTextureRewriteType(source.type || "text") && !force) {
+    if (!isTextureRewriteType(source.type || "text")
+      && !(String(source.type || "text") === "action" && options.textureRewriteReason === "explanatory")
+      && !force) {
       return null;
     }
 
@@ -5042,7 +5082,7 @@
 
   function isTextureRewriteType(type) {
     var value = String(type || "text");
-    return value === "text" || value === "speech" || value === "action";
+    return value === "text" || value === "speech";
   }
 
   function getTextureRewriteIndexes(replies) {
@@ -5301,16 +5341,29 @@
     return false;
   }
 
+  function getRepeatedReplyReason(repeatedItem, compactText) {
+    var sourceIndex = Number(repeatedItem && repeatedItem.sourceIndex);
+
+    if (sourceIndex === 1) {
+      return "repeat-rejected";
+    }
+    if (sourceIndex >= 2) {
+      return "repeat-recent-character-line";
+    }
+    return repeatedItem && compactText === repeatedItem.compact ? "repeat-same-text" : "repeat-similar-text";
+  }
+
   function filterRepeatedReplies(replies, previousTexts, options) {
     var settings = Object.assign({
       min: MIN_CHAT_REPLY_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
       defaultType: "text"
     }, options || {});
-    var previousItems = (Array.isArray(previousTexts) ? previousTexts : [previousTexts]).map(function (text) {
+    var previousItems = (Array.isArray(previousTexts) ? previousTexts : [previousTexts]).map(function (text, sourceIndex) {
       return {
         raw: String(text || ""),
-        compact: compactRepeatText(text)
+        compact: compactRepeatText(text),
+        sourceIndex: sourceIndex
       };
     }).filter(function (item) {
       return item.compact;
@@ -5324,10 +5377,25 @@
       var repeatedItem = compact && previousItems.filter(function (item) {
         return isHighlySimilarText(compact, item.compact);
       })[0];
-      var repeated = !!repeatedItem && !isIntentionalPersonaRepetition(reply && reply.content, repeatedItem.raw, profile, settings);
+      var intentionalPersonaRepeat = !!repeatedItem && isIntentionalPersonaRepetition(reply && reply.content, repeatedItem.raw, profile, settings);
+      var repeated = !!repeatedItem && !intentionalPersonaRepeat;
+      var repeatReason;
+      var voiceInfo;
+
+      if (intentionalPersonaRepeat) {
+        voiceInfo = getReplyTextureVoiceInfo(profile, settings);
+        debugReplyTexture("reply.protected", {
+          index: index,
+          protectedReason: "intentional-persona-repetition",
+          oldContent: reply && reply.content,
+          primaryTag: voiceInfo.primaryTag,
+          tags: voiceInfo.tags
+        });
+      }
 
       if (repeated) {
-        recordReplyTextureStat(settings.replyTextureStats, "repeatedFiltered", "repeat");
+        repeatReason = getRepeatedReplyReason(repeatedItem, compact);
+        recordReplyTextureStat(settings.replyTextureStats, "repeatedFiltered", repeatReason);
       }
 
       if (!repeated) {
@@ -5414,7 +5482,7 @@
 
   function countReplyItemsForMinimum(replies) {
     return (Array.isArray(replies) ? replies : []).filter(function (reply) {
-      return reply && reply.content && (!reply.type || reply.type === "text");
+      return reply && reply.content && (!reply.type || reply.type === "text" || reply.type === "speech");
     }).length;
   }
 
@@ -5833,6 +5901,10 @@
       intents.push("generic");
     }
 
+    if (info.isNegation && hasColdTsundereFallbackTags(primaryTag, activeTags)) {
+      candidates = candidates.concat(getColdTsundereNegationFallbackLines(phase));
+    }
+
     intents.forEach(function (intent) {
       activeTags.slice(0, 4).forEach(function (tag) {
         candidates = candidates.concat(getFallbackInputPhaseLines(intent, tag, info, phase, flags));
@@ -5841,6 +5913,21 @@
     });
 
     return uniqueList(candidates);
+  }
+
+  function hasColdTsundereFallbackTags(primaryTag, tags) {
+    var activeTags = uniqueList([primaryTag].concat(Array.isArray(tags) ? tags : [])).filter(Boolean);
+    return activeTags.indexOf("cold") !== -1 && activeTags.indexOf("tsundere") !== -1;
+  }
+
+  function getColdTsundereNegationFallbackLines(phase) {
+    var bank = {
+      instant: ["谁问你有没有事了。", "嗯，随你。"],
+      attitude: ["别拿这句糊弄我。", "行，那就当你没事。"],
+      progression: ["你最好真没事。", "……嘴硬。"],
+      hook: ["我没说信你。", "那就这样。"]
+    };
+    return bank[phase] || bank.instant;
   }
 
   function getFallbackInputPhaseLines(intent, tag, inputInfo, phase, flags) {
@@ -5927,13 +6014,13 @@
           progression: ["明天再接着说。", "别把刚才那句丢了。"],
           hook: ["醒了再说。", "别熬。"]
         }
-      },
-      negation: {
-        cold: {
-          instant: [q ? "你这叫" + q + "？" : "不像。", "别装。"],
-          attitude: [q ? "别拿" + quoted + "糊弄我。" : "别拿没事糊弄我。", "我听得出来。"],
-          progression: ["继续说。", "别急着收回去。"],
-          hook: ["这句留着。", "先别翻篇。"]
+        },
+        negation: {
+          cold: {
+          instant: ["是吗？", "随你。"],
+          attitude: [q ? "别拿" + quoted + "糊弄我。" : "别拿这句糊弄我。", "那就这样。"],
+          progression: ["你最好是。", "继续。"],
+          hook: ["我没说信你。", "先别翻篇。"]
         },
         strong: {
           instant: ["这句不算。", "抬头。"],
@@ -5942,8 +6029,8 @@
           hook: ["别让我问第二遍。", "到这儿，听我的。"]
         },
         tsundere: {
-          instant: ["谁问你有没有事了。", "啧。"],
-          attitude: [q ? "谁信你这个" + q + "。" : "谁信你这个。", "我又没担心你。"],
+          instant: ["谁问你了。", "啧。"],
+          attitude: ["我又没说担心你。", "你爱说不说。"],
           progression: ["那你倒是别躲。", "说完再装。"],
           hook: ["算了，先听你的。", "我先记着。"]
         },
@@ -6673,10 +6760,10 @@
     var byBucket = {
       worldControl: ["先停。", "这不是你能越过去的线。", "按我说的来。", "别试探我的底线。", "你现在要做的是听话。", "把话收回去。", "我没准你这样问。", "站在那儿，别动。", "这件事我来定。", "看着我，再说一遍。"],
       worldForbidden: ["这话到这里。", "别碰那条线。", "换个问法。", "我不会答应你这个。", "有些事你不该问。", "别把我往那边逼。", "这句我当没听见。", "收住。", "我们不谈这个。", "你知道这不合适。"],
-      cold: ["嗯。", "说重点。", "别绕。", "这句我听见了。", "停一下。", "你刚才那句，留着。", "我没说不管。", "继续。", "别装没事。", "到这儿就够了。"],
+      cold: ["嗯。", "说重点。", "是吗？", "随你。", "那就这样。", "你最好是。", "我没说信你。", "继续。", "别绕。", "到这儿就够了。"],
       strong: ["先停。", "听我说。", "这件事别拖。", "按我说的来。", "先把话说清楚。", "不用躲。", "我来判断。", "你现在别乱想。", "把手头的事放一放。", "看着我回。"],
       clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别躲我。", "再说一句。", "我还在等。", "你别敷衍我。"],
-      tsundere: ["谁担心你了。", "我是顺手问一句。", "别误会。", "你刚才那样很明显。", "行吧，我听着。", "别又装没事。", "烦死了。", "那你倒是说啊。", "我没生气。", "算了，先听你的。"],
+      tsundere: ["谁问你了。", "我又没说担心你。", "别误会。", "你爱说不说。", "行吧，我听着。", "谁稀罕管你。", "烦死了。", "那你倒是说啊。", "我没生气。", "算了，先听你的。"],
       gentle: ["先看着我。", "别把自己绷太紧。", "这句我接住了。", "不用硬撑。", "我在听。", "把气放下来一点。", "先坐稳。", "别急着躲开。", "这事我会放在心上。", "说到这儿也行。"],
       obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "看着我说。", "我不喜欢你这样躲。", "那个人先放一边。", "你现在回我。", "别让我猜。", "我盯着呢。"],
       playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "来，再说一遍。", "你这话我可记下了。", "别急着跑。", "行啊，胆子见长。", "我听着，你继续编。", "这反应挺明显的。"],
@@ -6701,9 +6788,9 @@
     if (!normalized.content) {
       var rawContent = String(source.content || source.text || "").trim();
       var rawType = normalizeMessageType(source.type || options.defaultType);
-      if (rawType === "text" && isGenericAiTemplateText(rawContent)) {
+      if ((rawType === "text" || rawType === "speech") && isGenericAiTemplateText(rawContent)) {
         return [Object.assign({}, source, {
-          type: "text",
+          type: rawType,
           content: rawContent
         })];
       }
@@ -6791,7 +6878,7 @@
 
   function normalizeMessageType(type) {
     var value = String(type || "text");
-    var supported = ["text", "voice", "emoji", "location", "image", "redPacket", "transfer"];
+    var supported = ["text", "speech", "voice", "emoji", "location", "image", "redPacket", "transfer"];
     return supported.indexOf(value) === -1 ? "text" : value;
   }
 
@@ -7086,7 +7173,8 @@
     return {
       inputReplies: replies,
       outputReplies: outputReplies,
-      stats: summarizeReplyTextureStats(stats)
+      stats: summarizeReplyTextureStats(stats),
+      rawStats: stats
     };
   }
 
@@ -7124,6 +7212,11 @@
     ];
     var inputs = ["我没事", "晚安", "不要你管"];
     var results = [];
+    var speechProtectionReplies = [
+      "好，站那儿别动。",
+      "当然。你敢走试试。",
+      "啧，谁问你了。"
+    ];
 
     characters.forEach(function (character) {
       inputs.forEach(function (input) {
@@ -7135,12 +7228,33 @@
           replies: templateReplies
         });
         results.push({
-          character: character.name,
+          character: character.id || character.name,
+          characterName: character.name,
           latestUserInput: input,
           outputReplies: result.outputReplies.map(function (reply) { return reply.content; }),
           stats: result.stats
         });
       });
+    });
+
+    results.speechProtection = speechProtectionReplies.map(function (content) {
+      var result = debugReplyTextureCase({
+        character: {
+          id: "speech-protect",
+          name: "speech-protect",
+          personality: "冷淡、嘴硬、短句，有边界感。",
+          speakingStyle: "短句，反问，少解释。"
+        },
+        latestUserInput: "我没事",
+        replies: [{ type: "speech", content: content }]
+      });
+      var output = result.outputReplies[0] || {};
+      return {
+        input: content,
+        output: output.content || "",
+        preserved: output.type === "speech" && output.content === content,
+        stats: result.stats
+      };
     });
 
     if (typeof console !== "undefined" && console.table) {
@@ -7152,7 +7266,10 @@
           second: item.outputReplies[1] || "",
           third: item.outputReplies[2] || "",
           genericReplaced: item.stats.genericReplaced,
-          textureRewritten: item.stats.textureRewritten
+          textureRewritten: item.stats.textureRewritten,
+          fallbackAdded: item.stats.fallbackAdded,
+          rhythmRebalanced: item.stats.rhythmRebalanced,
+          highQualitySkipped: item.stats.highQualitySkipped
         };
       }));
     }
@@ -7196,6 +7313,10 @@
     buildChatCompletionsUrl: buildChatCompletionsUrl,
     buildModelsUrl: buildModelsUrl,
     extractAiText: extractAiText,
-    fetchModels: fetchModels
+    fetchModels: fetchModels,
+    debugReplyTextureCase: debugReplyTextureCase,
+    runReplyTextureSmokeTest: runReplyTextureSmokeTest,
+    createReplyTextureStats: createReplyTextureStats,
+    summarizeReplyTextureStats: summarizeReplyTextureStats
   };
 })(window);
