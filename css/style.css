@@ -6129,3 +6129,377 @@ textarea::placeholder {
     height: 48px;
   }
 }
+
+
+/* ============================================================
+   心屿空间 · UI 美化补丁
+   使用方法：将这段 CSS 粘贴到 style.css 末尾，或单独引入。
+   ============================================================ */
+
+/* ─────────────────────────────────────────
+   1. 红包卡片全面重设计
+   替换原来的 .money-card.red-packet 系列
+   ───────────────────────────────────────── */
+
+/* 基础卡片容器 */
+.money-card {
+  width: min(280px, 78vw);
+  min-height: unset;           /* 撤销旧的 min-height:120px */
+  display: block;              /* 改为 block，内部分上下两段 */
+  padding: 0;
+  border-radius: 20px;
+  color: #fff;
+  box-shadow:
+    0 16px 40px rgba(180, 40, 30, 0.28),
+    0 2px 0 rgba(255, 200, 140, 0.15) inset;
+  overflow: hidden;
+  transition: transform 0.18s ease, box-shadow 0.18s ease;
+}
+
+.money-card:hover {
+  transform: translateY(-2px);
+  box-shadow:
+    0 22px 48px rgba(180, 40, 30, 0.34),
+    0 2px 0 rgba(255, 200, 140, 0.18) inset;
+}
+
+/* ── 红包 ── */
+.money-card.red-packet {
+  box-shadow:
+    0 16px 40px rgba(180, 40, 30, 0.3),
+    0 2px 0 rgba(255, 200, 140, 0.15) inset;
+}
+
+/* 红包上半区 */
+.money-card.red-packet .money-card-icon {
+  /* 变成顶部区域的容器 */
+  width: 100%;
+  height: auto;
+  border-radius: 0;
+  background: linear-gradient(150deg, #ff7a3c 0%, #e63528 48%, #c42020 100%);
+  padding: 16px 16px 14px;
+  display: block;
+  font-size: inherit;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 装饰圆 */
+.money-card.red-packet .money-card-icon::before {
+  content: '';
+  position: absolute;
+  top: -28px; right: -28px;
+  width: 110px; height: 110px;
+  border-radius: 50%;
+  background: rgba(255, 255, 255, 0.06);
+  pointer-events: none;
+}
+.money-card.red-packet .money-card-icon::after {
+  content: '';
+  position: absolute;
+  bottom: -16px; left: 8px;
+  width: 70px; height: 70px;
+  border-radius: 50%;
+  background: rgba(255, 160, 60, 0.09);
+  pointer-events: none;
+}
+
+/* 红包下半区 */
+.money-card.red-packet .money-card-main {
+  background: linear-gradient(0deg, #b51c1c, #cc2222);
+  padding: 13px 16px 15px;
+  display: block;
+  gap: 0;
+}
+
+/* 锯齿分割线 */
+.money-card.red-packet .money-card-main::before {
+  content: '';
+  display: block;
+  height: 1px;
+  background: rgba(255, 255, 255, 0.12);
+  margin: 0 -16px 13px;
+  position: relative;
+}
+
+/* 金额 */
+.money-card.red-packet .money-card-amount {
+  font-size: 32px;
+  font-weight: 900;
+  letter-spacing: -0.02em;
+  line-height: 1;
+  margin: 0 0 12px;
+  display: flex;
+  align-items: baseline;
+  gap: 2px;
+}
+
+/* 备注文字 */
+.money-card.red-packet .money-card-note {
+  font-size: 12px;
+  opacity: 0.72;
+  margin-bottom: 10px;
+}
+
+/* 领取/退回按钮 */
+.money-card.red-packet .money-card-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 0;
+}
+
+.money-card.red-packet .money-card-actions button {
+  padding: 9px 0;
+  border-radius: 12px;
+  font-size: 13px;
+  font-weight: 700;
+  min-height: unset;
+  flex: 1;
+}
+
+/* 领取按钮 —— 金色高亮 */
+.money-card.red-packet .money-card-actions button:not(.secondary) {
+  background: rgba(255, 220, 100, 0.92);
+  color: #7a2200;
+  border: 0;
+  letter-spacing: 0.03em;
+}
+
+/* 退回按钮 —— 半透明 */
+.money-card.red-packet .money-card-actions button.secondary {
+  background: transparent;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  color: rgba(255, 255, 255, 0.82);
+  flex: 0.6;
+}
+
+/* 状态标签 */
+.money-card.red-packet .money-card-status {
+  background: rgba(255, 255, 255, 0.18);
+  font-size: 11px;
+  padding: 3px 9px;
+  border-radius: 999px;
+}
+
+/* 已领取/退回 —— 褪色 */
+.money-card.red-packet.done,
+.money-card.red-packet.returned {
+  box-shadow: 0 8px 20px rgba(180, 40, 30, 0.14);
+  filter: saturate(0.65) brightness(0.94);
+}
+
+
+/* ─────────────────────────────────────────
+   2. 转账卡片
+   ───────────────────────────────────────── */
+
+.money-card.transfer {
+  box-shadow:
+    0 14px 36px rgba(20, 110, 80, 0.24),
+    0 2px 0 rgba(180, 255, 220, 0.12) inset;
+  display: block;
+  padding: 0;
+}
+
+.money-card.transfer .money-card-icon {
+  width: 100%;
+  height: auto;
+  border-radius: 0;
+  background: linear-gradient(150deg, #34c9a3, #1a9e7a, #0d7a5e);
+  padding: 15px 16px 13px;
+  display: block;
+  font-size: 20px;
+}
+
+.money-card.transfer .money-card-main {
+  background: linear-gradient(0deg, #0a6e52, #0e7f60);
+  padding: 12px 16px 14px;
+  display: block;
+}
+
+.money-card.transfer .money-card-amount {
+  font-size: 30px;
+  font-weight: 900;
+  color: #fff;
+  letter-spacing: -0.02em;
+  margin-bottom: 10px;
+}
+
+.money-card.transfer .money-card-note {
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 12px;
+  margin-bottom: 10px;
+}
+
+.money-card.transfer .money-card-actions button:not(.secondary) {
+  width: 100%;
+  min-height: unset;
+  padding: 10px 0;
+  border-radius: 12px;
+  background: rgba(200, 255, 230, 0.22);
+  color: #fff;
+  border: 1.5px solid rgba(255, 255, 255, 0.28);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.money-card.transfer .money-card-actions button.secondary {
+  display: none;   /* 转账通常不需要退回按钮，可按需删掉这行 */
+}
+
+.money-card.transfer.done,
+.money-card.transfer.returned {
+  filter: saturate(0.6) brightness(0.93);
+  box-shadow: 0 6px 16px rgba(20, 110, 80, 0.1);
+}
+
+
+/* ─────────────────────────────────────────
+   3. 聊天气泡升级（更有层次感）
+   ───────────────────────────────────────── */
+
+/* 接收方气泡 */
+.chat-bubble:not(.sent) {
+  background: #ffffff;
+  border-radius: 4px 16px 16px 16px;
+  box-shadow: 0 2px 12px rgba(29, 37, 33, 0.08);
+  border: none;
+}
+
+/* 发送方气泡 */
+.chat-bubble.sent {
+  background: linear-gradient(135deg, #78e05a, #52cd30);
+  color: #1a4010;
+  border-radius: 16px 4px 16px 16px;
+  box-shadow: 0 2px 12px rgba(80, 180, 40, 0.2);
+  border: none;
+}
+
+/* 消息时间戳 */
+.message-time {
+  font-size: 10px;
+  color: #aaa;
+  margin-top: 2px;
+}
+
+
+/* ─────────────────────────────────────────
+   4. 聊天顶栏和底部输入框
+   ───────────────────────────────────────── */
+
+/* 顶栏：加磨砂效果 */
+.chat-nav {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background: rgba(246, 247, 244, 0.88);
+  border-bottom: 0.5px solid rgba(29, 37, 33, 0.07);
+}
+
+/* 底部输入区域 */
+.chat-composer {
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+  background: rgba(255, 255, 255, 0.92);
+  border-top: 0.5px solid rgba(29, 37, 33, 0.08);
+}
+
+/* 输入框本体 */
+.composer-input {
+  border-radius: 20px;
+  background: #f5f6f3;
+  border: 1px solid rgba(29, 37, 33, 0.09);
+  padding: 9px 14px;
+  transition: border-color 0.15s;
+}
+.composer-input:focus {
+  border-color: rgba(104, 190, 163, 0.5);
+  background: #ffffff;
+  outline: none;
+}
+
+/* 发送按钮 */
+.send-button {
+  border-radius: 50%;
+  background: linear-gradient(135deg, #68bea3, #4fa48e);
+  color: #fff;
+  box-shadow: 0 4px 12px rgba(104, 190, 163, 0.35);
+  transition: transform 0.15s, box-shadow 0.15s;
+}
+.send-button:not(:disabled):hover {
+  transform: scale(1.06);
+  box-shadow: 0 6px 16px rgba(104, 190, 163, 0.45);
+}
+.send-button:not(:disabled):active {
+  transform: scale(0.96);
+}
+
+
+/* ─────────────────────────────────────────
+   5. 联系人列表 & 最近聊天项
+   ───────────────────────────────────────── */
+
+.recent-chat-item {
+  border-radius: 14px;
+  margin: 2px 8px;
+  padding: 10px 12px;
+  transition: background 0.14s;
+}
+.recent-chat-item:hover {
+  background: rgba(104, 190, 163, 0.08);
+}
+
+/* 未读角标 */
+.recent-unread-badge {
+  background: #e84545;
+  color: #fff;
+  font-size: 11px;
+  font-weight: 700;
+  min-width: 18px;
+  height: 18px;
+  border-radius: 999px;
+  padding: 0 5px;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 2px 8px rgba(232, 69, 69, 0.32);
+}
+
+
+/* ─────────────────────────────────────────
+   6. 底部 Tab 栏
+   ───────────────────────────────────────── */
+
+.nav-bar {
+  backdrop-filter: blur(18px);
+  -webkit-backdrop-filter: blur(18px);
+  background: rgba(246, 247, 244, 0.9);
+  border-top: 0.5px solid rgba(29, 37, 33, 0.07);
+}
+
+/* 当前激活的 Tab 图标颜色 */
+.nav-item.active {
+  color: var(--green-dark);
+}
+.nav-item.active .nav-icon {
+  background: rgba(104, 190, 163, 0.14);
+  border-radius: 12px;
+}
+
+
+/* ─────────────────────────────────────────
+   7. 通用卡片阴影升级（全局微调）
+   ───────────────────────────────────────── */
+
+.wechat-card,
+.form-section,
+.world-book-card,
+.thought-card {
+  border-radius: 16px;
+  box-shadow: 0 2px 14px rgba(29, 37, 33, 0.06);
+  border: 0.5px solid rgba(29, 37, 33, 0.07);
+}
+
+/* 按钮统一圆角 */
+.wechat-sheet button,
+.sheet-actions button {
+  border-radius: 14px;
+}
