@@ -10,7 +10,7 @@
   var CHARACTER_LINE_EXTRACT_LIMIT = 12;
   var HEART_VOICE_FETCH_LIMIT = 20;
   var HEART_VOICE_CONTEXT_LIMIT = 5;
-  var OFFLINE_ACTION_MAX_COUNT = 4;
+  var OFFLINE_ACTION_MAX_COUNT = 8;
 
   function valueOrFallback(value) {
     return value ? String(value) : "未填写";
@@ -1512,15 +1512,32 @@
     var field = primaryField || "messages";
     if (field === "events") {
       return [
-        "输出节奏规则",
-        "线下模式每次至少 10 条 speech / 角色说话；action 不计入这 10 条。",
-        "action 只作为现场动作/镜头辅助，建议 0-4 条；不要用 action 凑数量。",
-        "如果 speech 不足 10 条，继续补角色说话，不要补动作。",
-        "一个完整动作/镜头只算 1 条 action，不按逗号拆。",
-        "一句完整台词只算 1 条 speech，不按逗号拆。",
-        "整体节奏：1-2 条即时反应 speech；3-5 条态度展开 speech；6-8 条关系推进 speech，可夹少量 action；9-10 条收束/钩子 speech。",
-        "speech 要符合角色人设、当前情绪、线下距离和现场动作余波。",
-        "action 不显示时间角标，speech 可以显示时间。"
+        "输出节奏规则（线下叙事模式）",
+        "线下模式是第三人称叙事，action（动作/环境/表情/肢体语言）和 speech（台词）地位平等，必须自然交替穿插，像小说段落一样。",
+        "动作描写目标：每轮 4-8 条 action，分散在整个回复里，不要只堆在开头。",
+        "台词目标：每轮 6-10 条 speech，有节奏有态度，不要10条都在解释。",
+        "总量：整体 events 在 10-16 条之间，action + speech 自然交替。",
+        "禁止的错误节奏：",
+        "  × 1条action + 10条speech连续 → 动作只在开头，后面全是台词",
+        "  × action全堆在第一条 → 肢体语言和环境描写消失",
+        "  × speech连续超过4条没有任何动作穿插 → 变成纯对话剧本",
+        "正确的节奏参考（可以灵活变化，不要照抄）：",
+        "  [action]环境/进入动作 → [speech]第一句台词 → [action]肢体反应 → [speech]接话 → [action]情绪动作 → [speech]推进 → [action]转场动作 → [speech]收束",
+        "action 要写什么：",
+        "  - 肢体语言（垂眼、偏头、手指轻扣、停顿、靠近、后退、转身）",
+        "  - 表情细节（眉头微蹙、嘴角扯了扯、眼神一沉）",
+        "  - 环境细节（光线、温度、气氛、物品移动）",
+        "  - 内部动作（他没有立刻开口、她把视线移开、他停在原地没有动）",
+        "  - 转场（他走到窗边、她把头转向另一边）",
+        "action 写法要求：",
+        "  - 用第三人称（他/她/角色名），不要用第一人称",
+        "  - 一条 action 写一个完整动作或画面，不要切碎",
+        "  - 不要写成说明文或心理分析，要有镜头感",
+        "  - 长度适中：一句到三句，不要写成长段小说",
+        "speech 写法要求：",
+        "  - 只写说出口的话，不要把动作描写夹进 speech",
+        "  - 可以短句、停顿、半句、反问、改口、沉默后的补一句",
+        "  - 台词要符合角色人设和当前情绪，不要全都温柔解释"
       ].join("\n");
     }
 
@@ -1562,7 +1579,18 @@
   }
 
   function buildOfflineEventSchema() {
-    return "{\"events\":[{\"type\":\"action\",\"content\":\"动作描写\"},{\"type\":\"speech\",\"characterId\":\"角色ID\",\"content\":\"说的话\",\"money\":{\"type\":\"transfer\",\"amount\":\"37.50\",\"direction\":\"income\",\"note\":\"补偿\"}}],\"thoughts\":[{\"characterId\":\"角色ID\",\"content\":\"内心内容\",\"mood\":\"紧张\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色ID\",\"content\":\"要写入记忆的内容\"}]}";
+    return JSON.stringify({
+      "events": [
+        {"type": "action", "content": "他停在门口，没有立刻走进来，眼神在她脸上停了一秒。"},
+        {"type": "speech", "characterId": "角色ID", "content": "你今天怎么了。"},
+        {"type": "action", "content": "她把头转向另一边，手指轻轻捏紧了袖口。"},
+        {"type": "speech", "characterId": "角色ID", "content": "没事。"},
+        {"type": "action", "content": "他没有说话，走过去在她对面坐下。"},
+        {"type": "speech", "characterId": "角色ID", "content": "……你真的不知道吗。", "money": {"type": "transfer", "amount": "37.50", "direction": "income", "note": "补偿"}}
+      ],
+      "thoughts": [{"characterId": "角色ID", "content": "内心内容", "mood": "紧张", "visibleSummary": "一句摘要"}],
+      "memories": [{"characterId": "角色ID", "content": "要写入记忆的内容"}]
+    });
   }
 
   function buildNaturalStyleRules(mode) {
@@ -1581,8 +1609,8 @@
       "聊天气泡里的 content 不要故意插入硬换行；除非真的要分段，否则让前端自然换行。段落之间可以保留空行。",
       isGroup ? "群聊里每个角色的语气、用词、节奏必须明显区分，不能像同一个人在轮流换名字。" : "私聊里要有关系感和临场感，熟悉就不要装陌生，冷淡/傲娇/黏人/强势等设定要能从语气里看出来。",
       isGroup ? "群聊可以插话、打断、偏题、拱火、帮腔或冷场，但每个人都要符合自己的人设和彼此关系。" : "私聊要接住最近一句的情绪和潜台词，不要总是解释原因，也不要每句都把话说满。",
-      isOffline ? "线下模式里 action 和 speech 要自然交替：动作有画面但别长篇，发言像当面脱口而出。" : "",
-      isOffline ? "线下模式要更像现场反应：可以被动作打断，可以边做事边短促回话，不要把现场写成系统旁白说明。" : "",
+      isOffline ? "线下模式里 action（动作描写）和 speech（台词）地位平等，必须自然交替穿插全程——不是只在开头写一条 action，而是贯穿整个场景。" : "",
+      isOffline ? "action 写肢体语言（垂眼、偏头、靠近、转身、沉默的停顿）、表情细节、环境变化；speech 写台词，短句、反问、嘴硬、沉默、改口都行，不要全部温柔解释。" : "",
       isReenter ? "重回/重新生成时只改写最近一轮回复，仍然要像角色当下重新接住那句话，不要解释你在重写。" : "",
       "可以连续生成多条短气泡，像真人连续发消息；但不要把同一句话或同一个动作切碎成多条，不能按逗号、顿号、分号、冒号硬切。"
     ].filter(function (line) {
@@ -3102,14 +3130,15 @@
           thoughtMode: mode === "group" ? "group" : "private",
           selfCheckMode: "offline",
           afterRules: [
-            "本轮必须至少返回 10 条 speech / 角色说话。action 不计入 10 条要求。",
-            "action 只是现场镜头和动作辅助，建议 0-4 条；只有确实需要动作承接时再写。",
-            "不要用 action 凑数量；如果 speech 不足 10 条，继续生成角色说话补足，不要补动作。",
-            "speech 要像当面对话，短句、停顿、反问、打断、改口都可以。",
-            "action 和 speech 可以交替，但整体以 speech 为主；action 不能连续超过 2 条，不要一上来连续 4-6 条 action。",
-            "如果一个动作已经表达完整，不要拆成多条。",
-            "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"37.50\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
-            "memories 是长期记忆，不要为了心声或记忆额外调用 API。"
+            "【线下叙事核心规则】action 和 speech 必须交替穿插，不能只在开头写一条 action 然后全是 speech。",
+            "目标比例：action 4-8 条，分散在整个回复里；speech 6-10 条；总计 10-16 条 events。",
+            "speech 不足时，继续补台词；action 不足时，也要在 speech 之间补动作描写。",
+            "禁止节奏：[action][speech×10] — 这是最常见的错误，必须避免。",
+            "正确节奏：action 和 speech 至少要交替 3 次以上，让动作贯穿整个场景。",
+            "action 内容：肢体动作、表情细节、环境变化、角色的停顿/靠近/后退/转身，用第三人称写，有镜头感。",
+            "speech 内容：只写说出口的话，台词要符合角色人设，不要全部温柔解释。",
+            "如果线下剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
+            "memories 是长期记忆，不要为了凑数额外生成。"
           ].join("\n")
         })
       }
@@ -3350,12 +3379,13 @@
           thoughtMode: context.mode === "group" ? "group" : "private",
           selfCheckMode: "offline",
           afterRules: [
-            "本轮必须至少返回 10 条 speech / 角色说话。action 不计入 10 条要求。",
-            "action 只是现场镜头和动作辅助，建议 0-4 条；只有确实需要动作承接时再写。",
-            "不要用 action 凑数量；如果 speech 不足 10 条，继续生成角色说话补足，不要补动作。",
-            "speech 要像当面对话，短句、停顿、反问、打断、改口都可以。",
-            "action 和 speech 可以交替，但整体以 speech 为主；action 不能连续超过 2 条，不要一上来连续 4-6 条 action。",
-            "如果一个动作已经表达完整，不要拆成多条。",
+            "【线下叙事核心规则】action 和 speech 必须交替穿插，不能只在开头写一条 action 然后全是 speech。",
+            "目标比例：action 4-8 条，分散在整个回复里；speech 6-10 条；总计 10-16 条 events。",
+            "speech 不足时，继续补台词；action 不足时，也要在 speech 之间补动作描写。",
+            "禁止节奏：[action][speech×10] — 这是最常见的错误，必须避免。",
+            "正确节奏：action 和 speech 至少要交替 3 次以上，让动作贯穿整个场景。",
+            "action 内容：肢体动作、表情细节、环境变化、角色的停顿/靠近/后退/转身，用第三人称写，有镜头感。",
+            "speech 内容：只写说出口的话，台词要符合角色人设，不要全部温柔解释。",
             "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。"
           ].join("\n")
         })
@@ -4321,7 +4351,7 @@
       }
 
       consecutiveActions += 1;
-      if (consecutiveActions > 2 && !isOfflineMoneyEvent(event)) {
+      if (consecutiveActions > 3 && !isOfflineMoneyEvent(event)) {
         return;
       }
 
