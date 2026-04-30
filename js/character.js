@@ -2149,6 +2149,7 @@
 
   function findLatestPrivateRegenerateMessageId() {
     var messages = activeCharacterId ? removeLoadingMessages(window.AppStorage.getChatHistory(activeCharacterId)) : [];
+    var offlineActive = isInlineOfflineActive();
     var index;
     var nextIndex;
     var hasCharacterReply;
@@ -2162,7 +2163,8 @@
       nextIndex = index + 1;
 
       while (nextIndex < messages.length && messages[nextIndex].role !== "user") {
-        if (messages[nextIndex].role === "character" && messages[nextIndex].type !== "error") {
+        if (messages[nextIndex].role === "character" && messages[nextIndex].type !== "error"
+          || offlineActive && (messages[nextIndex].type === "offlineSpeech" || messages[nextIndex].type === "offlineAction")) {
           hasCharacterReply = true;
           break;
         }
@@ -2225,6 +2227,19 @@
     var rejectedReplyText;
 
     if (!requestCharacterId || !character) {
+      return;
+    }
+
+    if (isInlineOfflineActive()) {
+      if (window.OfflineManager && window.OfflineManager.regenerateInlineOfflineLastTurn) {
+        await window.OfflineManager.regenerateInlineOfflineLastTurn({
+          mode: "private",
+          targetType: "private",
+          targetId: requestCharacterId,
+          messageId: messageId,
+          regenerateInstruction: requirement
+        });
+      }
       return;
     }
 

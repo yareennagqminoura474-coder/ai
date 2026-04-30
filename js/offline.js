@@ -682,6 +682,104 @@
     }).join("\n");
   }
 
+  function isInlineUserEvent(event) {
+    return Boolean(event && (
+      event.role === "user"
+      || event.type === "user"
+      || event.type === "offlineUserAction"
+    ));
+  }
+
+  function isInlineGeneratedOfflineEvent(event) {
+    return Boolean(event && event.content && event.type !== "loading" && event.type !== "error" && !isInlineUserEvent(event) && (
+      event.type === "offlineAction"
+      || event.type === "offlineSpeech"
+      || event.role === "character"
+    ));
+  }
+
+  function getInlineHistory(mode, targetId) {
+    return mode === "group"
+      ? window.AppStorage.getGroupChatHistory(targetId)
+      : window.AppStorage.getChatHistory(targetId);
+  }
+
+  function saveInlineHistory(mode, targetId, messages) {
+    if (mode === "group") {
+      window.AppStorage.saveGroupChatHistory(targetId, messages);
+      return;
+    }
+    window.AppStorage.saveChatHistory(targetId, messages);
+  }
+
+  function getInlineParticipants(mode, targetId) {
+    var group;
+
+    if (mode === "group") {
+      group = getGroupById(targetId);
+      return group ? getParticipants({ participantIds: group.memberIds || [] }) : [];
+    }
+
+    return getCharacterById(targetId) ? [getCharacterById(targetId)] : [];
+  }
+
+  function collectInlineGenerationIds(items) {
+    var ids = {};
+
+    (Array.isArray(items) ? items : []).forEach(function (event) {
+      if (event && event.generationId) {
+        ids[String(event.generationId)] = true;
+      }
+      if (event && event.sourceGenerationId) {
+        ids[String(event.sourceGenerationId)] = true;
+      }
+    });
+
+    return Object.keys(ids);
+  }
+
+  function findLatestInlineRegenerateMessageId(mode, targetId) {
+    var messages = removeLoadingEvents(getInlineHistory(mode, targetId));
+    var index;
+    var nextIndex;
+    var hasOfflineReply;
+
+    for (index = messages.length - 1; index >= 0; index -= 1) {
+      if (!isInlineUserEvent(messages[index])) {
+        continue;
+      }
+
+      hasOfflineReply = false;
+      nextIndex = index + 1;
+
+      while (nextIndex < messages.length && !isInlineUserEvent(messages[nextIndex])) {
+        if (isInlineGeneratedOfflineEvent(messages[nextIndex])) {
+          hasOfflineReply = true;
+          break;
+        }
+        nextIndex += 1;
+      }
+
+      if (hasOfflineReply) {
+        return messages[index].id;
+      }
+    }
+
+    return "";
+  }
+
+  function getPreviousInlineReplyText(messages, userIndex) {
+    var list = Array.isArray(messages) ? messages : [];
+    var end = typeof userIndex === "number" ? userIndex : list.length - 1;
+    var start = end - 1;
+
+    while (start >= 0 && !isInlineUserEvent(list[start])) {
+      start -= 1;
+    }
+
+    return collectEventText(list.slice(start + 1, end));
+  }
+
   function enablePrivateInlineOffline(characterId, scene) {
     if (!getCharacterById(characterId)) {
       return;
@@ -835,6 +933,116 @@
     }
   }
 
+  async function regenerateInlineOfflineLastTurn(options) {
+    var source = options || {};
+    var mode = source.targetType === "group" || source.mode === "group" ? "group" : "private";
+    var targetId = String(source.targetId || inlineOfflineState.targetId || "");
+    var participants;
+    var messages;
+    var messageId;
+    var index;
+    var nextIndex;
+    var before;
+    var oldMessages;
+    var after;
+    var oldGenerationIds;
+    var oldBodyState;
+    var generationId;
+    var loadingMessage;
+    var errorCharacter;
+
+    if (!targetId || !isInlineOfflineActive(mode, targetId)) {
+      return false;
+    }
+
+    participants = getInlineParticipants(mode, targetId);
+    if (!participants.length || isAdvancing) {
+      return false;
+    }
+
+    if (isApiJobRunning(mode, targetId, ["inlineOffline", "regenerate"])) {
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast("正在回复中", true);
+      }
+      return true;
+    }
+
+    messages = getInlineHistory(mode, targetId);
+    messageId = source.messageId || findLatestInlineRegenerateMessageId(mode, targetId);
+    index = messages.findIndex(function (message) {
+      return message && message.id === messageId && isInlineUserEvent(message);
+    });
+
+    if (index === -1) {
+      return false;
+    }
+
+    nextIndex = index + 1;
+    while (nextIndex < messages.length && !isInlineUserEvent(messages[nextIndex])) {
+      nextIndex += 1;
+    }
+
+    before = messages.slice(0, index + 1);
+    oldMessages = messages.slice(index + 1, nextIndex);
+    after = messages.slice(nextIndex);
+    oldGenerationIds = collectInlineGenerationIds(oldMessages);
+    oldBodyState = window.AppStorage.getBodyState ? window.AppStorage.getBodyState(mode, targetId) : null;
+    generationId = createGenerationId();
+    loadingMessage = createInlineLoadingMessage(Date.now(), "正在重新生成...", generationId);
+    errorCharacter = mode === "group" ? participants[0] : null;
+
+    isAdvancing = true;
+    setInlineAdvanceState(mode, true);
+
+    if (oldGenerationIds.length && window.AppStorage.removeGenerationArtifacts) {
+      window.AppStorage.removeGenerationArtifacts(oldGenerationIds, {
+        targetType: mode,
+        targetId: targetId
+      });
+    }
+
+    saveInlineHistory(mode, targetId, before.concat([loadingMessage], after));
+    scheduleInlineRender(mode, targetId);
+
+    try {
+      await runApiJob({
+        targetType: mode,
+        targetId: targetId,
+        mode: "inlineOffline",
+        generationId: generationId,
+        beforeMessages: before,
+        afterMessages: after,
+        requestSnapshot: {
+          parentUserMessageId: messageId,
+          regenerateRequest: true,
+          regenerateInstruction: String(source.instruction || source.regenerateInstruction || "").trim(),
+          previousReplyText: getPreviousInlineReplyText(messages, index),
+          rejectedReplyText: collectEventText(oldMessages),
+          oldGenerationIds: oldGenerationIds,
+          oldMessages: oldMessages,
+          scene: inlineOfflineState.scene
+        }
+      });
+      messages = null;
+    } catch (error) {
+      if (oldBodyState && window.AppStorage.saveBodyState) {
+        window.AppStorage.saveBodyState(mode, targetId, oldBodyState);
+      }
+      messages = before.concat(oldMessages, [createInlineErrorMessage(error, errorCharacter, generationId)], after);
+    } finally {
+      if (messages) {
+        saveInlineHistory(mode, targetId, messages);
+      }
+      scheduleInlineRender(mode, targetId);
+      scheduleInlineListRender(mode);
+      isAdvancing = false;
+      setInlineAdvanceState(mode, false);
+      updateInlineOfflineUi();
+    }
+
+    return true;
+  }
+
   async function advancePrivateInlineOffline(characterId) {
     var character = getCharacterById(characterId);
     var messages;
@@ -956,10 +1164,12 @@
     var historyForRequest = Array.isArray(job.beforeMessages) && job.beforeMessages.length
       ? job.beforeMessages
       : (character ? removeLoadingEventsByGeneration(window.AppStorage.getChatHistory(character.id), job.generationId) : []);
+    var suffixMessages = Array.isArray(job.afterMessages) ? job.afterMessages : [];
     var generationContext;
     var aiResult;
     var events;
     var messages;
+    var baseMessages;
     var generatedMessages;
 
     if (!character) {
@@ -978,7 +1188,9 @@
       ? window.AppExtras.buildChatGenerationContext("private", character.id, {
         generationId: job.generationId,
         previousReplyText: requestSnapshot.previousReplyText || collectEventText(historyForRequest),
-        rejectedReplyText: requestSnapshot.rejectedReplyText || ""
+        rejectedReplyText: requestSnapshot.rejectedReplyText || "",
+        regenerateRequest: requestSnapshot.regenerateRequest,
+        regenerateInstruction: requestSnapshot.regenerateInstruction
       })
       : requestSnapshot;
 
@@ -987,15 +1199,20 @@
       targetId: character.id,
       participants: [character],
       history: historyForRequest,
-      userInput: getLatestInlineUserInput(historyForRequest),
+      offlineHistory: historyForRequest,
+      userInput: getLatestInlineUserInput(historyForRequest) || "继续推进",
+      regenerateRequest: Boolean(requestSnapshot.regenerateRequest),
+      regenerateInstruction: String(requestSnapshot.regenerateInstruction || "").trim(),
       scene: requestSnapshot.scene || inlineOfflineState.scene,
       userSettings: character.chatSettings || {},
       memories: window.AppStorage.getMemoriesForCharacters([character.id]),
+      sharedMemories: window.AppStorage.getMemoriesForCharacters([character.id]),
       chatMemories: generationContext.chatMemories,
       bodyStateEnabled: generationContext.bodyStateEnabled,
       bodyState: generationContext.bodyState,
       memorySummaryDue: generationContext.memorySummaryDue,
       memorySummaryRounds: generationContext.memorySummaryRounds,
+      selectedWorldBookIds: requestSnapshot.selectedWorldBookIds || generationContext.selectedWorldBookIds,
       previousReplyText: generationContext.previousReplyText,
       rejectedReplyText: generationContext.rejectedReplyText
     });
@@ -1010,9 +1227,13 @@
       return { afterMessages: messages };
     }
 
-    generatedMessages = await streamInlineOfflineEvents(messages, "private", character.id, [character], events, {
+    baseMessages = suffixMessages.length || requestSnapshot.regenerateRequest
+      ? historyForRequest.slice()
+      : messages;
+    window.AppStorage.saveChatHistory(character.id, baseMessages.concat(suffixMessages));
+    generatedMessages = await streamInlineOfflineEvents(baseMessages, "private", character.id, [character], events, {
       generationId: job.generationId
-    });
+    }, suffixMessages);
     persistInlineOfflineExtras("private", character.id, [character.id], aiResult, {
       generationId: job.generationId,
       relatedMessageIds: (generatedMessages || []).map(function (message) {
@@ -1037,10 +1258,12 @@
     var historyForRequest = Array.isArray(job.beforeMessages) && job.beforeMessages.length
       ? job.beforeMessages
       : (group ? removeLoadingEventsByGeneration(window.AppStorage.getGroupChatHistory(group.id), job.generationId) : []);
+    var suffixMessages = Array.isArray(job.afterMessages) ? job.afterMessages : [];
     var generationContext;
     var aiResult;
     var events;
     var messages;
+    var baseMessages;
     var generatedMessages;
 
     if (!group || !participants.length) {
@@ -1059,7 +1282,9 @@
       ? window.AppExtras.buildChatGenerationContext("group", group.id, {
         generationId: job.generationId,
         previousReplyText: requestSnapshot.previousReplyText || collectEventText(historyForRequest),
-        rejectedReplyText: requestSnapshot.rejectedReplyText || ""
+        rejectedReplyText: requestSnapshot.rejectedReplyText || "",
+        regenerateRequest: requestSnapshot.regenerateRequest,
+        regenerateInstruction: requestSnapshot.regenerateInstruction
       })
       : requestSnapshot;
 
@@ -1068,15 +1293,20 @@
       targetId: group.id,
       participants: participants,
       history: historyForRequest,
-      userInput: getLatestInlineUserInput(historyForRequest),
+      offlineHistory: historyForRequest,
+      userInput: getLatestInlineUserInput(historyForRequest) || "继续推进",
+      regenerateRequest: Boolean(requestSnapshot.regenerateRequest),
+      regenerateInstruction: String(requestSnapshot.regenerateInstruction || "").trim(),
       scene: requestSnapshot.scene || inlineOfflineState.scene,
       userSettings: group.settings || {},
       memories: window.AppStorage.getMemoriesForCharacters(group.memberIds || []),
+      sharedMemories: window.AppStorage.getMemoriesForCharacters(group.memberIds || []),
       chatMemories: generationContext.chatMemories,
       bodyStateEnabled: generationContext.bodyStateEnabled,
       bodyState: generationContext.bodyState,
       memorySummaryDue: generationContext.memorySummaryDue,
       memorySummaryRounds: generationContext.memorySummaryRounds,
+      selectedWorldBookIds: requestSnapshot.selectedWorldBookIds || generationContext.selectedWorldBookIds,
       previousReplyText: generationContext.previousReplyText,
       rejectedReplyText: generationContext.rejectedReplyText
     });
@@ -1091,9 +1321,13 @@
       return { afterMessages: messages };
     }
 
-    generatedMessages = await streamInlineOfflineEvents(messages, "group", group.id, participants, events, {
+    baseMessages = suffixMessages.length || requestSnapshot.regenerateRequest
+      ? historyForRequest.slice()
+      : messages;
+    window.AppStorage.saveGroupChatHistory(group.id, baseMessages.concat(suffixMessages));
+    generatedMessages = await streamInlineOfflineEvents(baseMessages, "group", group.id, participants, events, {
       generationId: job.generationId
-    });
+    }, suffixMessages);
     persistInlineOfflineExtras("group", group.id, group.memberIds || [], aiResult, {
       generationId: job.generationId,
       relatedMessageIds: (generatedMessages || []).map(function (message) {
@@ -1173,10 +1407,11 @@
     });
   }
 
-  function streamInlineOfflineEvents(baseMessages, mode, chatId, participants, events, meta) {
+  function streamInlineOfflineEvents(baseMessages, mode, chatId, participants, events, meta, suffixMessages) {
     var participantMap = {};
     var shown = [];
     var extra = meta || {};
+    var suffix = Array.isArray(suffixMessages) ? suffixMessages : [];
     var items = (events || []).slice(0, 50).filter(function (event) {
       return event && event.content;
     });
@@ -1188,9 +1423,9 @@
     if (!window.AppStream || !window.AppStream.appendMessagesWithStreamEffect) {
       appendInlineOfflineEvents(baseMessages, mode, chatId, participants, items, extra);
       if (mode === "group") {
-        window.AppStorage.saveGroupChatHistory(chatId, baseMessages);
+        window.AppStorage.saveGroupChatHistory(chatId, baseMessages.concat(suffix));
       } else {
-        window.AppStorage.saveChatHistory(chatId, baseMessages);
+        window.AppStorage.saveChatHistory(chatId, baseMessages.concat(suffix));
       }
       return Promise.resolve(baseMessages.slice(-items.length));
     }
@@ -1223,9 +1458,9 @@
 
         if (mode === "group") {
           if (window.AppApiJobs && window.AppApiJobs.saveChatHistoryDebounced) {
-            window.AppApiJobs.saveChatHistoryDebounced("group", chatId, baseMessages.concat(shown), 120);
+            window.AppApiJobs.saveChatHistoryDebounced("group", chatId, baseMessages.concat(shown, suffix), 120);
           } else {
-            window.AppStorage.saveGroupChatHistory(chatId, baseMessages.concat(shown));
+            window.AppStorage.saveGroupChatHistory(chatId, baseMessages.concat(shown, suffix));
           }
           if (window.GroupManager && window.GroupManager.renderGroupChatMessages) {
             if (window.AppApiJobs && window.AppApiJobs.scheduleRenderChat) {
@@ -1236,9 +1471,9 @@
           }
         } else {
           if (window.AppApiJobs && window.AppApiJobs.saveChatHistoryDebounced) {
-            window.AppApiJobs.saveChatHistoryDebounced("private", chatId, baseMessages.concat(shown), 120);
+            window.AppApiJobs.saveChatHistoryDebounced("private", chatId, baseMessages.concat(shown, suffix), 120);
           } else {
-            window.AppStorage.saveChatHistory(chatId, baseMessages.concat(shown));
+            window.AppStorage.saveChatHistory(chatId, baseMessages.concat(shown, suffix));
           }
           if (window.CharacterManager && window.CharacterManager.renderChatMessages) {
             if (window.AppApiJobs && window.AppApiJobs.scheduleRenderChat) {
@@ -1251,12 +1486,12 @@
       }
     }).then(function () {
       if (mode === "group") {
-        window.AppStorage.saveGroupChatHistory(chatId, baseMessages.concat(shown));
+        window.AppStorage.saveGroupChatHistory(chatId, baseMessages.concat(shown, suffix));
         if (window.AppApiJobs && window.AppApiJobs.flushChatHistorySave) {
           window.AppApiJobs.flushChatHistorySave("group", chatId);
         }
       } else {
-        window.AppStorage.saveChatHistory(chatId, baseMessages.concat(shown));
+        window.AppStorage.saveChatHistory(chatId, baseMessages.concat(shown, suffix));
         if (window.AppApiJobs && window.AppApiJobs.flushChatHistorySave) {
           window.AppApiJobs.flushChatHistorySave("private", chatId);
         }
@@ -1525,6 +1760,7 @@
     disableInlineOffline: disableInlineOffline,
     isInlineOfflineActive: isInlineOfflineActive,
     requestInlineOfflineAdvance: requestInlineOfflineAdvance,
+    regenerateInlineOfflineLastTurn: regenerateInlineOfflineLastTurn,
     getCurrentSession: getCurrentSession,
     openActiveOfflineThoughtsDrawer: openActiveOfflineThoughtsDrawer,
     updateOfflineThoughtButton: updateOfflineThoughtButton,

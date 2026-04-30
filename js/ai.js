@@ -4,6 +4,13 @@
   var MISSING_SETTINGS_MESSAGE = "请先到设置页填写 API 地址、API Key 和模型名称。";
   var MIN_CHAT_REPLY_COUNT = 10;
   var MAX_CHAT_REPLY_COUNT = 50;
+  var MAIN_HISTORY_WINDOW = 16;
+  var WORLD_HISTORY_WINDOW = 10;
+  var CHARACTER_LINE_HISTORY_WINDOW = 20;
+  var CHARACTER_LINE_EXTRACT_LIMIT = 12;
+  var HEART_VOICE_FETCH_LIMIT = 20;
+  var HEART_VOICE_CONTEXT_LIMIT = 5;
+  var OFFLINE_ACTION_MAX_COUNT = 4;
 
   function valueOrFallback(value) {
     return value ? String(value) : "未填写";
@@ -207,7 +214,7 @@
       "1. 角色原文人设和 personaVoiceFingerprint",
       "2. 本轮用户输入",
       "3. 最近心声 recentHeartVoice",
-      "4. 最近 3-8 条时间线",
+      "4. 最近 10-16 条时间线",
       "5. 当前聊天记忆和世界书命中",
       "先抓这 5 个，再生成 JSON。"
     ].join("\n");
@@ -690,7 +697,7 @@
     (Array.isArray(characters) ? characters : []).forEach(function (character) {
       var id = character && character.id ? String(character.id) : "";
       if (id) {
-        map[id] = buildRecentCharacterLinesText(extractRecentCharacterLines(messages, id, 5));
+        map[id] = buildRecentCharacterLinesText(extractRecentCharacterLines((messages || []).slice(-CHARACTER_LINE_HISTORY_WINDOW), id, CHARACTER_LINE_EXTRACT_LIMIT));
       }
     });
 
@@ -836,6 +843,7 @@
     var previousReplyText = String(source.previousReplyText || "").trim();
     var recentHeartVoiceText = String(source.recentHeartVoiceText || "").trim();
     var recentCharacterLinesText = String(source.recentCharacterLinesText || "").trim();
+    var relationshipPhaseHint = String(source.relationshipPhaseHint || "").trim();
     var lastReplyAngle = detectLastReplyAngle(previousReplyText);
 
     return [
@@ -847,6 +855,8 @@
       "上一轮角色余波：" + (previousReplyText ? limitText(previousReplyText, 180) : "暂无"),
       "最近心声惯性：" + (recentHeartVoiceText ? limitText(recentHeartVoiceText, 220) : "暂无"),
       recentCharacterLinesText ? "本次会话角色已说过的近句（禁止复刻句式、开头和结尾）：\n" + recentCharacterLinesText : "",
+      recentCharacterLinesText ? "角色在本次会话里已经建立的相处惯性（必须延续，不能本轮重置）：\n" + limitText(recentCharacterLinesText, 400) : "",
+      relationshipPhaseHint ? "当前关系深度/阶段提示（不要突然跳段或归零）：\n" + relationshipPhaseHint : "",
       "语气标签：" + (voiceProfile.tags.length ? voiceProfile.tags.join(" / ") : "无明确标签，按原文人设"),
       "原文人设证据：" + (personaEvidence.length ? personaEvidence.join(" / ") : "暂无明确短句"),
       lastReplyAngle ? "上一轮主要切入角度：" + lastReplyAngle + "；如果上一轮角度已经用得很满，本轮优先换一个不同角度；但不要为了换角度违背角色人设和最近心声。冷淡可继续冷处理，强势可继续压节奏，黏人可继续追问，嘴硬可继续绕着说，但句式要变、不能复读。" : "",
@@ -912,7 +922,7 @@
       return "";
     }
 
-    thoughts = (window.AppStorage.getRecentThoughts(characterId, 12) || []).filter(function (thought) {
+    thoughts = (window.AppStorage.getRecentThoughts(characterId, HEART_VOICE_FETCH_LIMIT) || []).filter(function (thought) {
       var thoughtType = String(thought && (thought.targetType || thought.source) || "").toLowerCase();
       var thoughtTargetId = String(thought && thought.targetId || "");
       var thoughtChatId = String(thought && thought.chatId || "");
@@ -958,7 +968,7 @@
       thoughts = window.AppStorage.getRecentThoughts(characterId, 3) || [];
     }
 
-    thoughts = thoughts.slice(0, 3).filter(function (thought) {
+    thoughts = thoughts.slice(0, HEART_VOICE_CONTEXT_LIMIT).filter(function (thought) {
       return thought && (thought.content || thought.visibleSummary || thought.mood);
     });
 
@@ -1047,6 +1057,7 @@
       "最近连续时间线（按发生顺序，控制在 3-8 条）：",
       source.recentTimelineText || "暂无",
       source.privateReferenceText ? "相关私聊参考摘要（只用于关系惯性，不要照抄）：\n" + source.privateReferenceText : "",
+      source.relationshipPhaseHint ? "当前关系阶段锚点（根据最近心声和记忆推断，不要打破这个阶段）：\n" + source.relationshipPhaseHint : "",
       source.recentHeartVoiceText ? "最近心声摘要（只用于延续情绪惯性）：\n" + source.recentHeartVoiceText : "",
       "聊天维度记忆：",
       source.chatMemoryText || "暂无",
@@ -1059,6 +1070,33 @@
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
+  }
+
+  function buildRelationshipPhaseHint(heartVoiceText, chatMemoryText, longMemoryText) {
+    var combined = [heartVoiceText, chatMemoryText, longMemoryText].filter(Boolean).join("\n");
+    var parts = [];
+
+    if (!combined) {
+      return "";
+    }
+
+    if (/吃醋|醋意|占有|盯着|只能是我/.test(combined)) {
+      parts.push("当前关系存在占有/吃醋张力，不能本轮突然消解");
+    }
+    if (/冷处理|生气|不想理|冷战/.test(combined)) {
+      parts.push("上一轮情绪偏冷/生气，本轮不能直接恢复普通朋友状态");
+    }
+    if (/心软|担心|靠近|在意/.test(combined)) {
+      parts.push("角色最近在压制心软，嘴硬/冷淡外表下有在意");
+    }
+    if (/确认|在一起|承诺|答应/.test(combined)) {
+      parts.push("关系已发展到较亲密阶段，不能退回陌生人对话方式");
+    }
+    if (/试探|防备|不信任|陌生/.test(combined)) {
+      parts.push("关系尚处于试探/防备阶段，不能突然亲密或坦白");
+    }
+
+    return parts.join("；");
   }
 
   function normalizeWorldBookIdList(ids) {
@@ -1261,7 +1299,7 @@
       "L. 输出前自检 outputSelfCheckRules",
       "失败条件，生成前内部检查；不满足就按角色重写。",
       "1. 至少体现 3 个具体人设点：称呼、句式、情绪外显、关系动作、身份姿态、禁忌或边界。",
-      "2. 接住本轮用户输入、上一轮情绪和最近 3-8 条时间线；不能每轮重开。",
+      "2. 接住本轮用户输入、上一轮情绪和最近 10-16 条时间线；不能每轮重开。",
       "3. recentHeartVoice、最近记忆或旧账要在语气、取舍或动作里留下痕迹。",
       "4. 命中世界书时，必须改变角色能不能说、做、靠近或透露的选择；未命中不要乱编设定。",
       "5. 不要客服/咨询/说明链条，尤其不要用“理解—安慰—建议—陪伴—追问”替代角色反应。",
@@ -1418,7 +1456,7 @@
       valueOrFallback(source.userInput),
       source.sceneText ? "当前场景：\n" + source.sceneText : "",
       source.beforeContext || "",
-      source.contextLabel || "最近 3-8 条上下文：",
+      source.contextLabel || "最近 10-16 条上下文：",
       source.recentHistory || "暂无",
       buildTemporalAwarenessRules(requestOptions),
       buildCurrentTask(taskMode, {
@@ -1453,13 +1491,14 @@
     if (field === "events") {
       return [
         "输出节奏规则",
-        "events 每次至少 10 条自然事件；红包、转账、图片、位置、语音等特殊消息不计入这 10 条。",
-        "10 条按一段连续现场节奏组织：1-2 即时反应；3-5 角色态度；6-8 关系、动作、安排或试探；9-10 收束或钩子。",
-        "一个完整动作/镜头/台词只算 1 条，不按逗号、顿号、分号或冒号拆开。",
-        "不够 10 条时生成新的自然推进，不拆已有句子凑数。",
-        "action 短而完整；speech 像当面对话，一条 speech 表达一句完整话。",
-        "允许停顿、反问、打断、改口和沉默后的补一句；每条都要有角色语气或关系推进。",
-        "每轮至少 3 条明显体现 personaVoiceFingerprint；不要 10 条都同一姿态。"
+        "线下模式每次至少 10 条 speech / 角色说话；action 不计入这 10 条。",
+        "action 只作为现场动作/镜头辅助，建议 0-4 条；不要用 action 凑数量。",
+        "如果 speech 不足 10 条，继续补角色说话，不要补动作。",
+        "一个完整动作/镜头只算 1 条 action，不按逗号拆。",
+        "一句完整台词只算 1 条 speech，不按逗号拆。",
+        "整体节奏：1-2 条即时反应 speech；3-5 条态度展开 speech；6-8 条关系推进 speech，可夹少量 action；9-10 条收束/钩子 speech。",
+        "speech 要符合角色人设、当前情绪、线下距离和现场动作余波。",
+        "action 不显示时间角标，speech 可以显示时间。"
       ].join("\n");
     }
 
@@ -1670,22 +1709,22 @@
     var chatSettings = profile.chatSettings || {};
     var userContext = buildUserContext(chatSettings);
     var memoryText = chatSettings.memoryEnabled === false ? "" : formatMemoryList(getMemoryForCharacter(profile.id));
-    var recentHistory = (Array.isArray(chatHistory) ? chatHistory : [])
+    var promptMessages = (Array.isArray(chatHistory) ? chatHistory : [])
       .filter(function (message) {
         return message && message.content && message.type !== "loading" && message.type !== "error";
-      })
-      .slice(-8);
+      });
+    var recentHistory = promptMessages.slice(-MAIN_HISTORY_WINDOW);
     var history = recentHistory.map(function (message) {
       return (message.role === "user" ? userContext.name + "：" : (profile.name || "角色") + "：") + summarizeMessageForAI(message);
     }).join("\n");
-    var worldHistory = recentHistory.slice(-5).map(function (message) {
+    var worldHistory = recentHistory.slice(-WORLD_HISTORY_WINDOW).map(function (message) {
       return (message.role === "user" ? userContext.name + "：" : (profile.name || "角色") + "：") + summarizeMessageForAI(message);
     }).join("\n");
     var latestUserInput = getLatestUserInputForPrompt(chatHistory);
     var previousReplyText = recentHistory.slice().reverse().filter(function (message) {
       return message && message.role !== "user";
     }).map(summarizeMessageForAI)[0] || "";
-    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(recentHistory, profile.id, 8));
+    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages.slice(-CHARACTER_LINE_HISTORY_WINDOW), profile.id, CHARACTER_LINE_EXTRACT_LIMIT));
     var timeGapInfo = detectRecentTimeGapText(recentHistory);
     var chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, null));
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, {});
@@ -2237,13 +2276,13 @@
       .filter(function (message) {
         return message && message.content && message.type !== "loading" && message.type !== "error";
       });
-    var history = promptMessages.slice(-8).map(function (message) {
+    var history = promptMessages.slice(-MAIN_HISTORY_WINDOW).map(function (message) {
         return formatPromptTimePrefix(message.createdAt) + (message.role === "user" ? userContext.name + "：" : (profile.name || "角色") + "：") + summarizeMessageForAI(message);
       }).join("\n");
-    var worldHistory = promptMessages.slice(-5).map(function (message) {
+    var worldHistory = promptMessages.slice(-WORLD_HISTORY_WINDOW).map(function (message) {
       return formatPromptTimePrefix(message.createdAt) + (message.role === "user" ? userContext.name + "：" : (profile.name || "角色") + "：") + summarizeMessageForAI(message);
     }).join("\n");
-    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages, profile.id, 8));
+    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages.slice(-CHARACTER_LINE_HISTORY_WINDOW), profile.id, CHARACTER_LINE_EXTRACT_LIMIT));
     var timeGapInfo = detectRecentTimeGapText(promptMessages);
     var latestUserInput = getLatestUserInputForPrompt(chatHistory);
     var contextText = buildWorldBookDecisionContext({
@@ -2275,12 +2314,14 @@
       characterIds: profile && profile.id ? [profile.id] : []
     });
     var recentHeartVoiceText = buildRecentHeartVoiceContext(profile.id, "private", profile.id);
+    var relationshipPhaseHint = buildRelationshipPhaseHint(recentHeartVoiceText, formatChatMemoryList(chatMemories), formatMemoryList(memories));
     requestOptions.worldBookContext = worldBookContext;
     requestOptions.selectedWorldBookIds = selectedWorldBookIds;
     requestOptions.latestUserInput = latestUserInput;
     requestOptions.recentHeartVoiceText = recentHeartVoiceText;
     requestOptions.thoughtsHint = recentHeartVoiceText;
     requestOptions.recentCharacterLinesText = recentCharacterLinesText;
+    requestOptions.relationshipPhaseHint = relationshipPhaseHint;
     requestOptions.timeGapText = timeGapInfo;
     requestOptions.timeGapInfo = timeGapInfo;
 
@@ -2299,7 +2340,8 @@
             previousReplyText: requestOptions.previousReplyText || requestOptions.lastAssistantText || "",
             recentHeartVoiceText: recentHeartVoiceText,
             worldBookContext: worldBookContext,
-            recentCharacterLinesText: recentCharacterLinesText
+            recentCharacterLinesText: recentCharacterLinesText,
+            relationshipPhaseHint: relationshipPhaseHint
           }),
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
           buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
@@ -2312,6 +2354,7 @@
             longTermMemoryText: formatMemoryList(memories) || "暂无",
             recentTimelineText: history || "暂无",
             recentHeartVoiceText: recentHeartVoiceText,
+            relationshipPhaseHint: relationshipPhaseHint,
             userContext: userContext,
             bodyState: requestOptions.bodyState
           }),
@@ -2328,7 +2371,7 @@
           taskMode: systemMode,
           userInput: latestUserInput,
           beforeContext: "用户在角色眼里：" + userContext.name + "；" + (userContext.persona || "无补充资料"),
-          contextLabel: "最近 3-8 条聊天上下文：",
+          contextLabel: "最近 10-16 条聊天上下文：",
           recentHistory: history || "暂无历史消息",
           requestOptions: requestOptions,
           regenerateRequest: requestOptions.regenerateRequest,
@@ -2396,8 +2439,16 @@
     var groupMode = requestOptions.regenerateRequest ? "reenterGroup" : "group";
     var recentHeartVoiceText = buildRecentHeartVoiceForCharacters(characters, "group", group && group.id);
     var privateReferenceText = buildPrivateReferenceSummary(characters);
+    var relationshipPhaseHint = buildRelationshipPhaseHint(
+      recentHeartVoiceText,
+      formatChatMemoryList(chatMemories),
+      (characters || []).map(function (character) {
+        return formatMemoryList(sharedMemories && sharedMemories[character.id] || []);
+      }).join("\n")
+    );
     requestOptions.recentHeartVoiceText = recentHeartVoiceText;
     requestOptions.thoughtsHint = recentHeartVoiceText;
+    requestOptions.relationshipPhaseHint = relationshipPhaseHint;
 
     return [
       buildSystemBase("group"),
@@ -2410,7 +2461,8 @@
         recentHeartVoiceText: recentHeartVoiceText,
         worldBookContext: resolvedWorldBookContext,
         recentCharacterLinesText: requestOptions.recentCharacterLinesText || "",
-        recentCharacterLinesMap: requestOptions.recentCharacterLinesMap || {}
+        recentCharacterLinesMap: requestOptions.recentCharacterLinesMap || {},
+        relationshipPhaseHint: relationshipPhaseHint
       }),
       buildGroupControlBoundaryRules(characters, groupMode),
       buildMatchedWorldBooksSection(resolvedWorldBookContext, worldBookMeta),
@@ -2427,6 +2479,7 @@
         recentTimelineText: requestOptions.recentHistory || requestOptions.recentWorldHistory || "暂无",
         privateReferenceText: privateReferenceText,
         recentHeartVoiceText: recentHeartVoiceText,
+        relationshipPhaseHint: relationshipPhaseHint,
         userContext: userContext,
         bodyState: requestOptions.bodyState
       }),
@@ -2633,9 +2686,9 @@
 
         return formatPromptTimePrefix(message.createdAt) + "系统：" + summarizeMessageForAI(message);
       };
-    var history = promptMessages.slice(-8).map(formatGroupWorldMessage).join("\n");
-    var worldHistory = promptMessages.slice(-5).map(formatGroupWorldMessage).join("\n");
-    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages, "", 8));
+    var history = promptMessages.slice(-MAIN_HISTORY_WINDOW).map(formatGroupWorldMessage).join("\n");
+    var worldHistory = promptMessages.slice(-WORLD_HISTORY_WINDOW).map(formatGroupWorldMessage).join("\n");
+    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages.slice(-CHARACTER_LINE_HISTORY_WINDOW), "", CHARACTER_LINE_EXTRACT_LIMIT));
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(characters, promptMessages);
     var timeGapInfo = detectRecentTimeGapText(promptMessages);
     latestUserInput = getLatestUserInputForPrompt(groupHistory);
@@ -2720,7 +2773,7 @@
             groupSettingsText || "暂无",
             "群聊背景：" + valueOrFallback(group && group.name) + "；公告：" + valueOrFallback(group && group.settings && group.settings.announcement) + "；氛围：" + valueOrFallback(group && group.settings && group.settings.atmosphere) + "。"
           ].join("\n"),
-          contextLabel: "最近 3-8 条群聊上下文：",
+          contextLabel: "最近 10-16 条群聊上下文：",
           recentHistory: history || "暂无群聊消息",
           requestOptions: requestOptions,
           regenerateRequest: requestOptions.regenerateRequest,
@@ -2760,14 +2813,17 @@
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
     if (!events.length && !parsed && rawContent) {
-      events = [{ type: "action", characterId: "", content: rawContent }];
+      events = fallbackId
+        ? [{ type: "speech", characterId: fallbackId, content: rawContent }]
+        : [{ type: "action", characterId: "", content: rawContent }];
     }
 
     normalizedEvents = normalizeOfflineEventList(events, rawContent, {
       validIds: validIds,
       fallbackId: fallbackId,
       mode: context.mode,
-      min: MIN_CHAT_REPLY_COUNT,
+      minSpeech: MIN_CHAT_REPLY_COUNT,
+      maxActionCount: OFFLINE_ACTION_MAX_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
       fallbackProfiles: participants.map(buildReplyFallbackProfile),
       previousReplyText: context.previousReplyText,
@@ -2793,9 +2849,9 @@
     var participants = Array.isArray(context.participants) ? context.participants : [];
     var memories = context.memories || {};
     var chatMemories = getChatMemoriesForPrompt(mode, context.targetId || "", context.chatMemories);
-    var historyText = formatInlineOfflineHistory(context.history);
-    var worldHistoryText = formatInlineOfflineHistory(context.history, 5);
-    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(context.history, "", 8));
+    var historyText = formatInlineOfflineHistory(context.history, MAIN_HISTORY_WINDOW);
+    var worldHistoryText = formatInlineOfflineHistory(context.history, WORLD_HISTORY_WINDOW);
+    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines((context.history || []).slice(-CHARACTER_LINE_HISTORY_WINDOW), "", CHARACTER_LINE_EXTRACT_LIMIT));
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(participants, context.history);
     var timeGapInfo = detectRecentTimeGapText(context.history);
     var scene = context.scene || {};
@@ -2863,6 +2919,14 @@
     context.recentHeartVoiceText = recentHeartVoiceText;
     context.thoughtsHint = recentHeartVoiceText;
     var privateReferenceText = mode === "group" ? buildPrivateReferenceSummary(participants) : "";
+    var relationshipPhaseHint = buildRelationshipPhaseHint(
+      recentHeartVoiceText,
+      formatChatMemoryList(chatMemories),
+      participants.map(function (character) {
+        return (character && character.name || character && character.id || "") + "：" + (formatMemoryList(memories[character.id] || []) || "");
+      }).join("\n")
+    );
+    context.relationshipPhaseHint = relationshipPhaseHint;
     return [
       {
         role: "system",
@@ -2876,14 +2940,16 @@
             previousReplyText: context.previousReplyText || context.lastAssistantText || "",
             recentHeartVoiceText: recentHeartVoiceText,
             worldBookContext: worldBookContext,
-            recentCharacterLinesText: recentCharacterLinesText
+            recentCharacterLinesText: recentCharacterLinesText,
+            relationshipPhaseHint: relationshipPhaseHint
           }) : buildGroupVoiceCalibrations(participants, userContext, "offline", {
             latestUserInput: context.userInput || "",
             previousReplyText: context.previousReplyText || context.lastAssistantText || "",
             recentHeartVoiceText: recentHeartVoiceText,
             worldBookContext: worldBookContext,
             recentCharacterLinesText: recentCharacterLinesText,
-            recentCharacterLinesMap: recentCharacterLinesMap
+            recentCharacterLinesMap: recentCharacterLinesMap,
+            relationshipPhaseHint: relationshipPhaseHint
           }),
           mode === "group" ? buildGroupControlBoundaryRules(participants, "offline") : "",
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
@@ -2900,6 +2966,7 @@
             recentTimelineText: historyText || "暂无",
             privateReferenceText: privateReferenceText,
             recentHeartVoiceText: recentHeartVoiceText,
+            relationshipPhaseHint: relationshipPhaseHint,
             userContext: userContext,
             bodyState: context.bodyState
           }),
@@ -2917,16 +2984,23 @@
           userInput: context.userInput,
           sceneText: sceneText || "未指定",
           beforeContext: "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
-          contextLabel: "最近 3-8 条聊天/剧情上下文：",
+          contextLabel: "最近 10-16 条聊天/剧情上下文：",
           recentHistory: historyText || "暂无历史",
           requestOptions: context,
+          regenerateRequest: context.regenerateRequest,
+          regenerateInstruction: String(context.regenerateInstruction || "").trim(),
           schemaText: buildOfflineEventSchema(),
           moneyScope: mode === "group" ? "群聊线下" : "私聊线下",
           primaryField: "events",
           thoughtMode: mode === "group" ? "group" : "private",
           selfCheckMode: "offline",
           afterRules: [
-            "events 形成一小段自然剧情：action 是旁白/动作描写，speech 是角色说话；不要返回空数组，不要把已有动作或一句话拆碎凑数。",
+            "本轮必须至少返回 10 条 speech / 角色说话。action 不计入 10 条要求。",
+            "action 只是现场镜头和动作辅助，建议 0-4 条；只有确实需要动作承接时再写。",
+            "不要用 action 凑数量；如果 speech 不足 10 条，继续生成角色说话补足，不要补动作。",
+            "speech 要像当面对话，短句、停顿、反问、打断、改口都可以。",
+            "action 和 speech 可以交替，但整体以 speech 为主；action 不能连续超过 2 条，不要一上来连续 4-6 条 action。",
+            "如果一个动作已经表达完整，不要拆成多条。",
             "如果线下剧情里出现真实的模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"37.50\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
             "memories 是长期记忆，不要为了心声或记忆额外调用 API。"
           ].join("\n")
@@ -2940,7 +3014,7 @@
       .filter(function (message) {
         return message && message.content && message.type !== "loading" && message.type !== "error";
       })
-      .slice(-(limit || 8))
+      .slice(-(limit || MAIN_HISTORY_WINDOW))
       .map(function (message) {
         if (message.type === "offlineAction") {
           return formatPromptTimePrefix(message.createdAt) + "旁白：" + summarizeMessageForAI(message);
@@ -2976,14 +3050,17 @@
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
     if (!events.length && !parsed && rawContent) {
-      events = [{ type: "action", characterId: "", content: rawContent }];
+      events = fallbackId
+        ? [{ type: "speech", characterId: fallbackId, content: rawContent }]
+        : [{ type: "action", characterId: "", content: rawContent }];
     }
 
     normalizedEvents = normalizeOfflineEventList(events, rawContent, {
       validIds: validIds,
       fallbackId: fallbackId,
       mode: context.mode,
-      min: MIN_CHAT_REPLY_COUNT,
+      minSpeech: MIN_CHAT_REPLY_COUNT,
+      maxActionCount: OFFLINE_ACTION_MAX_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
       fallbackProfiles: participants.map(buildReplyFallbackProfile),
       previousReplyText: context.previousReplyText,
@@ -3028,9 +3105,9 @@
 
         return formatPromptTimePrefix(event.createdAt) + "旁白：" + summarizeMessageForAI(event);
       };
-    var history = offlineEvents.slice(-8).map(formatOfflineWorldEvent).join("\n");
-    var worldHistory = offlineEvents.slice(-5).map(formatOfflineWorldEvent).join("\n");
-    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(offlineEvents, "", 8));
+    var history = offlineEvents.slice(-MAIN_HISTORY_WINDOW).map(formatOfflineWorldEvent).join("\n");
+    var worldHistory = offlineEvents.slice(-WORLD_HISTORY_WINDOW).map(formatOfflineWorldEvent).join("\n");
+    var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(offlineEvents.slice(-CHARACTER_LINE_HISTORY_WINDOW), "", CHARACTER_LINE_EXTRACT_LIMIT));
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(participants, offlineEvents);
     var timeGapInfo = detectRecentTimeGapText(offlineEvents);
     var selectedWorldBookIds = getSelectedWorldBookIds(context.mode === "group" ? "group" : "private", context.targetId || "", context);
@@ -3089,6 +3166,14 @@
     context.recentHeartVoiceText = recentHeartVoiceText;
     context.thoughtsHint = recentHeartVoiceText;
     var privateReferenceText = context.mode === "group" ? buildPrivateReferenceSummary(participants) : "";
+    var relationshipPhaseHint = buildRelationshipPhaseHint(
+      recentHeartVoiceText,
+      formatChatMemoryList(chatMemories),
+      participants.map(function (character) {
+        return (character && character.name || character && character.id || "") + "：" + (formatMemoryList(sharedMemories[character.id] || []) || "");
+      }).join("\n")
+    );
+    context.relationshipPhaseHint = relationshipPhaseHint;
 
     return [
       {
@@ -3103,14 +3188,16 @@
             previousReplyText: context.previousReplyText || context.lastAssistantText || "",
             recentHeartVoiceText: recentHeartVoiceText,
             worldBookContext: worldBookContext,
-            recentCharacterLinesText: recentCharacterLinesText
+            recentCharacterLinesText: recentCharacterLinesText,
+            relationshipPhaseHint: relationshipPhaseHint
           }) : buildGroupVoiceCalibrations(participants, userContext, "offline", {
             latestUserInput: context.userInput || "",
             previousReplyText: context.previousReplyText || context.lastAssistantText || "",
             recentHeartVoiceText: recentHeartVoiceText,
             worldBookContext: worldBookContext,
             recentCharacterLinesText: recentCharacterLinesText,
-            recentCharacterLinesMap: recentCharacterLinesMap
+            recentCharacterLinesMap: recentCharacterLinesMap,
+            relationshipPhaseHint: relationshipPhaseHint
           }),
           context.mode === "group" ? buildGroupControlBoundaryRules(participants, "offline") : "",
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
@@ -3127,6 +3214,7 @@
             recentTimelineText: history || "暂无",
             privateReferenceText: privateReferenceText,
             recentHeartVoiceText: recentHeartVoiceText,
+            relationshipPhaseHint: relationshipPhaseHint,
             userContext: userContext,
             bodyState: context.bodyState
           }),
@@ -3144,15 +3232,25 @@
           userInput: context.userInput,
           sceneText: sceneText || "未指定，请沿用最近剧情和参与者所处空间",
           beforeContext: "私聊模式只围绕当前角色和用户互动；群聊模式中多个角色可以自然互动。",
-          contextLabel: "最近 3-8 条剧情上下文：",
+          contextLabel: "最近 10-16 条剧情上下文：",
           recentHistory: history || "暂无",
           requestOptions: context,
+          regenerateRequest: context.regenerateRequest,
+          regenerateInstruction: String(context.regenerateInstruction || "").trim(),
           schemaText: buildOfflineEventSchema(),
           moneyScope: context.mode === "group" ? "群聊线下" : "私聊线下",
           primaryField: "events",
           thoughtMode: context.mode === "group" ? "group" : "private",
           selfCheckMode: "offline",
-          afterRules: "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。"
+          afterRules: [
+            "本轮必须至少返回 10 条 speech / 角色说话。action 不计入 10 条要求。",
+            "action 只是现场镜头和动作辅助，建议 0-4 条；只有确实需要动作承接时再写。",
+            "不要用 action 凑数量；如果 speech 不足 10 条，继续生成角色说话补足，不要补动作。",
+            "speech 要像当面对话，短句、停顿、反问、打断、改口都可以。",
+            "action 和 speech 可以交替，但整体以 speech 为主；action 不能连续超过 2 条，不要一上来连续 4-6 条 action。",
+            "如果一个动作已经表达完整，不要拆成多条。",
+            "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。"
+          ].join("\n")
         })
       }
     ];
@@ -3998,18 +4096,21 @@
       validIds: [],
       fallbackId: "",
       mode: "private",
-      min: 10,
+      minSpeech: MIN_CHAT_REPLY_COUNT,
+      maxActionCount: OFFLINE_ACTION_MAX_COUNT,
       max: MAX_CHAT_REPLY_COUNT
     }, options || {});
     var validIds = settings.validIds || [];
     var normalized = [];
+    var speechCount;
 
-    settings.min = Math.max(0, Number(settings.min) || 0);
-    settings.max = Math.max(settings.min || 1, Number(settings.max) || MAX_CHAT_REPLY_COUNT);
+    settings.minSpeech = Math.max(0, Number(settings.minSpeech || settings.min) || MIN_CHAT_REPLY_COUNT);
+    settings.maxActionCount = Math.max(0, Number(settings.maxActionCount) || OFFLINE_ACTION_MAX_COUNT);
+    settings.max = Math.max(settings.minSpeech || 1, Number(settings.max) || MAX_CHAT_REPLY_COUNT);
 
     (Array.isArray(events) ? events : []).forEach(function (event, index) {
       var source = event && typeof event === "object" ? event : { content: event };
-      var type = source.type === "speech" ? "speech" : "action";
+      var type = getOfflineNormalizedEventType(source);
       var content = normalizeAiMessageText(source.content);
       var contentParts = type === "speech" ? splitTextContentForTopUp(content).filter(Boolean) : (content ? [content] : []);
 
@@ -4034,39 +4135,189 @@
       normalized = filterRepeatedContentItems(normalized, getRepeatGuardTexts(settings));
     }
 
-    if (normalized.length < settings.min) {
-      normalized = normalized.concat(createFallbackOfflineEvents(settings, normalized.length));
+    normalized = limitOfflineActionEvents(normalized, settings);
+    speechCount = countOfflineSpeechEvents(normalized);
+
+    if (speechCount < settings.minSpeech) {
+      normalized = normalized.concat(createOfflineSpeechFallbackEvents(settings, settings.minSpeech - speechCount, normalized));
     }
+
+    normalized = limitOfflineActionEvents(normalized, settings);
 
     return normalized.filter(function (event) {
       return event.content && (event.type === "action" || event.characterId);
     }).slice(0, settings.max);
   }
 
-  function createFallbackOfflineEvents(settings, currentCount) {
-    var missing = Math.max(0, (Number(settings.min) || 0) - currentCount);
+  function getOfflineNormalizedEventType(event) {
+    var type = String(event && event.type || "").trim();
+
+    if (type === "speech" || type === "offlineSpeech" || type === "text") {
+      return "speech";
+    }
+    if (type === "action" || type === "offlineAction") {
+      return "action";
+    }
+    if (event && event.characterId) {
+      return "speech";
+    }
+    return "action";
+  }
+
+  function isOfflineSpeechEvent(event) {
+    var type = String(event && event.type || "").trim();
+    return Boolean(event && event.content && (
+      type === "speech"
+      || type === "offlineSpeech"
+      || type === "text"
+    ));
+  }
+
+  function isOfflineActionEvent(event) {
+    var type = String(event && event.type || "").trim();
+    return Boolean(event && event.content && (
+      type === "action"
+      || type === "offlineAction"
+    ));
+  }
+
+  function isOfflineMoneyEvent(event) {
+    var source = event || {};
+    var money = source.money && typeof source.money === "object" ? source.money : source;
+    var type = String(money.type || money.moneyType || "").trim();
+
+    return type === "transfer"
+      || type === "redPacket"
+      || type === "redpacket"
+      || Boolean(source.money && source.money.amount);
+  }
+
+  function countOfflineSpeechEvents(events) {
+    return (Array.isArray(events) ? events : []).filter(isOfflineSpeechEvent).length;
+  }
+
+  function countOfflineActionEvents(events) {
+    return (Array.isArray(events) ? events : []).filter(isOfflineActionEvent).length;
+  }
+
+  function limitOfflineActionEvents(events, settings) {
+    var actionMax = Math.max(0, Number(settings && settings.maxActionCount) || OFFLINE_ACTION_MAX_COUNT);
+    var consecutiveActions = 0;
+    var reduced = [];
+    var nonMoneyActionCount = 0;
+
+    (Array.isArray(events) ? events : []).forEach(function (event) {
+      if (!isOfflineActionEvent(event)) {
+        consecutiveActions = 0;
+        reduced.push(event);
+        return;
+      }
+
+      consecutiveActions += 1;
+      if (consecutiveActions > 2 && !isOfflineMoneyEvent(event)) {
+        return;
+      }
+
+      reduced.push(event);
+    });
+
+    return reduced.filter(function (event) {
+      if (!isOfflineActionEvent(event) || isOfflineMoneyEvent(event)) {
+        return true;
+      }
+
+      nonMoneyActionCount += 1;
+      return nonMoneyActionCount <= actionMax;
+    });
+  }
+
+  function createOfflineSpeechFallbackEvents(settings, missingCount, existingEvents) {
+    var missing = Math.max(0, Number(missingCount) || 0);
     var profiles = getFallbackProfiles(settings);
     var events = [];
     var usedSpeech = {};
-    var usedAction = {};
     var index = 0;
 
-    while (events.length < missing && currentCount + events.length < settings.max) {
-      var profile = profiles[index % profiles.length] || {};
-      var useAction = index % 3 === 0 || !(settings.validIds || []).length;
+    (Array.isArray(existingEvents) ? existingEvents : []).forEach(function (event) {
+      if (event && event.content) {
+        usedSpeech[event.content] = true;
+      }
+    });
+
+    while (events.length < missing && countOfflineSpeechEvents(existingEvents) + events.length < settings.max) {
+      var profile = pickOfflineFallbackProfile(profiles, settings, index);
       var contextFlags = buildFallbackContextFlags(profile, settings.worldBookContext || "");
-      var content = useAction ? pickFallbackOfflineActionLine(index, usedAction, contextFlags) : pickFallbackLine(profile, index, usedSpeech, contextFlags);
-      var characterId = useAction ? "" : (profile.id || pickOfflineSpeaker(settings.validIds || [], settings.fallbackId, settings.mode, index));
+      var content = pickFallbackLine(profile, index, usedSpeech, contextFlags);
+      var characterId = profile.id || pickOfflineSpeaker(settings.validIds || [], settings.fallbackId, settings.mode, index);
+
+      if (!characterId) {
+        break;
+      }
 
       events.push({
-        type: characterId ? "speech" : "action",
-        characterId: characterId || "",
+        type: "speech",
+        characterId: characterId,
         content: content
       });
       index += 1;
     }
 
     return events;
+  }
+
+  function pickOfflineFallbackProfile(profiles, settings, index) {
+    var list = Array.isArray(profiles) && profiles.length ? profiles : [{}];
+    var validIds = settings && Array.isArray(settings.validIds) ? settings.validIds : [];
+    var fallbackId = settings && settings.fallbackId ? String(settings.fallbackId) : "";
+    var matched;
+    var speakerId;
+
+    if ((settings && settings.mode) !== "group") {
+      matched = list.filter(function (profile) {
+        return profile && String(profile.id || "") === fallbackId;
+      })[0];
+      return matched || list[0] || {};
+    }
+
+    speakerId = validIds.length
+      ? validIds[(index + Math.floor(index / 2)) % validIds.length]
+      : fallbackId;
+    matched = list.filter(function (profile) {
+      return profile && String(profile.id || "") === String(speakerId || "");
+    })[0];
+    return matched || list[index % list.length] || {};
+  }
+
+  function debugOfflineNormalizeCase(input) {
+    var source = input && typeof input === "object" ? input : {};
+    var participants = Array.isArray(source.participants) ? source.participants : [];
+    var validIds = participants.map(function (character) {
+      return character && character.id;
+    }).filter(Boolean);
+    var fallbackId = source.fallbackId || validIds[0] || "";
+    var inputEvents = (Array.isArray(source.events) ? source.events : []).map(function (event) {
+      return event && typeof event === "object" ? Object.assign({}, event) : { content: event };
+    });
+    var outputEvents = normalizeOfflineEventList(inputEvents, "", {
+      validIds: validIds,
+      fallbackId: fallbackId,
+      mode: source.mode === "group" ? "group" : "private",
+      minSpeech: source.minSpeech || MIN_CHAT_REPLY_COUNT,
+      maxActionCount: source.maxActionCount || OFFLINE_ACTION_MAX_COUNT,
+      max: source.max || MAX_CHAT_REPLY_COUNT,
+      fallbackProfiles: participants.map(buildReplyFallbackProfile),
+      latestUserInput: source.latestUserInput || source.userInput || "",
+      recentHeartVoiceText: source.recentHeartVoiceText || "",
+      previousReplyText: source.previousReplyText || "",
+      rejectedReplyText: source.rejectedReplyText || ""
+    });
+
+    return {
+      inputEvents: inputEvents,
+      outputEvents: outputEvents,
+      speechCount: countOfflineSpeechEvents(outputEvents),
+      actionCount: countOfflineActionEvents(outputEvents)
+    };
   }
 
   function pickFallbackOfflineActionLine(index, used, contextFlags) {
@@ -7315,6 +7566,7 @@
     extractAiText: extractAiText,
     fetchModels: fetchModels,
     debugReplyTextureCase: debugReplyTextureCase,
+    debugOfflineNormalizeCase: debugOfflineNormalizeCase,
     runReplyTextureSmokeTest: runReplyTextureSmokeTest,
     createReplyTextureStats: createReplyTextureStats,
     summarizeReplyTextureStats: summarizeReplyTextureStats

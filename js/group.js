@@ -1819,6 +1819,7 @@
 
   function findLatestGroupRegenerateMessageId() {
     var messages = activeGroupId ? removeLoadingMessages(window.AppStorage.getGroupChatHistory(activeGroupId)) : [];
+    var offlineActive = isInlineOfflineActive();
     var index;
     var nextIndex;
     var hasCharacterReply;
@@ -1832,7 +1833,8 @@
       nextIndex = index + 1;
 
       while (nextIndex < messages.length && messages[nextIndex].role !== "user") {
-        if (messages[nextIndex].role === "character" && messages[nextIndex].type !== "error") {
+        if (messages[nextIndex].role === "character" && messages[nextIndex].type !== "error"
+          || offlineActive && (messages[nextIndex].type === "offlineSpeech" || messages[nextIndex].type === "offlineAction")) {
           hasCharacterReply = true;
           break;
         }
@@ -1894,6 +1896,19 @@
     var generationId;
 
     if (!group || !characters.length) {
+      return;
+    }
+
+    if (isInlineOfflineActive()) {
+      if (window.OfflineManager && window.OfflineManager.regenerateInlineOfflineLastTurn) {
+        await window.OfflineManager.regenerateInlineOfflineLastTurn({
+          mode: "group",
+          targetType: "group",
+          targetId: group.id,
+          messageId: messageId,
+          regenerateInstruction: requirement
+        });
+      }
       return;
     }
 
