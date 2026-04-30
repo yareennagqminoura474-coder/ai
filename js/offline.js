@@ -36,7 +36,7 @@
 
   function getOfflineAiServiceMethod(name) {
     if (!window.AIService || !window.AIService[name]) {
-      throw new Error("AI 服务未加载，请刷新或清缓存");
+      throw new Error("AI 服务未加载，请刷新页面或清除 PWA 缓存后重试。");
     }
     return window.AIService[name];
   }
