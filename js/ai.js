@@ -1522,19 +1522,11 @@
         "  × 1条action + 10条speech连续 → 动作只在开头，后面全是台词",
         "  × action全堆在第一条 → 肢体语言和环境描写消失",
         "  × speech连续超过4条没有任何动作穿插 → 变成纯对话剧本",
-        "正确的节奏参考（可以灵活变化，不要照抄）：",
-        "  [action]环境/进入动作 → [speech]第一句台词 → [action]肢体反应 → [speech]接话 → [action]情绪动作 → [speech]推进 → [action]转场动作 → [speech]收束",
-        "action 要写什么：",
-        "  - 肢体语言（垂眼、偏头、手指轻扣、停顿、靠近、后退、转身）",
-        "  - 表情细节（眉头微蹙、嘴角扯了扯、眼神一沉）",
-        "  - 环境细节（光线、温度、气氛、物品移动）",
-        "  - 内部动作（他没有立刻开口、她把视线移开、他停在原地没有动）",
-        "  - 转场（他走到窗边、她把头转向另一边）",
         "action 写法要求：",
-        "  - 用第三人称（他/她/角色名），不要用第一人称",
-        "  - 一条 action 写一个完整动作或画面，不要切碎",
-        "  - 不要写成说明文或心理分析，要有镜头感",
-        "  - 长度适中：一句到三句，不要写成长段小说",
+        "  - 每条 action 必须从当前场景、角色状态和前一条 event 的具体情境自然生成，不得套用固定词库",
+        "  - 同一轮中动词、视线方向、身体部位不得重复；禁止使用"垂眼""偏头""靠近""转身""目光一沉""停在原地"等泛用动作词",
+        "  - 用第三人称（他/她/角色名），一条写一个完整画面，有镜头感，不超过三句",
+        "  - 不要写成说明文或心理分析",
         "speech 写法要求：",
         "  - 只写说出口的话，不要把动作描写夹进 speech",
         "  - 可以短句、停顿、半句、反问、改口、沉默后的补一句",
@@ -1582,12 +1574,10 @@
   function buildOfflineEventSchema() {
     return JSON.stringify({
       "events": [
-        {"type": "action", "content": "他停在门口，没有立刻走进来，眼神在她脸上停了一秒。"},
-        {"type": "speech", "characterId": "角色ID", "content": "你今天怎么了。"},
-        {"type": "action", "content": "她把头转向另一边，手指轻轻捏紧了袖口。"},
-        {"type": "speech", "characterId": "角色ID", "content": "没事。"},
-        {"type": "action", "content": "他没有说话，走过去在她对面坐下。"},
-        {"type": "speech", "characterId": "角色ID", "content": "……你真的不知道吗。", "money": {"type": "transfer", "amount": "37.50", "direction": "income", "note": "补偿"}}
+        {"type": "action", "content": "【由当前场景和角色状态生成，不套用模板】"},
+        {"type": "speech", "characterId": "角色ID", "content": "台词内容"},
+        {"type": "action", "content": "【承接上一条 event 的具体情境，不重复已用动词/部位】"},
+        {"type": "speech", "characterId": "角色ID", "content": "台词内容", "money": {"type": "transfer", "amount": "37.50", "direction": "income", "note": "备注"}}
       ],
       "thoughts": [{"characterId": "角色ID", "content": "内心内容", "mood": "紧张", "visibleSummary": "一句摘要"}],
       "memories": [{"characterId": "角色ID", "content": "要写入记忆的内容"}]
@@ -2368,31 +2358,31 @@
     if (!tags.length) return "";
 
     var has = function (tag) { return tags.indexOf(tag) !== -1; };
-    var exampleLines = [];
+    var densityHint = "";
 
     if (has("cold")) {
-      exampleLines = ["嗯。", "说重点。", "没什么好问的。"];
+      densityHint = "语气密度：克制、低信息量、不解释；短句为主，不表露情绪，沉默多于开口";
     } else if (has("tsundere")) {
-      exampleLines = ["谁担心你了。", "别误会，我只是顺口。", "烦死了，你自己看着办。"];
+      densityHint = "语气密度：口是心非、反向表达；嘴硬但在意，语气刺但不是真的要赶走对方";
     } else if (has("clingy")) {
-      exampleLines = ["你怎么才回来。", "我等很久了。", "别走嘛。"];
+      densityHint = "语气密度：频率高、黏附感强；依赖对方回应，容易因对方态度变化而情绪波动";
     } else if (has("strong")) {
-      exampleLines = ["过来。", "先按我说的来。", "别让我说第二遍。"];
+      densityHint = "语气密度：命令式、节奏快、不废话；习惯主导，不主动解释，期待对方跟上";
     } else if (has("obsessive")) {
-      exampleLines = ["你刚才提到谁。", "别想糊弄过去。", "我注意到了。"];
+      densityHint = "语气密度：表面平稳但细节敏感；注意到所有细节，追问克制但压迫感强";
     } else if (has("shy")) {
-      exampleLines = ["……嗯。", "你别看我。", "我不是那个意思。"];
+      densityHint = "语气密度：低、犹豫、容易打结；话说一半，容易被误解，不擅长直接表达";
     } else if (has("gentle")) {
-      exampleLines = ["先别硬撑。", "我在听。", "慢慢说。"];
+      densityHint = "语气密度：稳、包容、不急于表态；给对方空间，情绪托底，不轻易推开";
     } else if (has("hostile")) {
-      exampleLines = ["少来这套。", "你这话什么意思。", "别试我。"];
+      densityHint = "语气密度：戒备、锋利、不轻易示弱；对话带刺，不主动亲近，底线明显";
     } else if (has("playful")) {
-      exampleLines = ["被我抓到了吧。", "逃不掉的。", "说，怎么办。"];
+      densityHint = "语气密度：轻、快、带节奏；喜欢掌控对话节奏，偶尔故意吊对方";
     }
 
-    if (!exampleLines.length) return "";
+    if (!densityHint) return "";
 
-    return "【角色当前声音参考（不要照抄，只用于感受语气密度）】：" + exampleLines.join(" / ");
+    return "【角色声音密度提示（只描述语气密度，不提供可复制句子）】：" + densityHint;
   }
 
   function buildPrivateReplyMessages(character, chatHistory, options) {
@@ -2948,6 +2938,7 @@
     var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(getThoughtPayload(parsed)), validIds);
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
+    // Only use raw text as a last-resort fallback when parsing fails completely.
     if (!events.length && !parsed && rawContent) {
       events = fallbackId
         ? [{ type: "speech", characterId: fallbackId, content: rawContent }]
@@ -2961,7 +2952,6 @@
       minSpeech: MIN_CHAT_REPLY_COUNT,
       maxActionCount: OFFLINE_ACTION_MAX_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
-      fallbackProfiles: participants.map(buildReplyFallbackProfile),
       previousReplyText: context.previousReplyText,
       rejectedReplyText: context.rejectedReplyText,
       worldBookContext: context.worldBookContext,
@@ -2970,6 +2960,14 @@
       thoughtsHint: context.thoughtsHint,
       recentCharacterLinesText: context.recentCharacterLinesText
     });
+
+    var quality = checkOfflineEventQuality(normalizedEvents);
+    if (!quality.ok) {
+      var repairedEvents = await repairOfflineEvents(context, normalizedEvents, quality.reason);
+      if (repairedEvents && repairedEvents.length) {
+        normalizedEvents = repairedEvents;
+      }
+    }
 
     return {
       events: normalizedEvents,
@@ -3138,6 +3136,8 @@
             "正确节奏：action 和 speech 至少要交替 3 次以上，让动作贯穿整个场景。",
             "action 内容：肢体动作、表情细节、环境变化、角色的停顿/靠近/后退/转身，用第三人称写，有镜头感。",
             "speech 内容：只写说出口的话，台词要符合角色人设，不要全部温柔解释。",
+            "不要使用固定模板台词，如“过来”“看着我”“别让我猜”“别逞强”“先回我”；台词要源自当前角色与情境。",
+            "action 描写要连贯且不要重复同一动作细节，避免使用简单套话式动作。",
             "如果线下剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
             "memories 是长期记忆，不要为了凑数额外生成。"
           ].join("\n")
@@ -3172,6 +3172,88 @@
       }).join("\n");
   }
 
+  async function repairOfflineEvents(context, currentEvents, reason) {
+    var participants = Array.isArray(context.participants) ? context.participants : [];
+    var validIds = participants.map(function (p) { return p.id; });
+    var fallbackId = validIds[0] || "";
+    var scene = context.scene || context.offlineScene || {};
+    var sceneText = [
+      scene.name ? "场景：" + scene.name : "",
+      scene.description ? "场景描述：" + scene.description : ""
+    ].filter(Boolean).join("\n");
+
+    var offlineHistory = Array.isArray(context.offlineHistory) ? context.offlineHistory : [];
+    var inlineHistory = Array.isArray(context.history) ? context.history : [];
+    var recentHistory = offlineHistory.length
+      ? offlineHistory
+          .filter(function (e) { return e && e.content && e.type !== "loading" && e.type !== "error"; })
+          .slice(-10)
+          .map(function (e) {
+            if (e.role === "user" || e.type === "user" || e.type === "offlineUserAction") return "用户：" + summarizeMessageForAI(e);
+            if (e.type === "speech" || e.type === "offlineSpeech") return (e.characterName || "角色") + "说：" + summarizeMessageForAI(e);
+            return "旁白：" + summarizeMessageForAI(e);
+          })
+          .join("\n")
+      : formatInlineOfflineHistory(inlineHistory, 10);
+
+    var previousReplyText = context.previousReplyText || context.lastAssistantText || "";
+
+    var messages = [
+      {
+        role: "system",
+        content: [
+          "你是一个叙事修复助手，专门处理线下模式的 events 序列。",
+          "任务：在不改变台词语义的前提下，将缺失的 action 插入合适位置，让 action 和 speech 自然交替。",
+          "修复规则：",
+          "1. 保留所有原有 speech 台词，不得改写台词内容或语义。",
+          "2. 保留原有有意义的 action，在 speech 之间补充新的 action。",
+          "3. 修复后 action 总数至少 " + OFFLINE_ACTION_MIN_COUNT + " 条，且不得有连续超过 4 条 speech 无 action 穿插。",
+          "4. 每条新增 action 必须承接前一条 event 的情境，由当前场景和角色状态自然生成，不得使用固定句库。",
+          "5. 同一轮中不得重复动词、视线方向或身体部位描写；禁止使用"垂眼""偏头""靠近""转身""目光一沉""停在原地"等泛用动作词。",
+          "6. action 用第三人称写，有镜头感，一条写一个完整画面，不超过三句。",
+          "7. 只输出修复后的完整 events 数组，JSON 格式：{\"events\":[...]}"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: [
+          "修复原因：" + (reason || "action不足或speech连续过多"),
+          sceneText || "",
+          recentHistory ? "最近剧情：\n" + recentHistory : "",
+          context.userInput ? "本轮用户输入：" + context.userInput : "",
+          previousReplyText ? "上一轮回复摘要：" + limitText(previousReplyText, 200) : "",
+          "参与角色：" + participants.map(function (p) { return p.name || p.id; }).join("、"),
+          "",
+          "需要修复的 events：",
+          JSON.stringify(currentEvents || []),
+          "",
+          "请输出修复后的完整 events，只返回 JSON。"
+        ].filter(Boolean).join("\n")
+      }
+    ];
+
+    try {
+      var rawContent = await sendConfiguredChatMessages(messages);
+      var parsed = parseJsonFromText(rawContent);
+      var repairedEvents = parsed && Array.isArray(parsed.events) ? parsed.events : null;
+
+      if (!repairedEvents || !repairedEvents.length) return null;
+
+      var normalized = normalizeOfflineEventList(repairedEvents, rawContent, {
+        validIds: validIds,
+        fallbackId: fallbackId,
+        mode: context.mode,
+        minSpeech: MIN_CHAT_REPLY_COUNT,
+        maxActionCount: OFFLINE_ACTION_MAX_COUNT,
+        max: MAX_CHAT_REPLY_COUNT
+      });
+
+      return normalized.length ? normalized : null;
+    } catch (e) {
+      return null;
+    }
+  }
+
   async function sendOfflineRequest(context) {
     var messages = buildOfflineMessages(context || {});
     var rawContent = await sendConfiguredChatMessages(messages);
@@ -3186,6 +3268,7 @@
     var thoughts = assignGroupAuxiliaryCharacterIds(normalizeThoughtList(getThoughtPayload(parsed)), validIds);
     var memories = assignGroupAuxiliaryCharacterIds(normalizeMemoryList(parsed && parsed.memories), validIds);
 
+    // Only use raw text as a last-resort fallback when parsing fails completely.
     if (!events.length && !parsed && rawContent) {
       events = fallbackId
         ? [{ type: "speech", characterId: fallbackId, content: rawContent }]
@@ -3199,7 +3282,6 @@
       minSpeech: MIN_CHAT_REPLY_COUNT,
       maxActionCount: OFFLINE_ACTION_MAX_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
-      fallbackProfiles: participants.map(buildReplyFallbackProfile),
       previousReplyText: context.previousReplyText,
       rejectedReplyText: context.rejectedReplyText,
       worldBookContext: context.worldBookContext,
@@ -3208,6 +3290,14 @@
       thoughtsHint: context.thoughtsHint,
       recentCharacterLinesText: context.recentCharacterLinesText
     });
+
+    var quality = checkOfflineEventQuality(normalizedEvents);
+    if (!quality.ok) {
+      var repairedEvents = await repairOfflineEvents(context, normalizedEvents, quality.reason);
+      if (repairedEvents && repairedEvents.length) {
+        normalizedEvents = repairedEvents;
+      }
+    }
 
     return {
       events: normalizedEvents,
@@ -3387,6 +3477,8 @@
             "正确节奏：action 和 speech 至少要交替 3 次以上，让动作贯穿整个场景。",
             "action 内容：肢体动作、表情细节、环境变化、角色的停顿/靠近/后退/转身，用第三人称写，有镜头感。",
             "speech 内容：只写说出口的话，台词要符合角色人设，不要全部温柔解释。",
+            "不要使用固定模板台词，如“过来”“看着我”“别让我猜”“别逞强”“先回我”；台词要源自当前角色与情境。",
+            "action 描写要连贯且不要重复同一动作细节，避免使用简单套话式动作。",
             "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。"
           ].join("\n")
         })
@@ -4229,6 +4321,7 @@
     return Boolean(value);
   }
 
+  // Normalize and sanitize offline events only. Do not generate or pad fallback speech/action content here.
   function normalizeOfflineEventList(events, rawContent, options) {
     var settings = Object.assign({
       validIds: [],
@@ -4242,7 +4335,6 @@
     var normalized = [];
     var speechCount;
     var actionCount;
-    var actionFallbacks;
 
     settings.minSpeech = Math.max(0, Number(settings.minSpeech || settings.min) || MIN_CHAT_REPLY_COUNT);
     settings.minActionCount = Math.max(0, Number(settings.minActionCount) || OFFLINE_ACTION_MIN_COUNT);
@@ -4281,17 +4373,7 @@
 
     normalized = limitOfflineActionEvents(normalized, settings);
     speechCount = countOfflineSpeechEvents(normalized);
-
-    if (speechCount < settings.minSpeech) {
-      normalized = normalized.concat(createOfflineSpeechFallbackEvents(settings, settings.minSpeech - speechCount, normalized));
-    }
-
     actionCount = countOfflineActionEvents(normalized);
-    if (actionCount < settings.minActionCount) {
-      actionFallbacks = createOfflineActionFallbackEvents(settings, settings.minActionCount - actionCount, normalized);
-      normalized = interleaveOfflineEvents(normalized, actionFallbacks);
-    }
-
     normalized = limitOfflineActionEvents(normalized, settings);
 
     return normalized.filter(function (event) {
@@ -4381,6 +4463,31 @@
     });
   }
 
+  function checkOfflineEventQuality(events) {
+    var list = Array.isArray(events) ? events : [];
+    var actionCount = countOfflineActionEvents(list);
+    var consecutiveSpeech = 0;
+    var i;
+
+    if (actionCount < OFFLINE_ACTION_MIN_COUNT) {
+      return { ok: false, reason: "action数量不足（" + actionCount + "条，要求至少" + OFFLINE_ACTION_MIN_COUNT + "条）" };
+    }
+
+    for (i = 0; i < list.length; i++) {
+      if (isOfflineSpeechEvent(list[i])) {
+        consecutiveSpeech++;
+        if (consecutiveSpeech > 4) {
+          return { ok: false, reason: "speech连续超过4条无action穿插" };
+        }
+      } else if (isOfflineActionEvent(list[i])) {
+        consecutiveSpeech = 0;
+      }
+    }
+
+    return { ok: true, reason: "" };
+  }
+
+  // Reserved for last-resort fallback only when the offline response cannot be parsed into valid events.
   function createOfflineSpeechFallbackEvents(settings, missingCount, existingEvents) {
     var missing = Math.max(0, Number(missingCount) || 0);
     var profiles = getFallbackProfiles(settings);
@@ -4415,6 +4522,7 @@
     return events;
   }
 
+  // Reserved for last-resort fallback only when the offline response cannot be parsed into valid events.
   function createOfflineActionFallbackEvents(settings, missingCount, existingEvents) {
     var options = settings || {};
     var existing = Array.isArray(existingEvents) ? existingEvents : [];
