@@ -7071,3 +7071,511 @@ textarea::placeholder {
 [data-theme="dark"] .form-section {
   border-color: rgba(255,255,255,.07);
 }
+
+/* -----------------------------------------------------------------
+   心屿空间 · money-card compact final pass
+   ----------------------------------------------------------------- */
+
+.message-special-wrapper {
+  display: inline-flex;
+  width: auto;
+  max-width: 100%;
+  border: 0;
+  background: transparent;
+  padding: 0;
+  font: inherit;
+  color: inherit;
+}
+
+.message-row.user .message-special-wrapper:not(.money-card) {
+  justify-content: flex-end;
+}
+
+.message-row.character .message-special-wrapper:not(.money-card) {
+  justify-content: flex-start;
+}
+
+.money-card {
+  width: clamp(210px, 68vw, 236px);
+  max-width: 100%;
+  min-width: min(210px, 100%);
+  min-height: unset;
+  padding: 0;
+  border: 0;
+  border-radius: 16px;
+  overflow: hidden;
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto;
+  gap: 0;
+  align-items: start;
+  position: relative;
+  color: #fff;
+  text-align: left;
+  font: inherit;
+  cursor: pointer;
+  box-shadow: 0 10px 24px rgba(31, 38, 34, 0.14);
+  transform-origin: left center;
+  transition: transform 0.16s ease, box-shadow 0.16s ease, filter 0.16s ease;
+}
+
+.money-card::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: 56px;
+  bottom: 0;
+  pointer-events: none;
+  z-index: 0;
+}
+
+.message-row.user .money-card {
+  margin-left: auto;
+  transform-origin: right center;
+}
+
+.message-row.character .money-card {
+  margin-right: auto;
+  transform-origin: left center;
+}
+
+.group-message-main .money-card {
+  width: min(232px, 100%);
+  min-width: min(210px, 100%);
+  align-self: flex-start;
+}
+
+.money-card:hover {
+  transform: translateY(-1px);
+}
+
+.money-card.red-packet {
+  background: linear-gradient(145deg, #ff7a3d 0%, #e13a2f 52%, #bb2430 100%);
+  box-shadow: 0 10px 24px rgba(191, 50, 43, 0.22);
+}
+
+.money-card.red-packet::after {
+  background: linear-gradient(180deg, rgba(126, 21, 27, 0.2), rgba(126, 21, 27, 0.36));
+}
+
+.money-card.transfer {
+  background: linear-gradient(145deg, #66dec3 0%, #31b897 52%, #1f8068 100%);
+  box-shadow: 0 10px 24px rgba(34, 139, 111, 0.2);
+}
+
+.money-card.transfer::after {
+  background: linear-gradient(180deg, rgba(10, 88, 70, 0.18), rgba(10, 88, 70, 0.34));
+}
+
+.money-card.done,
+.money-card.returned {
+  filter: saturate(0.76) brightness(0.96);
+  box-shadow: 0 8px 18px rgba(31, 38, 34, 0.1);
+}
+
+.money-card-icon,
+.money-card-header,
+.money-card-amount,
+.money-card-note,
+.money-card-status,
+.money-card-action,
+.money-card-actions {
+  position: relative;
+  z-index: 1;
+}
+
+.money-card-icon {
+  grid-column: 1;
+  grid-row: 1;
+  width: 38px;
+  height: 38px;
+  margin: 11px 0 8px 12px;
+  display: grid;
+  place-items: center;
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  font-size: 20px;
+  font-weight: 900;
+}
+
+.money-card-icon::before,
+.money-card-icon::after,
+.money-card-main::before,
+.money-card-main::after {
+  content: none;
+  display: none;
+}
+
+.money-card-main {
+  display: contents;
+  min-width: 0;
+}
+
+.money-card-header {
+  grid-column: 2;
+  grid-row: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 11px 12px 8px 8px;
+  margin: 0;
+}
+
+.money-card-title,
+.money-card-note {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.money-card-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 14px;
+  line-height: 1.3;
+  font-weight: 900;
+}
+
+.money-card-status {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.15;
+  font-style: normal;
+  font-weight: 900;
+}
+
+.money-card-amount {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  padding: 9px 12px 0;
+  margin: 0;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1.08;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.money-card-note {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: block;
+  padding: 3px 12px 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  line-height: 1.3;
+  font-style: normal;
+}
+
+.money-card-action {
+  grid-column: 1 / -1;
+  justify-self: start;
+  margin: 7px 12px 12px;
+  padding: 4px 9px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 900;
+}
+
+.money-card-actions {
+  grid-column: 1 / -1;
+  grid-row: 4;
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 12px 12px;
+  justify-self: stretch;
+}
+
+.money-card-actions button {
+  flex: 0 0 auto;
+  min-width: 48px;
+  min-height: 30px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 900;
+  cursor: pointer;
+  transition: transform 0.14s ease, opacity 0.14s ease, background 0.14s ease;
+}
+
+.money-card.red-packet .money-card-actions button:not(.secondary) {
+  color: #b92b2a;
+}
+
+.money-card.transfer .money-card-actions button:not(.secondary) {
+  color: #08715e;
+}
+
+.money-card-actions button:hover:not(:disabled) {
+  transform: translateY(-1px);
+}
+
+.money-card-actions button.secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(31, 38, 34, 0.18);
+  color: #fff;
+}
+
+.money-card-actions button:disabled,
+.message-special-wrapper.received .money-card-actions button {
+  cursor: default;
+  opacity: 0.62;
+}
+
+.message-special-wrapper.received .money-card-action,
+.message-special-wrapper.received .money-card-status {
+  opacity: 0.78;
+}
+
+.message-bubble {
+  border-radius: 14px;
+  box-shadow: 0 5px 14px rgba(29, 37, 33, 0.05);
+}
+
+.message-row.character .message-bubble {
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  box-shadow: 0 5px 16px rgba(29, 37, 33, 0.055);
+}
+
+.message-row.user .message-bubble {
+  border-radius: 14px;
+  background: linear-gradient(135deg, #5b9fe6, #65bfa4);
+  box-shadow: 0 6px 16px rgba(62, 142, 132, 0.18);
+}
+
+.wechat-card,
+.form-section,
+.recent-chat-item,
+.world-book-card,
+.thought-card,
+.body-state-summary,
+.memory-panel-card {
+  border-radius: 16px;
+  box-shadow: 0 6px 18px rgba(29, 37, 33, 0.055);
+}
+
+.action-menu,
+.chat-tool-panel,
+.message-action-panel {
+  border-radius: 16px;
+  background: rgba(255, 252, 253, 0.96);
+  box-shadow: 0 14px 34px rgba(29, 37, 33, 0.12);
+  border: 1px solid rgba(255, 255, 255, 0.72);
+}
+
+[data-theme="dark"] .money-card.red-packet {
+  background: linear-gradient(145deg, #f36b35 0%, #bd302b 52%, #8f1f29 100%);
+  box-shadow: 0 10px 22px rgba(80, 18, 18, 0.34);
+}
+
+[data-theme="dark"] .money-card.transfer {
+  background: linear-gradient(145deg, #50cdb4 0%, #249a80 52%, #17644f 100%);
+  box-shadow: 0 10px 22px rgba(8, 54, 44, 0.32);
+}
+
+[data-theme="dark"] .money-card-actions button:not(.secondary) {
+  background: rgba(255, 255, 255, 0.92);
+}
+
+[data-theme="dark"] .money-card-actions button.secondary {
+  background: rgba(0, 0, 0, 0.2);
+  border-color: rgba(255, 255, 255, 0.24);
+  color: rgba(255, 255, 255, 0.94);
+}
+
+[data-theme="dark"] .message-row.character .message-bubble {
+  background: #2a2e2c;
+  color: #e8ece9;
+  box-shadow: 0 5px 16px rgba(0, 0, 0, 0.18);
+}
+
+[data-theme="dark"] .action-menu,
+[data-theme="dark"] .chat-tool-panel,
+[data-theme="dark"] .message-action-panel {
+  background: rgba(28, 32, 30, 0.96);
+  border-color: rgba(255, 255, 255, 0.08);
+  box-shadow: 0 14px 32px rgba(0, 0, 0, 0.32);
+}
+
+/* money-card specificity lock: keep older red-packet/transfer rules compact */
+.money-card.red-packet,
+.money-card.transfer {
+  display: grid;
+  grid-template-columns: 50px minmax(0, 1fr);
+  grid-template-rows: auto auto auto auto;
+  gap: 0;
+  align-items: start;
+  padding: 0;
+  min-height: unset;
+  border-radius: 16px;
+}
+
+.money-card.red-packet .money-card-icon,
+.money-card.transfer .money-card-icon {
+  grid-column: 1;
+  grid-row: 1;
+  width: 38px;
+  height: 38px;
+  margin: 11px 0 8px 12px;
+  padding: 0;
+  border-radius: 13px;
+  display: grid;
+  place-items: center;
+  background: rgba(255, 255, 255, 0.18);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.24);
+  font-size: 20px;
+}
+
+.money-card.red-packet .money-card-icon::before,
+.money-card.red-packet .money-card-icon::after,
+.money-card.transfer .money-card-icon::before,
+.money-card.transfer .money-card-icon::after {
+  content: none;
+  display: none;
+}
+
+.money-card.red-packet .money-card-main,
+.money-card.transfer .money-card-main {
+  display: contents;
+  padding: 0;
+  background: transparent;
+}
+
+.money-card.red-packet .money-card-main::before,
+.money-card.red-packet .money-card-main::after,
+.money-card.transfer .money-card-main::before,
+.money-card.transfer .money-card-main::after {
+  content: none;
+  display: none;
+}
+
+.money-card.red-packet .money-card-header,
+.money-card.transfer .money-card-header {
+  grid-column: 2;
+  grid-row: 1;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  margin: 0;
+  padding: 11px 12px 8px 8px;
+}
+
+.money-card.red-packet .money-card-title,
+.money-card.transfer .money-card-title {
+  min-width: 0;
+  flex: 1 1 auto;
+  color: rgba(255, 255, 255, 0.96);
+  font-size: 14px;
+  line-height: 1.3;
+  font-weight: 900;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.money-card.red-packet .money-card-status,
+.money-card.transfer .money-card-status {
+  flex: 0 0 auto;
+  padding: 3px 7px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+  font-size: 10px;
+  line-height: 1.15;
+  font-weight: 900;
+}
+
+.money-card.red-packet .money-card-amount,
+.money-card.transfer .money-card-amount {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  padding: 9px 12px 0;
+  margin: 0;
+  color: #fff;
+  font-size: 20px;
+  line-height: 1.08;
+  font-weight: 900;
+  letter-spacing: 0;
+}
+
+.money-card.red-packet .money-card-note,
+.money-card.transfer .money-card-note {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  display: block;
+  padding: 3px 12px 0;
+  margin: 0;
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 12px;
+  line-height: 1.3;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.money-card.red-packet .money-card-actions,
+.money-card.transfer .money-card-actions {
+  grid-column: 1 / -1;
+  grid-row: 4;
+  display: flex;
+  gap: 6px;
+  margin: 0;
+  padding: 7px 12px 12px;
+  justify-self: stretch;
+}
+
+.money-card.red-packet .money-card-actions button,
+.money-card.transfer .money-card-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-width: 48px;
+  min-height: 30px;
+  padding: 5px 11px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.96);
+  font-size: 12px;
+  line-height: 1.2;
+  font-weight: 900;
+}
+
+.money-card.red-packet .money-card-actions button:not(.secondary) {
+  background: rgba(255, 255, 255, 0.96);
+  color: #b92b2a;
+}
+
+.money-card.transfer .money-card-actions button:not(.secondary) {
+  background: rgba(255, 255, 255, 0.96);
+  color: #08715e;
+}
+
+.money-card.red-packet .money-card-actions button.secondary,
+.money-card.transfer .money-card-actions button.secondary {
+  display: inline-flex;
+  border: 1px solid rgba(255, 255, 255, 0.28);
+  background: rgba(31, 38, 34, 0.18);
+  color: #fff;
+}
