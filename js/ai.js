@@ -58,13 +58,26 @@
 
   function buildReplyFallbackProfile(character) {
     var source = character || {};
+    var voiceProfile = detectPersonaVoiceProfile(source);
     return {
       id: source.id ? String(source.id) : "",
       name: source.name ? String(source.name) : "",
       persona: buildMergedCharacterPersona(source),
       currentMood: source.currentMood || source.chatSettings && source.chatSettings.currentMood || "",
       chatSettings: source.chatSettings || {},
-      chatSettingsText: JSON.stringify(source.chatSettings || {})
+      chatSettingsText: JSON.stringify(source.chatSettings || {}),
+      voiceProfile: voiceProfile,
+      voiceTags: voiceProfile.tags,
+      scoredTags: voiceProfile.scoredTags,
+      evidenceText: voiceProfile.evidenceText,
+      personaEvidence: extractPersonaEvidence(source),
+      voiceFingerprintText: buildPersonaVoiceFingerprint(source, null, "fallback"),
+      previousReplyText: source.previousReplyText || "",
+      rejectedReplyText: source.rejectedReplyText || "",
+      latestUserInput: source.latestUserInput || "",
+      recentHeartVoiceText: source.recentHeartVoiceText || source.thoughtsHint || "",
+      thoughtsHint: source.thoughtsHint || source.recentHeartVoiceText || "",
+      worldBookContext: source.worldBookContext || ""
     };
   }
 
@@ -74,6 +87,7 @@
     var source = contextOptions || {};
     var userContext = buildUserContext(chatSettings);
     var memoryText = chatSettings.memoryEnabled === false ? "" : formatMemoryList(memories || getMemoryForCharacter(profile.id));
+    var chatMemoryText = source.chatMemoryText || formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, source.chatMemories));
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, source);
     var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
     var contextText = buildWorldBookDecisionContext({
@@ -89,6 +103,7 @@
         userContext.persona || "暂无"
       ].join("\n"),
       relationshipStatus: chatSettings.userRelationshipName || profile.relationship || chatSettings.remarkName || userContext.relationshipName || "",
+      chatMemoryText: chatMemoryText,
       longTermMemoryText: memoryText,
       previousReplyText: source.previousReplyText || ""
     });
@@ -103,14 +118,22 @@
       buildSystemBase("private"),
       buildCharacterDossier(profile, userContext),
       buildPersonaExecutionAnchors(profile, userContext, "private"),
+      buildPersonaVoiceFingerprint(profile, userContext, "private", worldBookContext),
+      buildVoiceCalibration(profile, userContext, "private", {
+        latestUserInput: source.userInput || "",
+        previousReplyText: source.previousReplyText || "",
+        recentHeartVoiceText: recentHeartVoiceText,
+        worldBookContext: worldBookContext
+      }),
       buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
       buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
       buildRelationshipDriveRules("private"),
       buildRelationshipProgressionRules("private"),
-      buildCharacterDecisionCore("private"),
+      buildCharacterDecisionCore("private", worldBookContext),
       recentHeartVoiceText,
       buildMemoryStream({
         userContext: userContext,
+        chatMemoryText: chatMemoryText || "暂无",
         longTermMemoryText: memoryText,
         recentTimelineText: source.recentHistory || "",
         recentHeartVoiceText: recentHeartVoiceText
@@ -240,7 +263,11 @@
       "3. 情绪外显锚点：生气、关心、不耐烦、心软、嘴硬时各自怎么说必须不同；不能都写成温柔解释，也不能只把情绪塞进 thoughts。",
       "4. 关系动作锚点：遇到用户示弱、顶嘴、沉默、撒娇、拒绝或转移话题时，本轮至少选择一个动作方向：靠近、压制、试探、放任、冷处理、追问、绕开或清算。",
       "5. 禁止偏移锚点：冷淡角色不能突然长篇心理咨询；强势角色不能突然卑微求许可；嘴硬角色不能直接坦白成说明文；偏执/占有欲角色不能变成理性客服；年长/上位角色不能无故撒娇失位。",
-      "6. 口头细节锚点：人设里的口头禅、语气词、称呼习惯、动作习惯、身份姿态必须影响措辞或动作，但不要每轮机械重复同一句口头禅。"
+      "6. 口头细节锚点：人设里的口头禅、语气词、称呼习惯、动作习惯、身份姿态必须影响措辞或动作，但不要每轮机械重复同一句口头禅。",
+      "本轮失败条件：1. messages/events 没体现称呼、句式、情绪外显、关系动作中的至少 3 类，失败。",
+      "2. 回复换成另一个角色也成立，失败。",
+      "3. 角色人设写冷淡/强势/嘴硬/黏人/偏执/年长/敌对等，但 messages 仍是通用温柔陪聊，失败。",
+      "4. thoughts 很贴人设，但可见回复没有痕迹，失败。"
     ].join("\n");
   }
 
@@ -262,6 +289,356 @@
     ].join("\n");
   }
 
+  function getPersonaVoiceRules() {
+    return [
+      { tag: "cold", keywords: ["冷淡", "疏离", "淡漠", "寡言", "克制", "高冷", "冷感", "少话", "冷处理", "不近人情"], english: ["cold", "indifferent"] },
+      { tag: "strong", keywords: ["强势", "上位", "命令", "管教", "控制", "掌控", "支配", "压制", "严厉", "不许", "必须", "规训"], english: ["strong", "dominant"] },
+      { tag: "tsundere", keywords: ["嘴硬", "傲娇", "别扭", "不坦率", "口是心非", "不承认", "毒舌"], english: ["tsundere"] },
+      { tag: "clingy", keywords: ["黏人", "粘人", "依赖", "撒娇", "缺安全感", "缺乏安全感", "离不开", "缠人", "想贴", "贴近"], english: ["clingy"] },
+      { tag: "gentle", keywords: ["温柔", "耐心", "照顾", "包容", "体贴", "关怀", "细心", "护短"], english: ["gentle"] },
+      { tag: "obsessive", keywords: ["偏执", "占有欲", "占有", "疯批", "病态在意", "病态", "执念", "独占", "盯紧", "只能"], english: ["obsessive"] },
+      { tag: "playful", keywords: ["轻佻", "爱逗", "调侃", "玩世不恭", "逗弄", "戏谑", "坏笑", "嘴欠"], english: ["playful"] },
+      { tag: "formal", keywords: ["年长", "老师", "上司", "监护", "长辈", "前辈", "师长", "家长", "礼貌", "敬语", "身份感"], english: ["formal"] },
+      { tag: "hostile", keywords: ["敌对", "防备", "试探", "讽刺", "不信任", "戒备", "挑衅", "怀疑", "冷嘲", "针锋相对"], english: ["hostile"] },
+      { tag: "shy", keywords: ["害羞", "内向", "怯", "紧张", "羞怯", "胆怯", "结巴", "不敢", "局促"], english: ["shy"] }
+    ];
+  }
+
+  function addVoiceScore(scoreMap, tag, score, evidence) {
+    if (!scoreMap[tag]) {
+      scoreMap[tag] = { tag: tag, score: 0, evidence: [] };
+    }
+    scoreMap[tag].score += score;
+    (Array.isArray(evidence) ? evidence : [evidence]).forEach(function (item) {
+      var value = String(item || "").trim();
+      if (value && scoreMap[tag].evidence.indexOf(value) === -1) {
+        scoreMap[tag].evidence.push(value);
+      }
+    });
+  }
+
+  function detectPersonaVoiceProfile(character, extraText) {
+    var source = character || {};
+    var chatSettings = source.chatSettings || {};
+    var scoreMap = {};
+    var fields = [
+      { text: source.personality, weight: 5 },
+      { text: source.speakingStyle, weight: 4 },
+      { text: source.persona, weight: 3.5 },
+      { text: source.currentMood, weight: 3 },
+      { text: source.relationship, weight: 2.5 },
+      { text: chatSettings.userRelationshipName, weight: 2.5 },
+      { text: chatSettings.remarkName, weight: 2.2 },
+      { text: source.identity, weight: 2 },
+      { text: source.background, weight: 1.6 },
+      { text: source.lifeState || source.workState || source.currentState, weight: 1.6 },
+      { text: source.taboo, weight: 1.5 },
+      { text: chatSettings.personality, weight: 1.5 },
+      { text: chatSettings.speakingStyle, weight: 1.4 },
+      { text: chatSettings.currentMood, weight: 1.3 },
+      { text: chatSettings.relationship, weight: 1.2 },
+      { text: chatSettings.identity || chatSettings.background, weight: 1 },
+      { text: chatSettings.lifeState || chatSettings.workState || chatSettings.currentState || chatSettings.taboo, weight: 0.9 },
+      { text: source.chatSettingsText, weight: 0.6 },
+      { text: extraText, weight: 0.5 }
+    ];
+
+    getPersonaVoiceRules().forEach(function (rule) {
+      fields.forEach(function (field) {
+        var text = String(field.text || "");
+        var matched = [];
+        var englishMatched = [];
+
+        if (!text) {
+          return;
+        }
+
+        rule.keywords.forEach(function (keyword) {
+          if (text.indexOf(keyword) !== -1) {
+            matched.push(keyword);
+          }
+        });
+
+        if (matched.length) {
+          addVoiceScore(scoreMap, rule.tag, field.weight + Math.min(1.5, (matched.length - 1) * 0.5), matched);
+          return;
+        }
+
+        rule.english.forEach(function (alias) {
+          var pattern = new RegExp("(^|[^a-zA-Z])" + alias + "([^a-zA-Z]|$)", "i");
+          if (pattern.test(text)) {
+            englishMatched.push(alias);
+          }
+        });
+
+        if (englishMatched.length) {
+          addVoiceScore(scoreMap, rule.tag, Math.min(0.6, field.weight * 0.2), englishMatched);
+        }
+      });
+    });
+
+    var scoredTags = Object.keys(scoreMap).map(function (tag) {
+      var item = scoreMap[tag];
+      return {
+        tag: item.tag,
+        score: Math.round(item.score * 10) / 10,
+        evidence: item.evidence.slice(0, 5)
+      };
+    }).filter(function (item) {
+      return item.score > 0;
+    }).sort(function (a, b) {
+      return b.score - a.score;
+    });
+
+    return {
+      tags: scoredTags.map(function (item) { return item.tag; }),
+      scoredTags: scoredTags,
+      primaryTag: scoredTags[0] && scoredTags[0].tag || "",
+      secondaryTags: scoredTags.slice(1, 4).map(function (item) { return item.tag; }),
+      evidenceText: uniqueList(scoredTags.reduce(function (all, item) {
+        return all.concat(item.evidence || []);
+      }, [])).slice(0, 8).join("、")
+    };
+  }
+
+  function detectPersonaVoiceTags(character, extraText) {
+    return detectPersonaVoiceProfile(character, extraText).tags;
+  }
+
+  function hasPersonaVoiceTag(profile, tag) {
+    var source = profile || {};
+    var voiceProfile = source.voiceProfile || {};
+    return Array.isArray(voiceProfile.tags) && voiceProfile.tags.indexOf(tag) !== -1
+      || Array.isArray(source.voiceTags) && source.voiceTags.indexOf(tag) !== -1;
+  }
+
+  function uniqueList(items) {
+    var seen = {};
+    return (Array.isArray(items) ? items : []).filter(function (item) {
+      var value = String(item || "").trim();
+      if (!value || seen[value]) {
+        return false;
+      }
+      seen[value] = true;
+      return true;
+    });
+  }
+
+  function extractPersonaEvidence(character) {
+    var text = buildMergedCharacterPersona(character || {});
+    var keywordPattern = new RegExp(getPersonaVoiceRules().reduce(function (all, rule) {
+      return all.concat(rule.keywords);
+    }, []).join("|"));
+    var parts = String(text || "").split(/[\n。；;.!?！？]+/).map(function (part, index) {
+      return {
+        text: limitText(part.trim(), 80),
+        index: index,
+        priority: keywordPattern.test(part) ? 0 : 1
+      };
+    }).filter(function (item) {
+      return item.text && item.text.length >= 4;
+    }).sort(function (a, b) {
+      return a.priority - b.priority || a.index - b.index;
+    }).slice(0, 4).map(function (item) {
+      return item.text;
+    });
+
+    if (!parts.length && text) {
+      parts.push(limitText(text, 80));
+    }
+
+    return parts;
+  }
+
+  function pickVoiceText(tags, mapping, fallback) {
+    var values = [];
+
+    (Array.isArray(tags) ? tags : []).forEach(function (tag) {
+      if (mapping[tag]) {
+        values.push(mapping[tag]);
+      }
+    });
+
+    return uniqueList(values).slice(0, 3).join("；") || fallback;
+  }
+
+  function buildVoiceFingerprintFromTags(tags, character, userContext, worldBookContext, voiceProfile) {
+    var profile = character || {};
+    voiceProfile = voiceProfile || detectPersonaVoiceProfile(profile, worldBookContext || "");
+    var orderedTags = Array.isArray(tags) && tags.length ? tags : voiceProfile.tags;
+    var personaEvidence = extractPersonaEvidence(profile);
+    var personaText = [
+      buildMergedCharacterPersona(profile),
+      profile.currentMood || profile.chatSettings && profile.chatSettings.currentMood || "",
+      JSON.stringify(profile.chatSettings || {})
+    ].join("\n");
+    var postureMap = {
+      cold: "保持距离、少给情绪劳动",
+      strong: "稳住局面、压住节奏、不轻易低头",
+      tsundere: "端着面子、绕着在意、不直说",
+      clingy: "靠近、追问、怕被晾下",
+      gentle: "放软但具体照顾，不客服化",
+      obsessive: "盯住细节、有占有感、不给轻易滑走",
+      playful: "轻快逗弄，用玩笑试探",
+      formal: "保留身份边界、稳住分寸",
+      hostile: "防备、试探、话里带刺",
+      shy: "犹豫、短促、回避直白"
+    };
+    var addressMap = {
+      cold: "少称呼或疏离称呼",
+      strong: "带身份感，关系近也不软塌",
+      tsundere: "亲近称呼也别扭，不轻易软下来",
+      clingy: "可以更亲近，带一点委屈或黏着",
+      gentle: "柔和但有私人关系痕迹",
+      obsessive: "带锁定感，像盯住对方",
+      playful: "轻一点，带逗弄但不油腻",
+      formal: "符合年长、老师、上司或监护感",
+      hostile: "带距离、质疑或挑衅感",
+      shy: "短、轻、犹豫，不突然成熟客服"
+    };
+    var actionMap = {
+      cold: "先冷处理，再决定要不要接",
+      strong: "先判断，再安排",
+      tsundere: "关心时绕着说，必要时改口",
+      clingy: "追问、靠近、要对方多给一点反应",
+      gentle: "具体照顾，少说空泛安慰",
+      obsessive: "盯细节、追旧账、不让话题滑走",
+      playful: "先逗一下，再把重点勾回来",
+      formal: "先稳住，再按身份分寸处理",
+      hostile: "先试探，再决定信不信",
+      shy: "小心靠近，回避太直白的表达"
+    };
+    var emotionMap = {
+      cold: "用短句、停顿、少解释露出情绪",
+      strong: "通过命令、判断、反问露出来",
+      tsundere: "不直接承认在意，用嘴硬、停顿、改口露出来",
+      clingy: "通过追问、黏着和一点委屈露出来",
+      gentle: "通过具体动作和细节照顾露出来",
+      obsessive: "通过盯住细节和占有式追问露出来",
+      playful: "通过调侃、轻快转锋露出来",
+      formal: "通过克制、分寸和身份姿态露出来",
+      hostile: "通过讽刺、防备、质问露出来",
+      shy: "通过犹豫、省略、回避眼神露出来"
+    };
+    var forbidMap = {
+      cold: "不能突然长篇心理咨询",
+      strong: "不能突然卑微求许可",
+      tsundere: "不能直接坦白成说明文",
+      clingy: "不能变成普通朋友式客气",
+      gentle: "不能变成客服安慰模板",
+      obsessive: "不能变成理性客服或油腻独白",
+      playful: "不能只剩油嘴滑舌",
+      formal: "不能突然幼稚撒娇或失去身份感",
+      hostile: "不能无故温柔和解",
+      shy: "不能突然成熟流畅地长篇开导"
+    };
+    var sentenceLength = /短句|少话|寡言|冷淡|简短|短促|害羞|紧张|嘴硬/.test(personaText)
+      || orderedTags.indexOf("cold") !== -1
+      || orderedTags.indexOf("shy") !== -1
+      ? "短到中，留白多，不把话说满"
+      : (/长句|细腻|话多|絮叨|解释|温柔|耐心|礼貌/.test(personaText)
+        ? "中句为主，允许细节，但少说明文"
+        : "短到中，按情绪起伏变化");
+
+    if (orderedTags.indexOf("strong") !== -1 && orderedTags.indexOf("formal") !== -1) {
+      sentenceLength = "短到中，少解释，多判断";
+    }
+    if (orderedTags.indexOf("clingy") !== -1 || orderedTags.indexOf("playful") !== -1) {
+      sentenceLength = "短中交替，有追问、停顿或转锋";
+    }
+
+    return [
+      "",
+      "B++. 角色语气指纹 personaVoiceFingerprint",
+      orderedTags.length ? "- 主要标签：" + orderedTags.join(" / ") : "- 主要标签：无明确标签，严格按原始人设和最近上下文判断，不要泛化成温柔陪聊。",
+      "- 主导姿态：" + pickVoiceText(orderedTags, postureMap, "按原始人设和最近上下文确定，不套温柔陪聊模板"),
+      "- 句子长度：" + sentenceLength,
+      "- 称呼方式：" + pickVoiceText(orderedTags, addressMap, "按关系备注、身份差和当前情绪自然称呼，不要所有角色都只叫“你”"),
+      "- 关系动作：" + pickVoiceText(orderedTags, actionMap, "先按关系判断，再选择靠近、拉远、压住、试探或转移"),
+      "- 情绪外显：" + pickVoiceText(orderedTags, emotionMap, "不要把情绪只放进 thoughts，要让称呼、停顿、反问或动作露出来"),
+      "- 禁止偏移：" + pickVoiceText(orderedTags, forbidMap, "不能变成长篇心理咨询，不能变客服，不能把关系写平"),
+      "- 原文人设证据：" + (personaEvidence.length ? personaEvidence.join(" / ") : "暂无明确短句，严格按完整人设文本判断"),
+      "- 标签证据：" + (voiceProfile.evidenceText || "暂无，标签只作辅助"),
+      "- 优先级：原文人设 > 最近聊天情绪 > 最近心声 > 当前关系 > 标签。标签不是角色本人，只帮你抓说话方向。",
+      "- 本轮必须体现：至少 2 个标签特征 + 1 个原始人设细节。若标签和原文冲突，以原文人设证据为准。",
+      String(worldBookContext || "").trim()
+        ? "- 世界书影响：本轮命中世界书时，先服从命中规则，再把语气指纹压进称呼、边界、动作和沉默里。"
+        : "- 世界书影响：未命中时不要编世界规则，只按人设、关系、记忆和最近心声推进。"
+    ].join("\n");
+  }
+
+  function buildPersonaVoiceFingerprint(character, userContext, mode, worldBookContext) {
+    var voiceProfile = detectPersonaVoiceProfile(character || {}, worldBookContext || "");
+    return buildVoiceFingerprintFromTags(voiceProfile.tags, character, userContext, worldBookContext, voiceProfile);
+  }
+
+  function buildGroupPersonaVoiceFingerprints(characters, userContext, mode, worldBookContext) {
+    var list = Array.isArray(characters) ? characters : [];
+
+    if (!list.length) {
+      return "";
+    }
+
+    return [
+      "",
+      "B++. 群成员语气指纹 personaVoiceFingerprint",
+      "每个角色只能用自己的语气指纹；不能让所有群成员共用一个温柔口吻。如果去掉名字后分不出是谁，必须重写。",
+      list.map(function (character) {
+        return "角色 " + valueOrFallback(character && character.name) + " / " + valueOrFallback(character && character.id) + "：\n"
+          + buildPersonaVoiceFingerprint(character, userContext, mode, worldBookContext);
+      }).join("\n")
+    ].join("\n");
+  }
+
+  function buildVoiceCalibration(character, userContext, mode, options) {
+    var profile = character || {};
+    var source = options || {};
+    var voiceProfile = detectPersonaVoiceProfile(profile, source.worldBookContext || "");
+    var personaEvidence = extractPersonaEvidence(profile);
+    var latestUserInput = String(source.latestUserInput || "").trim();
+    var previousReplyText = String(source.previousReplyText || "").trim();
+    var recentHeartVoiceText = String(source.recentHeartVoiceText || "").trim();
+
+    return [
+      "",
+      "B+++. 角色声音校准 voiceCalibration",
+      "内部校准，不要输出：",
+      "校准角色：" + valueOrFallback(profile.name) + (profile.id ? " / " + profile.id : ""),
+      "本轮用户输入：" + (latestUserInput ? limitText(latestUserInput, 160) : "暂无"),
+      "上一轮角色余波：" + (previousReplyText ? limitText(previousReplyText, 180) : "暂无"),
+      "最近心声惯性：" + (recentHeartVoiceText ? limitText(recentHeartVoiceText, 220) : "暂无"),
+      "语气标签：" + (voiceProfile.tags.length ? voiceProfile.tags.join(" / ") : "无明确标签，按原文人设"),
+      "原文人设证据：" + (personaEvidence.length ? personaEvidence.join(" / ") : "暂无明确短句"),
+      "请先按这个角色的人设，想出面对“本轮用户输入”的 3 种可能反应：",
+      "1. 本能反应：脱口而出的第一句，会不会冷、急、酸、嘴硬、黏、压人？",
+      "2. 关系反应：这个角色想拉近、拉远、压住、试探、转移还是清算？",
+      "3. 隐藏反应：真实情绪藏在哪里，会通过称呼、停顿、反问、动作露出什么？",
+      "最终回复不必照抄这 3 句，但必须沿用其中最符合当前上下文的一种声音。",
+      "规则：这 3 种反应不能输出到 JSON；它们只是帮助模型锁定角色声音。",
+      "如果本轮用户输入很短，也要从关系惯性和最近心声里判断；如果上一轮还在生气、吃醋、冷处理、克制，本轮不能突然普通朋友。",
+      "如果角色是强势，不要校准成请求许可；如果角色是嘴硬，不要校准成直接坦白；如果角色是冷淡，不要校准成长篇安慰；如果角色是黏人，不要校准成普通朋友。"
+    ].join("\n");
+  }
+
+  function buildGroupVoiceCalibrations(characters, userContext, mode, options) {
+    var list = Array.isArray(characters) ? characters : [];
+    var source = options || {};
+
+    if (!list.length) {
+      return "";
+    }
+
+    return [
+      "",
+      "B+++. 群成员声音校准 voiceCalibration",
+      "每个角色只按自己的声音校准；不要把一个人的校准结果借给另一个人。",
+      "同一个用户输入，在不同群成员那里会触发不同反应。不要让所有角色用同一套校准结果。",
+      list.map(function (character) {
+        return buildVoiceCalibration(character, userContext, mode, source);
+      }).join("\n")
+    ].join("\n");
+  }
+
   function buildGroupControlBoundaryRules(characters, mode) {
     var ids = (Array.isArray(characters) ? characters : []).map(function (character) {
       return [character && character.name, character && character.id].filter(Boolean).join("/");
@@ -273,7 +650,9 @@
       "可控制角色：" + (ids || "本轮传入的群成员"),
       "禁止控制用户：不要替用户发言、行动、收钱、退钱、道歉、沉默表态或解释动机；只能让群成员对用户已经发出的内容反应。",
       "不要平均轮流。允许插话、打断、沉默、帮腔、拆台、压场、转移话题；强势角色可以压场，冷淡角色可以少说，黏人角色可以追着问，嘴硬角色可以绕着说。",
-      "每轮至少 2 个发言角色的语气要明显不同；如果去掉名字后分不清是谁说的，必须重写。"
+      "每轮至少 2 个发言角色的句式和态度要明显不同；如果去掉名字后分不清是谁说的，必须重写。",
+      "冷淡角色可以只短短插一句，不必为了凑数变话痨；强势角色可以压场；黏人角色可以追问或靠近；嘴硬角色可以绕着说；敌对角色可以讽刺或试探。",
+      "如果所有角色都在“理解—安慰—建议”，失败；如果所有角色像同一个人换名字，失败。"
     ].join("\n");
   }
 
@@ -281,6 +660,7 @@
     var thoughts;
     var normalizedType = targetType === "group" ? "group" : (targetType === "offline" ? "offline" : "private");
     var normalizedTargetId = String(targetId || "");
+    var normalizedCharacterId = String(characterId || "");
 
     if (!characterId || !window.AppStorage || !window.AppStorage.getRecentThoughts) {
       return "";
@@ -288,17 +668,44 @@
 
     thoughts = (window.AppStorage.getRecentThoughts(characterId, 12) || []).filter(function (thought) {
       var thoughtType = String(thought && (thought.targetType || thought.source) || "").toLowerCase();
-      var thoughtTargetId = String(thought && (thought.targetId || thought.chatId || thought.groupId) || "");
+      var thoughtTargetId = String(thought && thought.targetId || "");
+      var thoughtChatId = String(thought && thought.chatId || "");
+      var thoughtGroupId = String(thought && thought.groupId || "");
+      var thoughtSessionId = String(thought && thought.sessionId || "");
 
       if (!normalizedTargetId) {
-        return true;
+        return !thoughtType || thoughtType === normalizedType;
       }
 
-      if (thoughtTargetId !== normalizedTargetId) {
-        return false;
+      if (normalizedType === "private") {
+        return (!thoughtType || thoughtType === "private")
+          && (
+            thoughtTargetId === normalizedCharacterId
+            || thoughtTargetId === normalizedTargetId
+            || thoughtChatId === normalizedCharacterId
+            || thoughtChatId === normalizedTargetId
+            || thoughtChatId === "private:" + normalizedCharacterId
+            || thoughtChatId === "private:" + normalizedTargetId
+          );
       }
 
-      return !thoughtType || thoughtType === normalizedType;
+      if (normalizedType === "group") {
+        return (!thoughtType || thoughtType === "group")
+          && (
+            thoughtTargetId === normalizedTargetId
+            || thoughtGroupId === normalizedTargetId
+            || thoughtChatId === normalizedTargetId
+            || thoughtChatId === "group:" + normalizedTargetId
+          );
+      }
+
+      return (!thoughtType || thoughtType === "offline")
+        && (
+          thoughtTargetId === normalizedTargetId
+          || thoughtChatId === normalizedTargetId
+          || thoughtGroupId === normalizedTargetId
+          || thoughtSessionId === normalizedTargetId
+        );
     });
 
     if (!thoughts.length && !normalizedTargetId) {
@@ -576,8 +983,9 @@
     }).join("\n");
   }
 
-  function buildCharacterDecisionCore(mode) {
+  function buildCharacterDecisionCore(mode, worldBookContext) {
     var primary = mode === "offline" ? "events" : "messages";
+    var hasWorldBook = !!String(worldBookContext || "").trim();
 
     return [
       "",
@@ -591,6 +999,7 @@
       "5. 隐藏内容：哪些真实想法只进 thoughts，不直接说出口；尤其是吃醋、占有、心软、受伤、心虚、试探或想控制。",
       "6. 外显痕迹：隐藏内容必须在 " + primary + "/events 里露一点痕迹，比如称呼变了、句子短了、停顿、反问、动作、绕开或突然压住话题。",
       "7. 世界书或关系限制：如果命中规则限制角色能不能说、能不能做、能不能靠近或透露，本轮必须先受限制，再按角色方式反应。",
+      hasWorldBook ? "本轮已有命中的世界书上下文：角色决策必须先判断规则边界，再让 personaVoiceFingerprint 通过称呼、语气、动作和沉默表现出来，不要把规则讲成说明文。" : "本轮没有命中的世界书上下文时，不要编造规则；角色决策只由人设、关系、记忆、最近心声和当前输入驱动。",
       "这些判断只能影响 " + primary + "/events/thoughts 的语气、节奏、用词、动作和取舍；不允许写成判断过程，不允许作为字段输出。"
       + "\n硬性失败条件：如果 " + primary + " 看不出本轮说话纹理，就不合格；如果 thoughts 和 " + primary + " 的语气完全断裂，就不合格；如果这一轮换成别的角色也成立，就不合格。"
     ].join("\n");
@@ -598,6 +1007,7 @@
 
   function buildOutputSelfCheckRules(mode) {
     var primary = mode === "offline" ? "events" : "messages";
+    var isGroup = mode === "group" || mode === "reenterGroup";
 
     return [
       "",
@@ -610,8 +1020,13 @@
       "5. 如果命中世界书，是否改变了角色“能不能说、能不能做、能不能靠近、能不能透露”的选择；未命中时是否没有乱编世界设定。",
       "6. 是否存在明显客服句、咨询师句、说明文句，尤其是“理解—安慰—建议—陪伴—追问”的通用链条。",
       "7. 如果有 thoughts，" + primary + "/events 是否体现了 thoughts 的真实动机；不要 thoughts 很贴人设，外面却像客服模板。",
+      "8. 至少 3 条 " + primary + "/events 必须明显体现 personaVoiceFingerprint；至少 1 条必须体现原文人设证据；至少 1 条必须体现 recentHeartVoice 或上一轮情绪惯性。",
+      "9. 优先级是否正确：原文人设 > 最近聊天情绪 > 最近心声 > 当前关系 > 标签。标签不是角色本人，不能把复杂角色压成标签模板。",
+      isGroup ? "10. 群聊自检：每个发言角色至少有 1 条体现自己的语气指纹；每轮至少 2 个角色的句式和态度明显不同；如果所有角色都在“理解—安慰—建议”，失败；如果去掉 characterName 后看不出谁是谁，失败。" : "",
       "不要用“不出现 AI 词”来冒充人设贴合；真正的人设贴合必须能从措辞、称呼、节奏、态度和关系动作看出来。"
-    ].join("\n");
+    ].filter(function (line) {
+      return line !== "";
+    }).join("\n");
   }
 
   function buildCharacterResourceWhitelist(profile, options) {
@@ -798,7 +1213,11 @@
         "一个完整动作只能算 1 条，不许拆成多个短语；角色一句完整台词只能算 1 条，不许按逗号、顿号、分号或冒号拆开。",
         "不够 10 条时，生成新的自然推进：动作、停顿、反应、角色发言、环境变化或下一步安排，而不是拆碎已有句子。",
         "action 要短而完整，一条动作卡表达一个完整动作或镜头；speech 要像当面对话，一条 speech 表达一句完整话。",
-        "不允许 10 条都问问题、都解释、都同一种句式，也不允许靠拆一句话凑数；每条都要像现场连续发生的事件。"
+        "不允许 10 条都问问题、都解释、都同一种句式，也不允许靠拆一句话凑数；每条都要像现场连续发生的事件。",
+        "不是每条都要完整表达，也不是每条都要新信息；可以有短促反应、停顿、反问、动作、改口，但每条必须体现角色语气或关系推进。",
+        "每轮至少 3 条必须明显体现 personaVoiceFingerprint 的语气标签；否则重写。",
+        "必须有起伏：1-2 条即时反应；3-5 条带出角色态度；6-8 条关系动作或情绪推进；9-10 条收束、压住、转移或留下钩子。",
+        "不要 10 条都是同一个标签的重复：strong 不能 10 条都命令，cold 不能 10 条都“嗯”，clingy 不能 10 条都追问，tsundere 不能 10 条都嘴硬。"
       ].join("\n");
     }
 
@@ -812,7 +1231,11 @@
       "不够 10 条时，生成新的自然气泡继续推进，而不是把同一句话拆成前半句/后半句。",
       "允许半句、停顿、改口、短句、沉默后的补一句；但每条都要有角色态度或推进，像真人连续发的气泡。",
       "每轮至少有情绪变化、关系推进、动作推进、信息推进中的一种，不要 10 条都解释、都安慰或都问问题。",
-      "每条要短而有推进，不要为了凑数制造废话。"
+      "每条要短而有推进，不要为了凑数制造废话。",
+      "不是每条都要完整表达，也不是每条都要新信息；可以有短促反应、停顿、反问、动作、改口，但每条必须体现角色语气或关系推进。",
+      "每轮至少 3 条必须明显体现 personaVoiceFingerprint 的语气标签；否则重写。",
+      "必须有起伏：1-2 条即时反应；3-5 条带出角色态度；6-8 条关系动作或情绪推进；9-10 条收束、压住、转移或留下钩子。",
+      "不要 10 条都是同一个标签的重复：strong 不能 10 条都命令，cold 不能 10 条都“嗯”，clingy 不能 10 条都追问，tsundere 不能 10 条都嘴硬。"
     ].join("\n");
   }
 
@@ -1004,6 +1427,7 @@
     var previousReplyText = recentHistory.slice().reverse().filter(function (message) {
       return message && message.role !== "user";
     }).map(summarizeMessageForAI)[0] || "";
+    var chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, null));
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, {});
     var contextText = buildWorldBookDecisionContext({
       modeLabel: "线上私聊",
@@ -1018,6 +1442,7 @@
         userContext.persona || "暂无"
       ].join("\n"),
       relationshipStatus: chatSettings.userRelationshipName || profile.relationship || chatSettings.remarkName || userContext.relationshipName || "",
+      chatMemoryText: chatMemoryText,
       longTermMemoryText: memoryText,
       previousReplyText: previousReplyText
     });
@@ -1040,6 +1465,7 @@
           userInput: latestUserInput,
           recentHistory: worldHistory,
           previousReplyText: previousReplyText,
+          chatMemoryText: chatMemoryText,
           selectedWorldBookIds: selectedWorldBookIds,
           worldBookContext: worldBookContext
         })
@@ -1574,11 +2000,18 @@
           buildSystemBase("private"),
           buildCharacterDossier(profile, userContext),
           buildPersonaExecutionAnchors(profile, userContext, systemMode),
+          buildPersonaVoiceFingerprint(profile, userContext, systemMode, worldBookContext),
+          buildVoiceCalibration(profile, userContext, systemMode, {
+            latestUserInput: latestUserInput,
+            previousReplyText: requestOptions.previousReplyText || requestOptions.lastAssistantText || "",
+            recentHeartVoiceText: recentHeartVoiceText,
+            worldBookContext: worldBookContext
+          }),
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
           buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
           buildRelationshipDriveRules("private"),
           buildRelationshipProgressionRules("private"),
-          buildCharacterDecisionCore(systemMode),
+          buildCharacterDecisionCore(systemMode, worldBookContext),
           recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -1673,12 +2106,19 @@
       buildSystemBase("group"),
       buildParticipantDossier(characters, sharedMemories),
       buildGroupPersonaExecutionAnchors(characters, userContext, groupMode),
+      buildGroupPersonaVoiceFingerprints(characters, userContext, groupMode, resolvedWorldBookContext),
+      buildGroupVoiceCalibrations(characters, userContext, groupMode, {
+        latestUserInput: latestUserInput,
+        previousReplyText: requestOptions.previousReplyText || requestOptions.lastAssistantText || "",
+        recentHeartVoiceText: recentHeartVoiceText,
+        worldBookContext: resolvedWorldBookContext
+      }),
       buildGroupControlBoundaryRules(characters, groupMode),
       buildMatchedWorldBooksSection(resolvedWorldBookContext, worldBookMeta),
       buildWorldRuleEnforcement(resolvedWorldBookContext, worldBookMeta),
       buildRelationshipDriveRules("group"),
       buildRelationshipProgressionRules("group"),
-      buildCharacterDecisionCore(groupMode),
+      buildCharacterDecisionCore(groupMode, resolvedWorldBookContext),
       recentHeartVoiceText,
       buildMemoryStream({
         chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -2104,12 +2544,24 @@
           buildSystemBase(mode === "group" ? "group" : "private"),
           buildParticipantDossier(participants, memories),
           participants.length === 1 ? buildPersonaExecutionAnchors(participants[0], userContext, "offline") : buildGroupPersonaExecutionAnchors(participants, userContext, "offline"),
+          participants.length === 1 ? buildPersonaVoiceFingerprint(participants[0], userContext, "offline", worldBookContext) : buildGroupPersonaVoiceFingerprints(participants, userContext, "offline", worldBookContext),
+          participants.length === 1 ? buildVoiceCalibration(participants[0], userContext, "offline", {
+            latestUserInput: context.userInput || "",
+            previousReplyText: context.previousReplyText || context.lastAssistantText || "",
+            recentHeartVoiceText: recentHeartVoiceText,
+            worldBookContext: worldBookContext
+          }) : buildGroupVoiceCalibrations(participants, userContext, "offline", {
+            latestUserInput: context.userInput || "",
+            previousReplyText: context.previousReplyText || context.lastAssistantText || "",
+            recentHeartVoiceText: recentHeartVoiceText,
+            worldBookContext: worldBookContext
+          }),
           mode === "group" ? buildGroupControlBoundaryRules(participants, "offline") : "",
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
           buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
           buildRelationshipDriveRules(mode === "group" ? "group" : "private"),
           buildRelationshipProgressionRules("offline"),
-          buildCharacterDecisionCore("offline"),
+          buildCharacterDecisionCore("offline", worldBookContext),
           recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -2299,12 +2751,24 @@
           buildSystemBase(context.mode === "group" ? "group" : "private"),
           buildParticipantDossier(participants, sharedMemories),
           participants.length === 1 ? buildPersonaExecutionAnchors(participants[0], userContext, "offline") : buildGroupPersonaExecutionAnchors(participants, userContext, "offline"),
+          participants.length === 1 ? buildPersonaVoiceFingerprint(participants[0], userContext, "offline", worldBookContext) : buildGroupPersonaVoiceFingerprints(participants, userContext, "offline", worldBookContext),
+          participants.length === 1 ? buildVoiceCalibration(participants[0], userContext, "offline", {
+            latestUserInput: context.userInput || "",
+            previousReplyText: context.previousReplyText || context.lastAssistantText || "",
+            recentHeartVoiceText: recentHeartVoiceText,
+            worldBookContext: worldBookContext
+          }) : buildGroupVoiceCalibrations(participants, userContext, "offline", {
+            latestUserInput: context.userInput || "",
+            previousReplyText: context.previousReplyText || context.lastAssistantText || "",
+            recentHeartVoiceText: recentHeartVoiceText,
+            worldBookContext: worldBookContext
+          }),
           context.mode === "group" ? buildGroupControlBoundaryRules(participants, "offline") : "",
           buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
           buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
           buildRelationshipDriveRules(context.mode === "group" ? "group" : "private"),
           buildRelationshipProgressionRules("offline"),
-          buildCharacterDecisionCore("offline"),
+          buildCharacterDecisionCore("offline", worldBookContext),
           recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -3292,10 +3756,14 @@
     var line = lines[offset];
     var guard = 0;
 
-    while (used[line] && guard < lines.length) {
+    while ((used[line] || isGenericAiTemplateText(line)) && guard < lines.length) {
       offset = (offset + 1) % lines.length;
       line = lines[offset];
       guard += 1;
+    }
+
+    if (isGenericAiTemplateText(line)) {
+      line = "这句先别翻过去。";
     }
 
     used[line] = true;
@@ -3352,7 +3820,7 @@
       ], settings);
     }
 
-    filtered = filterGenericTemplateReplies(filtered, settings);
+    filtered = replaceGenericTemplateReplies(filtered, settings);
 
     if (countReplyItemsForMinimum(filtered) < settings.min) {
       filtered = filtered.concat(createFallbackReplyItems(settings, filtered));
@@ -3361,13 +3829,51 @@
     return filtered.slice(0, settings.max);
   }
 
-  function filterGenericTemplateReplies(replies, options) {
-    return (Array.isArray(replies) ? replies : []).filter(function (reply) {
+  function replaceGenericTemplateReplies(replies, options) {
+    var settings = options || {};
+    var profiles = getFallbackProfiles(settings);
+    var used = {};
+
+    return (Array.isArray(replies) ? replies : []).map(function (reply, index) {
       if (!reply || reply.type && reply.type !== "text") {
-        return true;
+        return reply;
       }
 
-      return !isGenericAiTemplateText(reply.content);
+      if (!isGenericAiTemplateText(reply.content)) {
+        return reply;
+      }
+
+      return replaceTemplateWithPersonaLine(reply, Object.assign({}, settings, {
+        fallbackProfiles: profiles,
+        templateReplacementUsed: used
+      }), index);
+    });
+  }
+
+  function replaceTemplateWithPersonaLine(reply, settings, index) {
+    var source = reply || {};
+    var options = settings || {};
+    var profiles = getFallbackProfiles(options);
+    var profile = pickFallbackProfileForReply(profiles, source, index);
+    var used = options.templateReplacementUsed || {};
+    var line;
+    var guard = 0;
+
+    if (!source || source.type && source.type !== "text") {
+      return source;
+    }
+
+    line = buildPersonaAwareFallbackLine(profile, index, buildFallbackContextFlags(profile, options.worldBookContext || ""), getFallbackRhythmPhase(index));
+    while ((used[line] || isGenericAiTemplateText(line)) && guard < 24) {
+      guard += 1;
+      line = buildPersonaAwareFallbackLine(profile, index + guard, buildFallbackContextFlags(profile, options.worldBookContext || ""), getFallbackRhythmPhase(index + guard));
+    }
+    used[line] = true;
+
+    return Object.assign({}, source, {
+      type: "text",
+      characterId: source.characterId || profile.id || "",
+      content: line
     });
   }
 
@@ -3378,7 +3884,7 @@
       return false;
     }
 
-    return /我理解你|如果你需要|慢慢来|我会陪着你|你并不孤单|请告诉我更多|我们可以一起|作为\s*AI|根据你提供的信息|很抱歉听到|听起来你|你的感受很重要|我在这里陪你/.test(value);
+    return /我理解你|如果你需要|慢慢来|我会陪着你|你并不孤单|请告诉我更多|我们可以一起|你的感受是合理的|你的感受很合理|没关系的|辛苦了|当然可以|作为\s*AI|根据你提供的信息|很抱歉听到|听起来你|你的感受很重要|我在这里陪你|(^|[。！？!?\s])好的([。！？!?\s]|$)/.test(value);
   }
 
   function filterRepeatedReplies(replies, previousTexts, options) {
@@ -3493,7 +3999,7 @@
 
     while (items.length < missing && items.length + (Array.isArray(existingReplies) ? existingReplies.length : 0) < settings.max) {
       var profile = profiles[index % profiles.length] || {};
-      var line = pickFallbackLine(profile, index, used, buildFallbackContextFlags(profile, settings.worldBookContext || ""));
+      var line = pickFallbackLine(profile, index, used, buildFallbackContextFlags(profile, settings.worldBookContext || ""), getFallbackRhythmPhase(index));
       var reply = {
         type: "text",
         content: line
@@ -3510,6 +4016,27 @@
     return items;
   }
 
+  function pickFallbackProfileForReply(profiles, reply, index) {
+    var list = Array.isArray(profiles) ? profiles : [];
+    var characterId = reply && reply.characterId ? String(reply.characterId) : "";
+    var matched;
+
+    if (!list.length) {
+      return {};
+    }
+
+    if (characterId) {
+      matched = list.filter(function (profile) {
+        return profile && String(profile.id || "") === characterId;
+      })[0];
+      if (matched) {
+        return matched;
+      }
+    }
+
+    return list[index % list.length] || {};
+  }
+
   function getFallbackProfiles(settings) {
     var profiles = Array.isArray(settings.fallbackProfiles) ? settings.fallbackProfiles.filter(Boolean) : [];
     if (!profiles.length && settings.fallbackProfile) {
@@ -3519,41 +4046,219 @@
       profiles = [{ name: "", persona: "", currentMood: "" }];
     }
     return profiles.map(function (profile) {
-      return Object.assign({}, profile, {
-        previousReplyText: settings.previousReplyText || settings.lastAssistantText || "",
-        rejectedReplyText: settings.rejectedReplyText || settings.oldReplyText || "",
+      var enriched = Object.assign({}, profile, {
+        latestUserInput: settings.latestUserInput || profile.latestUserInput || "",
+        previousReplyText: settings.previousReplyText || settings.lastAssistantText || profile.previousReplyText || "",
+        rejectedReplyText: settings.rejectedReplyText || settings.oldReplyText || profile.rejectedReplyText || "",
         worldBookContext: settings.worldBookContext || profile.worldBookContext || "",
-        thoughtsHint: settings.thoughtsHint || profile.thoughtsHint || "",
-        latestUserInput: settings.latestUserInput || profile.latestUserInput || ""
+        recentHeartVoiceText: settings.recentHeartVoiceText || profile.recentHeartVoiceText || "",
+        thoughtsHint: settings.thoughtsHint || settings.recentHeartVoiceText || profile.thoughtsHint || profile.recentHeartVoiceText || ""
       });
+      enriched.voiceProfile = profile.voiceProfile || detectPersonaVoiceProfile(enriched, enriched.latestUserInput || "");
+      enriched.voiceTags = Array.isArray(enriched.voiceTags) && enriched.voiceTags.length
+        ? enriched.voiceTags
+        : enriched.voiceProfile.tags;
+      enriched.scoredTags = Array.isArray(enriched.scoredTags) && enriched.scoredTags.length
+        ? enriched.scoredTags
+        : enriched.voiceProfile.scoredTags;
+      enriched.evidenceText = enriched.evidenceText || enriched.voiceProfile.evidenceText || "";
+      enriched.personaEvidence = Array.isArray(enriched.personaEvidence) && enriched.personaEvidence.length
+        ? enriched.personaEvidence
+        : extractPersonaEvidence(enriched);
+      enriched.voiceFingerprintText = enriched.voiceFingerprintText || buildPersonaVoiceFingerprint(enriched, null, "fallback", enriched.worldBookContext);
+      return enriched;
     });
   }
 
-  function pickFallbackLine(profile, index, used, contextFlags) {
+  function getFallbackRhythmPhase(index) {
+    var position = index % 10;
+    if (position < 2) {
+      return "instant";
+    }
+    if (position < 5) {
+      return "attitude";
+    }
+    if (position < 8) {
+      return "progression";
+    }
+    return "hook";
+  }
+
+  function pickFallbackLine(profile, index, used, contextFlags, phase) {
     var flags = contextFlags || buildFallbackContextFlags(profile, "");
-    var bucket = getFallbackStyleBucket(profile, flags);
-    var lines = getFallbackLines(bucket, profile, flags);
-    var offset = index % lines.length;
-    var line = lines[offset];
+    var line = buildPersonaAwareFallbackLine(profile, index, flags, phase || getFallbackRhythmPhase(index));
     var guard = 0;
 
-    while (used[line] && guard < lines.length) {
-      offset = (offset + 1) % lines.length;
-      line = lines[offset];
+    while ((used[line] || isGenericAiTemplateText(line)) && guard < 24) {
       guard += 1;
+      line = buildPersonaAwareFallbackLine(profile, index + guard, flags, phase || getFallbackRhythmPhase(index + guard));
+    }
+
+    if (isGenericAiTemplateText(line)) {
+      line = "这句先别翻过去。";
     }
 
     used[line] = true;
     return line;
   }
 
+  function buildPersonaAwareFallbackLine(profile, index, contextFlags, phase) {
+    var source = profile || {};
+    var flags = contextFlags || buildFallbackContextFlags(source, "");
+    var voiceProfile = source.voiceProfile || detectPersonaVoiceProfile(source);
+    var tags = voiceProfile.tags || [];
+    var primaryTag = voiceProfile.primaryTag || tags[0] || getFallbackStyleBucket(source, flags);
+    var candidates = buildPersonaAwareFallbackCandidates(source, tags, primaryTag, flags, phase || getFallbackRhythmPhase(index));
+
+    if (!candidates.length) {
+      candidates = getFallbackLines(primaryTag || "default", source, flags);
+    }
+
+    return candidates[index % candidates.length] || "这句先别翻过去。";
+  }
+
+  function buildPersonaAwareFallbackCandidates(profile, tags, primaryTag, flags, phase) {
+    var source = profile || {};
+    var activeTags = Array.isArray(tags) && tags.length ? tags : (primaryTag ? [primaryTag] : []);
+    var latestInput = String(source.latestUserInput || "");
+    var previousText = [source.previousReplyText, source.rejectedReplyText, source.thoughtsHint, source.recentHeartVoiceText].filter(Boolean).join("\n");
+    var rhythmPhase = phase || "instant";
+    var has = function (tag) { return activeTags.indexOf(tag) !== -1; };
+    var pickPhaseLines = function (lines) {
+      var list = Array.isArray(lines) ? lines : [];
+      if (rhythmPhase === "instant") {
+        return list.slice(0, 2);
+      }
+      if (rhythmPhase === "attitude") {
+        return list.slice(2, 5);
+      }
+      if (rhythmPhase === "progression") {
+        return list.slice(5, 8);
+      }
+      return list.slice(8, 10);
+    };
+    var phaseLines = {
+      strong: ["先停。", "看着我。", "这句别糊过去。", "我来判断。", "按我说的来。", "先把话说清楚。", "不用躲。", "这件事我来定。", "别让我问第二遍。", "到这儿，听我的。"],
+      cold: ["嗯。", "不像。", "说重点。", "别绕。", "我听见了。", "继续。", "别装没事。", "这句留着。", "到这儿就够了。", "先别翻篇。"],
+      tsundere: ["谁担心你了。", "别误会。", "我只是顺口问。", "你刚才那样很明显。", "烦死了。", "那你倒是说啊。", "我没生气。", "别又装没事。", "算了，先听你的。", "这事我先记着。"],
+      clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别躲我。", "再说一句。", "我还在等。", "你别敷衍我。"],
+      gentle: ["先看着我。", "别把自己绷太紧。", "这句我接住了。", "不用硬撑。", "我在听。", "把气放下来一点。", "先坐稳。", "别急着躲开。", "这事我会放在心上。", "说到这儿也行。"],
+      obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "看着我说。", "我不喜欢你这样躲。", "那个人先放一边。", "你现在回我。", "别让我猜。", "我盯着呢。"],
+      playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "来，再说一遍。", "你这话我可记下了。", "别急着跑。", "行啊，胆子见长。", "我听着，你继续编。", "这反应挺明显的。"],
+      formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，看着我说。"],
+      hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续装。", "这笔账先记着。"],
+      shy: ["……嗯。", "我听见了。", "你别看我。", "我不是那个意思。", "你刚才那句……算了。", "我有点乱。", "别催我。", "再给我一下。", "我会回你的。", "你先别走。"],
+      default: ["等一下。", "这话不像随便说的。", "先别急着翻篇。", "你看着我回。", "别把话藏一半。", "继续说。", "这句留着。", "我听着。", "先说到这儿。", "别跳过刚才那句。"]
+    };
+    var comboLines = [];
+    var contextLines = [];
+    var candidates = [];
+
+    if (has("strong") && has("tsundere") && has("formal")) {
+      comboLines = ["先别急着说没事。", "看着我。", "我不是在问你愿不愿意。", "把话说清楚，别又糊过去。", "算了，我只是顺手管一下。", "站稳，按我说的来。", "你那点逞强，我看得出来。", "别误会，我没心疼你。", "这件事到我这里先停。", "下次再这么说，先过我这一关。"];
+    } else if (has("strong") && has("tsundere")) {
+      comboLines = ["先停，别嘴硬。", "我就问这一句。", "过来，把话说清楚。", "别误会，我只是看不下去。", "你那点逞强收一收。", "按我说的来，少顶嘴。", "我没担心你。", "但你也别想糊弄过去。", "这事我先替你压住。", "下次别让我抓到。"];
+    } else if (has("strong") && has("formal")) {
+      comboLines = ["先停。", "按节奏来。", "这件事我来判断。", "把话说完整。", "别急着自己扛。", "先坐下，看着我。", "我会安排，但你要配合。", "逞强到这里为止。", "这句我记下了。", "回头我再和你算。"];
+    } else if (has("cold") && has("obsessive")) {
+      comboLines = ["不像。", "你刚才那句，别收回去。", "提到谁了？", "别想混过去。", "我听见了。", "继续。", "少拿没事挡我。", "你躲得太快了。", "这事先放我这儿。", "我会盯着。"];
+    } else if (has("gentle") && has("formal")) {
+      comboLines = ["先坐稳。", "这事不用急着撑过去。", "我听你说完。", "把呼吸放慢一点。", "别自己硬扛。", "我会处理，但先按分寸来。", "这句我记着。", "先别躲开。", "到这里，先休息一下。", "之后再慢慢算清楚。"];
+    } else if (has("playful") && has("hostile")) {
+      comboLines = ["哟，说得真干净。", "别急着装无辜。", "我差点就信了。", "这话留着，我爱听破绽。", "继续编。", "你这反应挺有意思。", "少来这套。", "别把自己摘得太干净。", "这笔账我先记着。", "跑什么，我还没问完。"];
+    } else if (has("shy") && has("clingy")) {
+      comboLines = ["……你别走。", "我不是催你。", "就是再说一句。", "你刚才那样，我会乱想。", "别把我晾在这里。", "我、我听着。", "你小声说也行。", "别躲太远。", "我还在等你。", "算了，你先看我一下。"];
+    }
+
+    if (/没事|不用|算了|随便|都行|晚安|不说了/.test(latestInput)) {
+      if (has("strong")) {
+        contextLines.push("你说没事，我不一定信。");
+      }
+      if (has("cold")) {
+        contextLines.push("不像。");
+      }
+      if (has("tsundere")) {
+        contextLines.push("谁信你这个。");
+      }
+      if (has("clingy")) {
+        contextLines.push("你又想把我晾过去。");
+      }
+      if (has("obsessive")) {
+        contextLines.push("你躲得太快了。");
+      }
+      if (has("formal")) {
+        contextLines.push("先别用这句收尾。");
+      }
+      if (has("shy")) {
+        contextLines.push("……我不太信。");
+      }
+    }
+
+    if (/生气|压着火|不爽|冷处理|克制/.test(previousText)) {
+      if (has("cold")) {
+        contextLines.push("我还没打算翻篇。");
+      }
+      if (has("strong")) {
+        contextLines.push("刚才那笔先记着。");
+      }
+      if (has("tsundere")) {
+        contextLines.push("我没说我消气了。");
+      }
+      if (has("formal")) {
+        contextLines.push("这件事还没结束。");
+      }
+    }
+    if (/吃醋|占有|盯|别人|那个人/.test(previousText)) {
+      contextLines.push("那个人先放一边。", "你先回我。");
+    }
+    if (/心软|担心|在意|靠近/.test(previousText)) {
+      if (has("tsundere")) {
+        contextLines.push("我只是顺手问一句。");
+      } else if (has("gentle") || has("formal")) {
+        contextLines.push("先把话说稳。");
+      } else if (has("clingy")) {
+        contextLines.push("我就是有点在意。");
+      }
+    }
+
+    if (flags.wantsAway) {
+      contextLines.push("到这儿。", "别再往前推。");
+    }
+    if (flags.wantsSuppress) {
+      contextLines.push("先停。", "我来压住这件事。");
+    }
+    if (flags.wantsProbe) {
+      contextLines.push("你这句，像是在试我。", "再说一遍。");
+    }
+    if (flags.wantsHide) {
+      contextLines.push("别问那么直。", "这句先放着。");
+    }
+    if (flags.isJealous) {
+      contextLines.push("那个人先放一边。", "你先回我。");
+    }
+
+    candidates = candidates.concat(contextLines, pickPhaseLines(comboLines), pickPhaseLines(phaseLines[primaryTag] || []));
+    activeTags.slice(1, 4).forEach(function (tag) {
+      candidates = candidates.concat(pickPhaseLines(phaseLines[tag] || []));
+    });
+    candidates = candidates.concat(pickPhaseLines(phaseLines.default));
+
+    return uniqueList(candidates).filter(function (line) {
+      return line && !isGenericAiTemplateText(line);
+    });
+  }
+
   function buildFallbackContextFlags(profile, worldBookContext) {
-    var thoughtsHint = profile && profile.thoughtsHint || "";
+    var thoughtsHint = profile && (profile.thoughtsHint || profile.recentHeartVoiceText) || "";
     var text = [
       profile && profile.name,
       profile && profile.persona,
       profile && profile.currentMood,
       profile && profile.chatSettingsText,
+      profile && profile.voiceFingerprintText,
+      Array.isArray(profile && profile.voiceTags) ? profile.voiceTags.join(" ") : "",
+      profile && profile.evidenceText,
+      Array.isArray(profile && profile.personaEvidence) ? profile.personaEvidence.join(" ") : "",
       profile && profile.previousReplyText,
       profile && profile.rejectedReplyText,
       profile && profile.worldBookContext,
@@ -3577,6 +4282,7 @@
       isPlayful: /playful|轻佻|爱逗|逗弄|玩笑|欠揍|调侃|嬉皮笑脸/.test(text),
       isFormal: /formal|年长|老师|上司|前辈|家长|监护|师长|敬语|礼貌|克制/.test(text),
       isHostile: /hostile|敌对|防备|戒备|讽刺|厌恶|不信任|挑衅|针锋相对/.test(text),
+      isShy: /shy|害羞|内向|羞怯|胆怯|紧张|局促|不敢|怯/.test(text),
       wantsClose: /拉近|靠近|想见|想抱|黏|想他|想她|想你|心动|想要|不舍|靠过去/.test(thoughts),
       wantsAway: /拉远|拉开|疏远|不想理|烦|远点|滚|别靠近|冷处理|懒得理/.test(thoughts),
       wantsSuppress: /压住|压制|管住|训|教训|安排|让他听话|让她听话|让他低头|让她低头/.test(thoughts),
@@ -3593,6 +4299,8 @@
       profile && profile.persona,
       profile && profile.currentMood,
       profile && profile.chatSettingsText,
+      profile && profile.voiceFingerprintText,
+      Array.isArray(profile && profile.voiceTags) ? profile.voiceTags.join(" ") : "",
       profile && profile.previousReplyText,
       profile && profile.latestUserInput
     ].join("\n");
@@ -3603,37 +4311,73 @@
     if (flags.hasWorldRules && (flags.wantsHide || flags.isForbidden)) {
       return "worldForbidden";
     }
-    if (flags.isHostile || /hostile|敌对|防备|戒备|讽刺|厌恶|不信任|挑衅|针锋相对/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "hostile")) {
       return "hostile";
     }
-    if (flags.isObsessive || flags.isJealous || /obsessive|偏执|占有欲|占有|病态|盯紧|不许别人|只能/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "obsessive")) {
       return "obsessive";
+    }
+    if (hasPersonaVoiceTag(profile, "cold")) {
+      return "cold";
+    }
+    if (hasPersonaVoiceTag(profile, "strong")) {
+      return "strong";
+    }
+    if (hasPersonaVoiceTag(profile, "clingy")) {
+      return "clingy";
+    }
+    if (hasPersonaVoiceTag(profile, "tsundere")) {
+      return "tsundere";
+    }
+    if (hasPersonaVoiceTag(profile, "playful")) {
+      return "playful";
+    }
+    if (hasPersonaVoiceTag(profile, "formal")) {
+      return "formal";
+    }
+    if (hasPersonaVoiceTag(profile, "shy")) {
+      return "shy";
+    }
+    if (hasPersonaVoiceTag(profile, "gentle")) {
+      return "gentle";
+    }
+    if (hasPersonaVoiceTag(profile, "hostile") || flags.isHostile || /hostile|敌对|防备|戒备|讽刺|厌恶|不信任|挑衅|针锋相对/.test(text)) {
+      return "hostile";
+    }
+    if (hasPersonaVoiceTag(profile, "obsessive") || flags.isObsessive || flags.isJealous || /obsessive|偏执|占有欲|占有|病态|盯紧|不许别人|只能/.test(text)) {
+      return "obsessive";
+    }
+    if (hasPersonaVoiceTag(profile, "tsundere") && (flags.wantsHide || flags.isJealous)) {
+      return "tsundere";
     }
     if (flags.wantsHide && (flags.isJealous || flags.isTsundere || /傲娇|嘴硬|别扭|毒舌/.test(text))) {
       return "tsundere";
     }
-    if (flags.wantsAway || flags.isCold || /冷淡|寡言|克制|疏离|淡漠|高冷/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "cold") || flags.wantsAway || flags.isCold || /冷淡|寡言|克制|疏离|淡漠|高冷/.test(text)) {
       return "cold";
     }
-    if (flags.wantsSuppress || flags.isStrongRelation || /强势|控制|上位|命令|管束|掌控|严厉/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "strong") || flags.wantsSuppress || flags.isStrongRelation || /强势|控制|上位|命令|管束|掌控|严厉/.test(text)) {
       return "strong";
     }
-    if (flags.isClingy || flags.wantsClose || /黏|粘|撒娇|依赖|黏人/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "clingy") || flags.isClingy || flags.wantsClose || /黏|粘|撒娇|依赖|黏人/.test(text)) {
       return "clingy";
     }
     if (flags.wantsProbe || /试探|留白|观察|留余地/.test(text)) {
       return "tsundere";
     }
-    if (flags.isTsundere || /傲娇|嘴硬|别扭|毒舌/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "tsundere") || flags.isTsundere || /傲娇|嘴硬|别扭|毒舌/.test(text)) {
       return "tsundere";
     }
-    if (flags.isPlayful || /轻佻|爱逗|逗弄|玩笑|调侃/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "playful") || flags.isPlayful || /轻佻|爱逗|逗弄|玩笑|调侃/.test(text)) {
       return "playful";
     }
-    if (flags.isFormal || /年长|老师|上司|前辈|家长|监护|师长|敬语|礼貌/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "formal") || flags.isFormal || /年长|老师|上司|前辈|家长|监护|师长|敬语|礼貌/.test(text)) {
       return "formal";
     }
-    if (flags.isGentle || /温柔但克制|温柔|体贴|耐心/.test(text)) {
+    if (hasPersonaVoiceTag(profile, "shy") || flags.isShy || /害羞|内向|羞怯|胆怯|紧张|局促|不敢|怯/.test(text)) {
+      return "shy";
+    }
+    if (hasPersonaVoiceTag(profile, "gentle") || flags.isGentle || /温柔但克制|温柔|体贴|耐心/.test(text)) {
       return "gentle";
     }
     return "default";
@@ -3653,6 +4397,7 @@
       playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "来，再说一遍。", "你这话我可记下了。", "别急着跑。", "行啊，胆子见长。", "我听着，你继续编。", "这反应挺明显的。"],
       formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，看着我说。"],
       hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续装。", "这笔账先记着。"],
+      shy: ["……嗯。", "我听见了。", "你别看我。", "我不是那个意思。", "你刚才那句……算了。", "我有点乱。", "别催我。", "再给我一下。", "我会回你的。", "你先别走。"],
       default: ["嗯，我看见了。", "你刚才那句，我没跳过去。", "等一下。", "这话不像随便说的。", "先别急着翻篇。", "你看着我回。", "我接着呢。", "别把话藏一半。", "继续说。", "这句留着。"]
     };
     var lines = byBucket[bucket] || byBucket.default;
@@ -3669,6 +4414,14 @@
     var normalized = normalizeSpecialReply(source, options);
 
     if (!normalized.content) {
+      var rawContent = String(source.content || source.text || "").trim();
+      var rawType = normalizeMessageType(source.type || options.defaultType);
+      if (rawType === "text" && isGenericAiTemplateText(rawContent)) {
+        return [Object.assign({}, source, {
+          type: "text",
+          content: rawContent
+        })];
+      }
       return [];
     }
 
