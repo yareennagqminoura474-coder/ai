@@ -148,7 +148,8 @@
       }),
       buildThoughtReplyBindingRules("private"),
       buildCharacterResourceWhitelist(profile),
-      buildPromptPriorityHint()
+      buildCharacterPersonaReminder(profile),
+      buildPromptPriorityHint(profile)
     ].join("\n");
   }
 
@@ -207,7 +208,14 @@
     ].join("\n");
   }
 
-  function buildPromptPriorityHint() {
+  function buildPromptPriorityHint(character) {
+    var profile = character || {};
+    var voiceProfile = detectPersonaVoiceProfile(profile);
+    var evidence = extractPersonaEvidence(profile);
+    var tags = voiceProfile.tags || [];
+    var personaReminder = evidence.length
+      ? "生成前最后确认：这个角色的声音证据是「" + evidence.slice(0, 2).join("」「") + "」，语气标签是【" + (tags.slice(0, 3).join("、") || "按原文人设") + "】。本轮 messages 里至少 2 条必须能让人一眼认出是这个角色说的，而不是换个名字的通用角色。"
+      : (tags.length ? "生成前确认：本轮至少 2 条 messages 必须带出角色具体的语气标签【" + tags.slice(0, 3).join("、") + "】和人设特征。" : "");
     return [
       "",
       "本轮最重要的输入优先级：",
@@ -216,8 +224,9 @@
       "3. 最近心声 recentHeartVoice",
       "4. 最近 10-16 条时间线",
       "5. 当前聊天记忆和世界书命中",
-      "先抓这 5 个，再生成 JSON。"
-    ].join("\n");
+      "先抓这 5 个，再生成 JSON。",
+      personaReminder
+    ].filter(Boolean).join("\n");
   }
 
   function buildThoughtPresetText(character, chatSettings) {
@@ -584,6 +593,7 @@
       "- 标签证据：" + (voiceProfile.evidenceText || "暂无，标签只作辅助"),
       "- 优先级：原文人设 > 最近聊天情绪 > 最近心声 > 当前关系 > 标签。标签不是角色本人，只帮你抓说话方向。",
       "- 本轮必须体现：至少 2 个标签特征 + 1 个原始人设细节。若标签和原文冲突，以原文人设证据为准。",
+      "- 立即检查：如果把这条回复的角色名换成另一个角色，回复内容还成立吗？如果成立，说明没有贴住人设，必须重写。",
       String(worldBookContext || "").trim()
         ? "- 世界书影响：本轮命中世界书时，先服从命中规则，再把语气指纹压进称呼、边界、动作和沉默里。"
         : "- 世界书影响：未命中时不要编世界规则，只按人设、关系、记忆和最近心声推进。"
@@ -1080,23 +1090,35 @@
       return "";
     }
 
-    if (/吃醋|醋意|占有|盯着|只能是我/.test(combined)) {
-      parts.push("当前关系存在占有/吃醋张力，不能本轮突然消解");
+    if (/吃醋|醋意|占有|盯着|只能是我|别和别人/.test(combined)) {
+      parts.push("【占有/吃醋张力存在】本轮不能突然消解，须延续这个情绪底色");
     }
-    if (/冷处理|生气|不想理|冷战/.test(combined)) {
-      parts.push("上一轮情绪偏冷/生气，本轮不能直接恢复普通朋友状态");
+    if (/冷处理|生气|不想理|冷战|发火|不理/.test(combined)) {
+      parts.push("【上轮情绪偏冷/生气】本轮不能直接恢复普通朋友模式，需要让冷战或距离继续存在");
     }
-    if (/心软|担心|靠近|在意/.test(combined)) {
-      parts.push("角色最近在压制心软，嘴硬/冷淡外表下有在意");
+    if (/心软|担心|靠近|在意|其实/.test(combined)) {
+      parts.push("【角色在压制真实的在意】嘴硬/冷淡只是表面，需要在某处漏出一点痕迹");
     }
-    if (/确认|在一起|承诺|答应/.test(combined)) {
-      parts.push("关系已发展到较亲密阶段，不能退回陌生人对话方式");
+    if (/确认|在一起|承诺|答应|答应我/.test(combined)) {
+      parts.push("【关系已进入亲密阶段】称呼、态度、边界要有默认熟悉感，不能退回陌生人模式");
     }
-    if (/试探|防备|不信任|陌生/.test(combined)) {
-      parts.push("关系尚处于试探/防备阶段，不能突然亲密或坦白");
+    if (/试探|防备|不信任|还不熟|不了解/.test(combined)) {
+      parts.push("【关系仍在试探/防备阶段】不能突然亲密或坦白，保持适当距离和观察");
     }
 
-    return parts.join("；");
+    var quotes = [];
+    var lines = combined.split(/[\n。；]+/).map(function (l) { return l.trim(); }).filter(function (l) { return l.length > 8 && l.length < 60; });
+    if (lines.length) {
+      quotes = lines.slice(0, 2);
+    }
+
+    if (!parts.length && !quotes.length) return "";
+
+    var result = parts.join("；");
+    if (quotes.length) {
+      result += (result ? "\n" : "") + "近期关系痕迹（角色说话时要能感觉到这些存在）：" + quotes.join("、");
+    }
+    return result;
   }
 
   function normalizeWorldBookIdList(ids) {
@@ -1504,13 +1526,14 @@
 
     return [
       "输出节奏规则",
-      field + " 每次至少 10 条普通内容气泡/事件；红包、转账、图片、位置、语音等特殊消息不计入这 10 条。",
-      "10 条按一段真人连续发消息的节奏组织：1-2 即时反应；3-5 角色态度；6-8 关系/动作/安排/试探；9-10 收束或钩子。",
+      field + " 气泡数量按角色人设决定（见 instruction 里的数量提示）；红包、转账、图片、位置、语音等特殊消息不计入普通内容气泡数。",
+      "按真人连续发消息的节奏组织：1-2 条即时反应；3-5 条角色态度；后续关系/动作/安排/试探；最后收束或钩子。",
       "不要把一句完整话按逗号、顿号、分号或冒号拆成多条；一条气泡必须有独立语义。",
-      "不够 10 条时生成新的自然气泡继续推进，不拆已有句子凑数。",
+      "不够数时生成新的自然气泡继续推进，不拆已有句子凑数。",
       "允许短句、停顿、反问、打断、语音、表情、改口和沉默后的补一句。",
       "每条都要符合角色人设、当前情绪和本轮说话纹理，带出角色态度或关系推进。",
-      "每轮至少 3 条明显体现 personaVoiceFingerprint；不要 10 条都解释、都问问题或都同一姿态。"
+      "每轮至少 3 条明显体现 personaVoiceFingerprint；不要每条都解释、都问问题或都同一姿态。",
+      "不要因为凑数让话变多变废；每条都必须有独立情感推进，不换句复读。"
     ].join("\n");
   }
 
@@ -2263,6 +2286,86 @@
     });
   }
 
+  function buildPersonaCountHint(profile) {
+    var voiceProfile = detectPersonaVoiceProfile(profile || {});
+    var tags = voiceProfile.tags || [];
+    var has = function (tag) { return tags.indexOf(tag) !== -1; };
+
+    if (has("cold") || has("hostile")) {
+      return "这个角色话少，3-5 条有态度的短句比 10 条废话更贴人设；能用沉默和短句压住场面的，不要硬凑长篇。";
+    }
+    if (has("tsundere")) {
+      return "这个角色嘴硬，4-6 条绕弯子的短句比直接长篇更贴人设；说太多反而不像。";
+    }
+    if (has("shy")) {
+      return "这个角色害羞局促，3-5 条犹豫、简短、改口的气泡比流畅长篇更贴人设。";
+    }
+    if (has("strong") || has("formal")) {
+      return "这个角色强势，5-7 条有判断力的短句比凑 10 条更有压迫感；说到位即止。";
+    }
+    if (has("clingy") || has("gentle")) {
+      return "按角色关系给出 6-10 条自然气泡，可以追问、黏着、关心，但每条要有独立情感推进，不要换句复读。";
+    }
+    return "按角色人设和当前情绪，给出 5-8 条自然短气泡；能用少量精准的句子体现人设的，不要为了凑数变成话痨。";
+  }
+
+  function buildCharacterPersonaReminder(character) {
+    var profile = character || {};
+    var voiceProfile = detectPersonaVoiceProfile(profile);
+    var tags = voiceProfile.tags || [];
+    var evidence = extractPersonaEvidence(profile);
+    var chatSettings = profile.chatSettings || {};
+    var currentMood = profile.currentMood || chatSettings.currentMood || "";
+
+    if (!tags.length && !evidence.length) return "";
+
+    return [
+      "",
+      "Z. 输出前最后锁定 personaLock",
+      "角色名：" + valueOrFallback(profile.name),
+      tags.length ? "声音标签：" + tags.join(" / ") : "",
+      evidence.length ? "原文人设片段：" + evidence.slice(0, 2).join(" / ") : "",
+      currentMood ? "当前情绪：" + currentMood : "",
+      "输出前问自己：这几条 messages，换个角色名还成立吗？如果成立，必须重写至少 3 条，让它们只能是这个角色说的。",
+      "不要用角色的名字代替人设落地：名字写对了不等于声音写对了。"
+    ].filter(Boolean).join("\n");
+  }
+
+  function buildCharacterVoiceSnapshot(profile) {
+    var source = profile || {};
+    var voiceProfile = detectPersonaVoiceProfile(source);
+    var tags = voiceProfile.tags || [];
+
+    if (!tags.length) return "";
+
+    var has = function (tag) { return tags.indexOf(tag) !== -1; };
+    var exampleLines = [];
+
+    if (has("cold")) {
+      exampleLines = ["嗯。", "说重点。", "没什么好问的。"];
+    } else if (has("tsundere")) {
+      exampleLines = ["谁担心你了。", "别误会，我只是顺口。", "烦死了，你自己看着办。"];
+    } else if (has("clingy")) {
+      exampleLines = ["你怎么才回来。", "我等很久了。", "别走嘛。"];
+    } else if (has("strong")) {
+      exampleLines = ["过来。", "先按我说的来。", "别让我说第二遍。"];
+    } else if (has("obsessive")) {
+      exampleLines = ["你刚才提到谁。", "别想糊弄过去。", "我注意到了。"];
+    } else if (has("shy")) {
+      exampleLines = ["……嗯。", "你别看我。", "我不是那个意思。"];
+    } else if (has("gentle")) {
+      exampleLines = ["先别硬撑。", "我在听。", "慢慢说。"];
+    } else if (has("hostile")) {
+      exampleLines = ["少来这套。", "你这话什么意思。", "别试我。"];
+    } else if (has("playful")) {
+      exampleLines = ["被我抓到了吧。", "逃不掉的。", "说，怎么办。"];
+    }
+
+    if (!exampleLines.length) return "";
+
+    return "【角色当前声音参考（不要照抄，只用于感受语气密度）】：" + exampleLines.join(" / ");
+  }
+
   function buildPrivateReplyMessages(character, chatHistory, options) {
     var profile = character || {};
     var chatSettings = profile.chatSettings || {};
@@ -2360,13 +2463,17 @@
           }),
           buildThoughtReplyBindingRules("private"),
           buildCharacterResourceWhitelist(profile),
-          buildPromptPriorityHint()
+          buildCharacterPersonaReminder(profile),
+          buildPromptPriorityHint(profile)
         ].filter(Boolean).join("\n")
       },
       {
         role: "user",
         content: buildUserTaskPrompt({
-          instruction: "请以 " + valueOrFallback(profile.name) + " 本人身份反应。不是回答问题，而是从角色处境里接住这一句；即使对方明显结束、沉默、敷衍或晚安，也要按角色关系给出至少 10 条自然短气泡，不要返回空数组，也不要把一句完整话按逗号拆开凑数。",
+          instruction: [
+            "请以 " + valueOrFallback(profile.name) + " 本人身份反应。不是回答问题，而是从角色处境里接住这一句；" + buildPersonaCountHint(profile) + "不要返回空数组，也不要把一句完整话按逗号拆开凑数。",
+            buildCharacterVoiceSnapshot(profile)
+          ].filter(Boolean).join("\n"),
           modeLabel: requestOptions.regenerateRequest ? "线上私聊重回" : (requestOptions.blockReaction ? "线上私聊 blockReaction" : "线上私聊"),
           taskMode: systemMode,
           userInput: latestUserInput,
