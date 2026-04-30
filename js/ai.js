@@ -10,6 +10,7 @@
   var CHARACTER_LINE_EXTRACT_LIMIT = 12;
   var HEART_VOICE_FETCH_LIMIT = 20;
   var HEART_VOICE_CONTEXT_LIMIT = 5;
+  var OFFLINE_ACTION_MIN_COUNT = 4;
   var OFFLINE_ACTION_MAX_COUNT = 8;
 
   function valueOrFallback(value) {
@@ -4240,10 +4241,16 @@
     var validIds = settings.validIds || [];
     var normalized = [];
     var speechCount;
+    var actionCount;
+    var actionFallbacks;
 
     settings.minSpeech = Math.max(0, Number(settings.minSpeech || settings.min) || MIN_CHAT_REPLY_COUNT);
+    settings.minActionCount = Math.max(0, Number(settings.minActionCount) || OFFLINE_ACTION_MIN_COUNT);
     settings.maxActionCount = Math.max(0, Number(settings.maxActionCount) || OFFLINE_ACTION_MAX_COUNT);
-    settings.max = Math.max(settings.minSpeech || 1, Number(settings.max) || MAX_CHAT_REPLY_COUNT);
+    settings.max = Math.max(
+      (settings.minSpeech || 1) + Math.min(settings.minActionCount, settings.maxActionCount),
+      Number(settings.max) || MAX_CHAT_REPLY_COUNT
+    );
 
     (Array.isArray(events) ? events : []).forEach(function (event, index) {
       var source = event && typeof event === "object" ? event : { content: event };
@@ -4277,6 +4284,12 @@
 
     if (speechCount < settings.minSpeech) {
       normalized = normalized.concat(createOfflineSpeechFallbackEvents(settings, settings.minSpeech - speechCount, normalized));
+    }
+
+    actionCount = countOfflineActionEvents(normalized);
+    if (actionCount < settings.minActionCount) {
+      actionFallbacks = createOfflineActionFallbackEvents(settings, settings.minActionCount - actionCount, normalized);
+      normalized = interleaveOfflineEvents(normalized, actionFallbacks);
     }
 
     normalized = limitOfflineActionEvents(normalized, settings);
@@ -4400,6 +4413,104 @@
     }
 
     return events;
+  }
+
+  function createOfflineActionFallbackEvents(settings, missingCount, existingEvents) {
+    var options = settings || {};
+    var existing = Array.isArray(existingEvents) ? existingEvents : [];
+    var missing = Math.max(0, Number(missingCount) || 0);
+    var actionMax = Math.max(0, Number(options.maxActionCount) || OFFLINE_ACTION_MAX_COUNT);
+    var totalMax = Math.max(1, Number(options.max) || MAX_CHAT_REPLY_COUNT);
+    var limit = Math.min(
+      missing,
+      Math.max(0, actionMax - countOfflineActionEvents(existing)),
+      Math.max(0, totalMax - existing.length)
+    );
+    var profiles = getFallbackProfiles(options);
+    var events = [];
+    var usedActions = {};
+    var index = 0;
+
+    existing.forEach(function (event) {
+      if (isOfflineActionEvent(event) && event.content) {
+        usedActions[event.content] = true;
+      }
+    });
+
+    while (events.length < limit) {
+      var profile = pickOfflineFallbackProfile(profiles, options, index);
+      var contextFlags = buildFallbackContextFlags(profile, options.worldBookContext || "");
+      var content = pickFallbackOfflineActionLine(index, usedActions, contextFlags);
+
+      if (!content) {
+        break;
+      }
+
+      events.push({
+        type: "action",
+        characterId: "",
+        content: content
+      });
+      index += 1;
+    }
+
+    return events;
+  }
+
+  function interleaveOfflineEvents(events, actionFallbacks) {
+    var source = Array.isArray(events) ? events.slice() : [];
+    var fallbacks = Array.isArray(actionFallbacks) ? actionFallbacks.filter(function (event) {
+      return isOfflineActionEvent(event);
+    }) : [];
+    var speechSplitSlots = [];
+    var speechSlots = [];
+    var insertions = {};
+    var fallbackIndex = 0;
+    var slots;
+
+    if (!fallbacks.length) {
+      return source;
+    }
+
+    source.forEach(function (event, index) {
+      if (!isOfflineSpeechEvent(event)) {
+        return;
+      }
+
+      speechSlots.push(index);
+      if (source[index + 1] && isOfflineSpeechEvent(source[index + 1])) {
+        speechSplitSlots.push(index);
+      }
+    });
+
+    slots = speechSplitSlots.length ? speechSplitSlots : speechSlots;
+
+    if (!slots.length) {
+      return fallbacks.concat(source);
+    }
+
+    fallbacks.forEach(function (fallback, index) {
+      var slotOffset = fallbacks.length === 1
+        ? Math.floor(slots.length / 2)
+        : Math.floor(index * slots.length / fallbacks.length);
+      var slot = slots[Math.min(slots.length - 1, slotOffset)];
+
+      insertions[slot] = insertions[slot] || [];
+      insertions[slot].push(fallback);
+    });
+
+    return source.reduce(function (result, event, index) {
+      result.push(event);
+
+      if (insertions[index]) {
+        insertions[index].forEach(function (fallback) {
+          result.push(fallback);
+          fallbackIndex += 1;
+        });
+      }
+
+      return result;
+    }, []).concat(fallbacks.slice(fallbackIndex));
   }
 
   function pickOfflineFallbackProfile(profiles, settings, index) {
