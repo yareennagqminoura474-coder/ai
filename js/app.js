@@ -288,6 +288,16 @@
     if (pageId === "characterSpaceScreen") {
       renderCharacterSpaceScreen();
     }
+
+    if (pageId === "chatScreen" && !canOpenPrivateChatScreen()) {
+      setWechatTab("wechat");
+      return setActivePage("wechatScreen");
+    }
+
+    if (pageId === "groupChatScreen" && !canOpenGroupChatScreen()) {
+      setWechatTab("wechat");
+      return setActivePage("wechatScreen");
+    }
   }
 
   function goHome() {
@@ -7428,7 +7438,35 @@
     }
   }
 
+  function forceSafeStartupPage() {
+    var activeScreens = Array.prototype.slice.call(document.querySelectorAll(".screen.active"));
+    var shouldReset = activeScreens.length !== 1 || activeScreens.some(function (screen) {
+      return screen && (screen.id === "chatScreen" || screen.id === "groupChatScreen");
+    });
+
+    if (shouldReset) {
+      pageIds.forEach(function (id) {
+        var screen = getElement(id);
+        if (screen) {
+          screen.classList.remove("active");
+          screen.setAttribute("aria-hidden", "true");
+        }
+      });
+      var home = getElement("homeScreen");
+      if (home) {
+        home.classList.add("active");
+        home.setAttribute("aria-hidden", "false");
+      }
+      activePage = "homeScreen";
+    }
+  }
+
   function initApp() {
+    console.debug("[Startup Debug] initApp running", {
+      version: "2026050515",
+      activeScreens: Array.prototype.map.call(document.querySelectorAll(".screen.active"), function (el) { return el.id; })
+    });
+    forceSafeStartupPage();
     document.title = "心屿空间";
     applySavedTheme();
     bindHomeActions();
@@ -7450,6 +7488,10 @@
     refreshHomeSummary();
     setActivePage("homeScreen");
     resumeAppApiJobsWhenReady();
+    console.debug("[Startup Debug] initApp finished", {
+      activePage: activePage,
+      activeScreens: Array.prototype.map.call(document.querySelectorAll(".screen.active"), function (el) { return el.id; })
+    });
   }
 
   window.setActivePage = setActivePage;

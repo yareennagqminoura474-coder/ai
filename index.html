@@ -12,7 +12,7 @@
   <link rel="manifest" href="./manifest.json">
   <link rel="icon" href="./assets/icons/icon.svg">
   <link rel="apple-touch-icon" href="./assets/icons/icon-192.png">
-  <link rel="stylesheet" href="css/style.css?v=2026050514">
+  <link rel="stylesheet" href="css/style.css?v=2026050515">
 </head>
 <body>
   <div class="phone">
@@ -613,16 +613,39 @@
     <input id="characterImportInput" class="visually-hidden" type="file" accept="application/json,.json">
   </div>
 
-  <script src="js/storage.js?v=2026050514"></script>
-  <script src="js/ai.js?v=2026050514"></script>
-  <script src="js/api-jobs.js?v=2026050514"></script>
-  <script src="js/character.js?v=2026050514"></script>
-  <script src="js/group.js?v=2026050514"></script>
-  <script src="js/offline.js?v=2026050514"></script>
-  <script src="js/watch.js?v=2026050514"></script>
-  <script src="js/app.js?v=2026050514"></script>
+  <script>
+    (function () {
+      try {
+        var screens = document.querySelectorAll(".screen");
+        screens.forEach(function (screen) {
+          screen.classList.remove("active");
+          screen.setAttribute("aria-hidden", "true");
+        });
+        var home = document.getElementById("homeScreen");
+        if (home) {
+          home.classList.add("active");
+          home.setAttribute("aria-hidden", "false");
+        }
+      } catch (e) {}
+    })();
+  </script>
+  <script src="js/storage.js?v=2026050515"></script>
+  <script src="js/ai.js?v=2026050515"></script>
+  <script src="js/api-jobs.js?v=2026050515"></script>
+  <script src="js/character.js?v=2026050515"></script>
+  <script src="js/group.js?v=2026050515"></script>
+  <script src="js/offline.js?v=2026050515"></script>
+  <script src="js/watch.js?v=2026050515"></script>
+  <script src="js/app.js?v=2026050515"></script>
   <script>
     if ("serviceWorker" in navigator) {
+      navigator.serviceWorker.getRegistrations().then(function (registrations) {
+        registrations.forEach(function (registration) {
+          if (registration && registration.update) {
+            registration.update();
+          }
+        });
+      });
       window.addEventListener("load", function () {
         navigator.serviceWorker.register("./sw.js").catch(function (error) {
           console.warn("Service Worker 注册失败：", error);
