@@ -969,20 +969,156 @@
     });
   }
 
+  function buildBridgeMessageKeys(character) {
+    var keys = [];
+    if (character && character.chatSettings && character.chatSettings.userPersonaOverride && character.chatSettings.userPersonaOverride.name) {
+      keys.push(String(character.chatSettings.userPersonaOverride.name || "").trim());
+    }
+    var profile = getUserProfile();
+    if (profile && profile.name) {
+      keys.push(String(profile.name || "").trim());
+    }
+    keys.push("用户", "我", "你");
+    return keys.filter(function (item, index, array) {
+      return item && array.indexOf(item) === index;
+    });
+  }
+
+  function isPrivateBridgeKeyMessage(message, prevMessage, nextMessage, currentCharacterId) {
+    if (!message || message.role !== "character") {
+      return false;
+    }
+
+    if (prevMessage && prevMessage.role === "character" && String(prevMessage.characterId) !== String(message.characterId)) {
+      return true;
+    }
+    if (nextMessage && nextMessage.role === "character" && String(nextMessage.characterId) !== String(message.characterId)) {
+      return true;
+    }
+
+    var content = normalizeBridgeText(message.content).toLowerCase();
+    if (content.indexOf("？") !== -1 || content.indexOf("?") !== -1 || content.indexOf("！") !== -1 || content.indexOf("!") !== -1 || content.indexOf("…") !== -1) {
+      return true;
+    }
+
+    var triggerWords = ["怎么", "为什么", "别", "不要", "还是", "又", "不过", "可是", "真是", "真的", "你说", "问", "追问", "冲突", "拆台", "暧昧", "质问", "责怪", "挑衅", "挑逗", "撩"];
+    return triggerWords.some(function (word) {
+      return content.indexOf(word) !== -1;
+    });
+  }
+
   function getPrivateMemoryBridgeContext(characterId, options) {
     var params = options && typeof options === "object" ? options : {};
-    var characterIds = Array.isArray(params.characterIds) ? params.characterIds.map(String).filter(Boolean) : [];
     var groupIds = Array.isArray(params.groupIds) ? params.groupIds.map(String).filter(Boolean) : [];
     var rounds = Number(params.rounds) || 10;
     var maxLength = 2200;
     var groups = getGroups();
     var characters = getCharacters();
     var character = characters.find(function (c) { return String(c.id) === String(characterId); });
-    var userName = "用户";
     var out = [];
 
     if (!characterId || !groupIds.length || !groups.length) {
       return "";
+    }
+
+    var userKeys = buildBridgeMessageKeys(character);
+    var userName = userKeys[0] || "用户";
+
+    function collectRoundCandidates(round) {
+      var candidates = [];
+      var selectedScores = {};
+      var selectedIndexes = {};
+      var isDirectReplyIndex = {};
+
+      round.forEach(function (message, index) {
+        if (!message || !message.content) {
+          return;
+        }
+
+        if (message.role === "user") {
+          selectedIndexes[index] = true;
+          selectedScores[index] = 100;
+          return;
+        }
+
+        if (message.role === "character") {
+          if (String(message.characterId) === String(characterId)) {
+            selectedIndexes[index] = true;
+            selectedScores[index] = 95;
+            return;
+          }
+
+          var prevMessage = round[index - 1];
+          var nextMessage = round[index + 1];
+          var directReply = prevMessage && prevMessage.role === "user";
+          if (directReply) {
+            selectedIndexes[index] = true;
+            selectedScores[index] = 90;
+            isDirectReplyIndex[index] = true;
+            return;
+          }
+
+          if (containsMention(message.content, userKeys) || isPrivateBridgeKeyMessage(message, prevMessage, nextMessage, characterId)) {
+            selectedIndexes[index] = true;
+            selectedScores[index] = 70;
+            return;
+          }
+
+          candidates.push(index);
+        }
+      });
+
+      Object.keys(selectedIndexes).forEach(function (key) {
+        var index = Number(key);
+        for (var delta = -2; delta <= 2; delta += 1) {
+          var pivot = index + delta;
+          if (pivot < 0 || pivot >= round.length) {
+            continue;
+          }
+          if (!round[pivot] || !round[pivot].content || round[pivot].type === "loading" || round[pivot].type === "error" || round[pivot].type === "system") {
+            continue;
+          }
+          if (!selectedIndexes[pivot]) {
+            selectedIndexes[pivot] = true;
+            selectedScores[pivot] = 60 - Math.abs(delta) * 5;
+          }
+        }
+      });
+
+      candidates.forEach(function (index) {
+        if (selectedIndexes[index]) {
+          return;
+        }
+        var message = round[index];
+        var prevMessage = round[index - 1];
+        var nextMessage = round[index + 1];
+        if (prevMessage && prevMessage.role === "character" && nextMessage && nextMessage.role === "character" && String(prevMessage.characterId) !== String(message.characterId) && String(nextMessage.characterId) !== String(message.characterId)) {
+          selectedIndexes[index] = true;
+          selectedScores[index] = 65;
+        }
+      });
+
+      Object.keys(selectedIndexes).forEach(function (key) {
+        var index = Number(key);
+        candidates.push(index);
+      });
+
+      candidates = candidates.filter(function (index, pos) {
+        return candidates.indexOf(index) === pos;
+      });
+
+      candidates.sort(function (a, b) {
+        var scoreA = selectedScores[a] || 0;
+        var scoreB = selectedScores[b] || 0;
+        if (scoreA !== scoreB) {
+          return scoreB - scoreA;
+        }
+        return a - b;
+      });
+
+      var keepCount = Math.min(candidates.length, 16);
+      var kept = candidates.slice(0, keepCount).sort(function (a, b) { return a - b; });
+      return kept.map(function (index) { return round[index]; });
     }
 
     (groups || []).forEach(function (group) {
@@ -1008,28 +1144,21 @@
       var groupName = group.name || "群聊";
       var lines = [];
       roundsList.forEach(function (round) {
-        round.forEach(function (message) {
+        var selectedMessages = collectRoundCandidates(round);
+        selectedMessages.forEach(function (message) {
           if (!message || !message.content) {
             return;
           }
-          if (message.role === "user") {
-            lines.push(buildBridgeMessageLine(message, characterId, userName));
-            return;
-          }
-          if (message.role === "character") {
-            if (String(message.characterId) === String(characterId)) {
-              lines.push(buildBridgeMessageLine(message, characterId, userName));
-              return;
-            }
-            if (containsMention(message.content, [character.name, userName])) {
-              lines.push(buildBridgeMessageLine(message, characterId, userName));
-            }
-          }
+          lines.push(buildBridgeMessageLine(message, characterId, userName));
         });
       });
 
       if (!lines.length) {
         return;
+      }
+
+      if (lines.length > 16) {
+        lines = lines.slice(0, 16);
       }
 
       var groupText = "群聊《" + groupName + "》最近发生：\n" + lines.join("\n");
