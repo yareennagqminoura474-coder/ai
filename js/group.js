@@ -1509,8 +1509,10 @@
 
   function deleteSelectedGroupMessages() {
     var ids = selectedGroupMessageIds.slice();
+    var allMessages;
     var messages;
     var scrollState;
+    var artifacts;
 
     if (!activeGroupId || !ids.length) {
       return;
@@ -1521,10 +1523,26 @@
     }
 
     scrollState = captureChatScrollState(getElement("groupChatMessages"));
-    messages = window.AppStorage.getGroupChatHistory(activeGroupId).filter(function (message) {
+    allMessages = window.AppStorage.getGroupChatHistory(activeGroupId);
+
+    artifacts = window.AppStorage.collectDeletedTurnArtifactsBeforeDelete
+      ? window.AppStorage.collectDeletedTurnArtifactsBeforeDelete(allMessages, ids)
+      : { messageIds: ids, generationIds: [] };
+
+    messages = allMessages.filter(function (message) {
       return ids.indexOf(message.id) === -1;
     });
     window.AppStorage.saveGroupChatHistory(activeGroupId, messages);
+
+    if ((artifacts.messageIds && artifacts.messageIds.length) && window.AppStorage.removeMessageArtifacts) {
+      window.AppStorage.removeMessageArtifacts({
+        targetType: "group",
+        targetId: activeGroupId,
+        messageIds: artifacts.messageIds,
+        generationIds: artifacts.generationIds,
+        includeRelatedTurn: false
+      });
+    }
 
     isGroupMessageSelectionMode = false;
     selectedGroupMessageIds = [];
@@ -1577,10 +1595,22 @@
 
     if (action === "delete") {
       var scrollState = captureChatScrollState(getElement("groupChatMessages"));
+      var artifacts = window.AppStorage.collectDeletedTurnArtifactsBeforeDelete
+        ? window.AppStorage.collectDeletedTurnArtifactsBeforeDelete(messages, [messageId])
+        : { messageIds: [messageId], generationIds: [] };
       messages = messages.filter(function (item) {
         return item.id !== messageId;
       });
       window.AppStorage.saveGroupChatHistory(group.id, messages);
+      if ((artifacts.messageIds && artifacts.messageIds.length) && window.AppStorage.removeMessageArtifacts) {
+        window.AppStorage.removeMessageArtifacts({
+          targetType: "group",
+          targetId: group.id,
+          messageIds: artifacts.messageIds,
+          generationIds: artifacts.generationIds,
+          includeRelatedTurn: false
+        });
+      }
       suppressGroupHistoryLoad(group.id);
       renderGroupChatMessages(group.id, { skipScroll: true, restoreScrollState: scrollState });
       renderGroupList();
@@ -2085,6 +2115,19 @@
         targetType: "group",
         targetId: group.id
       });
+    }
+
+    if ((oldMessages && oldMessages.length) && window.AppStorage.removeMessageArtifacts) {
+      var oldMessageIds = oldMessages.map(function (m) { return m.id; }).filter(Boolean);
+      if (oldMessageIds.length) {
+        window.AppStorage.removeMessageArtifacts({
+          targetType: "group",
+          targetId: group.id,
+          messageIds: oldMessageIds,
+          generationIds: oldGenerationIds,
+          includeRelatedTurn: false
+        });
+      }
     }
 
     window.AppStorage.saveGroupChatHistory(group.id, before.concat([createGroupLoadingMessage(generationId, characters[0])], after));
@@ -3181,10 +3224,12 @@
       }
 
       if (option) {
-        option.classList.toggle("active", event.target.checked);
-        var checkMark = option.querySelector(".member-check");
-        if (checkMark) {
-          checkMark.textContent = event.target.checked ? "✓" : "";
+        if (option.classList.contains("member-option")) {
+          option.classList.toggle("active", event.target.checked);
+          var checkMark = option.querySelector(".member-check");
+          if (checkMark) {
+            checkMark.textContent = event.target.checked ? "✓" : "";
+          }
         }
       }
     };

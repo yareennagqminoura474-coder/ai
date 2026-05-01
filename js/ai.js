@@ -2485,6 +2485,29 @@
     var userContext = buildUserContext(chatSettings);
     var memories = chatSettings.memoryEnabled === false ? [] : getMemoryForCharacter(profile.id);
     var chatMemories = getChatMemoriesForPrompt("private", profile.id, requestOptions.chatMemories);
+    var memoryBridgeSettings = chatSettings.memoryBridge || {};
+    var bridgeGroupText = "";
+    if (profile.id && memoryBridgeSettings.groupEnabled && Array.isArray(memoryBridgeSettings.groupIds) && memoryBridgeSettings.groupIds.length && window.AppStorage && typeof window.AppStorage.getPrivateMemoryBridgeContext === "function") {
+      bridgeGroupText = window.AppStorage.getPrivateMemoryBridgeContext(profile.id, {
+        groupIds: memoryBridgeSettings.groupIds,
+        rounds: memoryBridgeSettings.groupRounds || 10
+      });
+    }
+    var recentGroupContextText = bridgeGroupText || (profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
+      ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 16)
+      : "");
+    console.debug("[Bridge Debug] private actual prompt", {
+      characterId: profile.id,
+      groupEnabled: memoryBridgeSettings.groupEnabled || false,
+      groupIds: memoryBridgeSettings.groupIds || [],
+      bridgeGroupTextLength: bridgeGroupText ? bridgeGroupText.length : 0,
+      bridgeGroupTextPreview: bridgeGroupText
+        ? bridgeGroupText.slice(0, 200)
+        : (memoryBridgeSettings.groupEnabled
+            ? "(enabled but empty — check groupIds, group membership, or group messages)"
+            : "(bridge disabled, using fallback recentGroupContext)"),
+      path: "sendPrivateChatRequest/buildPrivateReplyMessages"
+    });
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, requestOptions);
     var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
     var promptMessages = (Array.isArray(chatHistory) ? chatHistory : [])
@@ -2530,6 +2553,22 @@
     });
     var recentHeartVoiceText = buildRecentHeartVoiceContext(profile.id, "private", profile.id);
     var relationshipPhaseHint = buildRelationshipPhaseHint(recentHeartVoiceText, formatChatMemoryList(chatMemories), formatMemoryList(memories));
+
+    var combinedRecentHistory = history || "暂无历史消息";
+    var groupAfterRules = "";
+    if (recentGroupContextText) {
+      combinedRecentHistory = "【最近私聊】\n" + (history || "暂无历史消息") + "\n【刚刚/近期互通群聊记忆】\n" + recentGroupContextText;
+      requestOptions.memoryBridgeText = bridgeGroupText || recentGroupContextText;
+      groupAfterRules = [
+        "注意：以上包含最近互通群聊记忆，私聊时请像亲历一样承接：",
+        '1. 如果用户提到"刚才"、"群里"、"你刚刚"、"他们刚刚"，必须优先承接互通群聊记忆，体现临场反应；不要说"记忆互通""系统记录""上下文显示"。',
+        "2. 如果互通群聊刚发生冲突、暧昧、尴尬、偏袒、拆台，私聊第一轮要自然带出余波。",
+        "3. 本轮第一条回复不要表现像没经历过群聊；可以带出尴尬、追问、回避、生气或继续刚才话题的自然反应。",
+        "4. 不要直接复述群聊对话原文；把它融入态度、措辞和下意识反应里。",
+        "5. 要像角色自己刚经历过一样反应，群聊余波优先于无关的长期记忆，但请尊重角色人设与世界书限制。"
+      ].join("\n");
+    }
+
     requestOptions.worldBookContext = worldBookContext;
     requestOptions.selectedWorldBookIds = selectedWorldBookIds;
     requestOptions.latestUserInput = latestUserInput;
@@ -2541,6 +2580,7 @@
     requestOptions.timeGapInfo = timeGapInfo;
 
     var systemMode = requestOptions.regenerateRequest ? "reenter" : "private";
+    var rejectedText = String(requestOptions.rejectedReplyText || requestOptions.oldReplyText || "").trim();
 
     return [
       {
@@ -2568,11 +2608,26 @@
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
             longTermMemoryText: formatMemoryList(memories) || "暂无",
             recentTimelineText: history || "暂无",
+            memoryBridgeText: requestOptions.memoryBridgeText || "",
             recentHeartVoiceText: recentHeartVoiceText,
             relationshipPhaseHint: relationshipPhaseHint,
             userContext: userContext,
             bodyState: requestOptions.bodyState
           }),
+          requestOptions.regenerateRequest && rejectedText ? [
+            "",
+            "P. 重回旧回复封锁",
+            "以下旧回复已被用户否定，只用于避开，不得承接、不得复述、不得当作已发生剧情：",
+            limitText(rejectedText, 300)
+          ].join("\n") : "",
+          [
+            "",
+            "Q. 已删除内容封锁",
+            "当前输入的 recentHistory、memory、bridgeContext 已是当前真实历史，不得推测被删除的消息。",
+            "不得引用不在当前 history / active memory 中的内容。",
+            "如果记忆和当前聊天历史冲突，以当前聊天历史为准。",
+            "如果某段关系变化只存在于已删除消息产生的旧记忆里，必须忽略该段关系变化。"
+          ].join("\n"),
           buildThoughtReplyBindingRules("private"),
           buildCharacterResourceWhitelist(profile),
           buildCharacterPersonaReminder(profile),
@@ -2590,8 +2645,8 @@
           taskMode: systemMode,
           userInput: latestUserInput,
           beforeContext: "用户在角色眼里：" + userContext.name + "；" + (userContext.persona || "无补充资料"),
-          contextLabel: "最近 10-16 条聊天上下文：",
-          recentHistory: history || "暂无历史消息",
+          contextLabel: recentGroupContextText ? "最近私聊 + 互通群聊记忆（按顺序）：" : "最近 10-16 条聊天上下文：",
+          recentHistory: combinedRecentHistory,
           requestOptions: requestOptions,
           regenerateRequest: requestOptions.regenerateRequest,
           regenerateInstruction: String(requestOptions.regenerateInstruction || "").trim(),
@@ -2602,10 +2657,11 @@
           thoughtMode: "private",
           selfCheckMode: "private",
           afterRules: [
+            groupAfterRules,
             "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
             "如果最近用户发给角色红包或转账，必须按人设和关系决定收下或退回；在 JSON 顶层返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
             "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount()
-          ].join("\n")
+          ].filter(Boolean).join("\n")
         })
       }
     ];

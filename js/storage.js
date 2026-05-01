@@ -5033,6 +5033,220 @@
     saveWallet(wallet);
   }
 
+  function normalizeIdList(ids) {
+    if (!Array.isArray(ids)) return [];
+    return ids.map(function (id) { return String(id || ""); }).filter(Boolean);
+  }
+
+  function collectDeletedTurnArtifactsBeforeDelete(allMessages, selectedIds) {
+    var messageIds = [];
+    var generationIds = [];
+    var seenIds = {};
+
+    function addId(id, gid) {
+      var idStr = String(id || "");
+      if (!idStr) return;
+      if (!seenIds[idStr]) {
+        messageIds.push(idStr);
+        seenIds[idStr] = true;
+      }
+      if (gid) {
+        var gidStr = String(gid);
+        if (generationIds.indexOf(gidStr) === -1) {
+          generationIds.push(gidStr);
+        }
+      }
+    }
+
+    var selectedIdSet = {};
+    selectedIds.forEach(function (id) { selectedIdSet[String(id || "")] = true; });
+
+    (Array.isArray(allMessages) ? allMessages : []).forEach(function (msg, index) {
+      if (!selectedIdSet[String(msg.id || "")]) return;
+
+      addId(msg.id, msg.generationId);
+
+      if (msg.role === "user") {
+        var nextUserIndex = index + 1;
+        while (nextUserIndex < allMessages.length && allMessages[nextUserIndex].role !== "user") {
+          nextUserIndex += 1;
+        }
+        for (var i = index + 1; i < nextUserIndex; i += 1) {
+          addId(allMessages[i].id, allMessages[i].generationId);
+        }
+      }
+    });
+
+    return { messageIds: messageIds, generationIds: generationIds };
+  }
+
+  function removeThoughtArtifactsByMessageIds(messageIds) {
+    if (!messageIds.length) return;
+    var store = getThoughtStore();
+    var changed = false;
+
+    Object.keys(store).forEach(function (characterId) {
+      var next = (Array.isArray(store[characterId]) ? store[characterId] : []).filter(function (thought) {
+        var relatedIds = Array.isArray(thought.relatedMessageIds) ? thought.relatedMessageIds : [];
+        if (!relatedIds.length) return true;
+        return !relatedIds.some(function (id) { return messageIds.indexOf(String(id || "")) !== -1; });
+      });
+      if (next.length !== (store[characterId] || []).length) {
+        store[characterId] = next;
+        changed = true;
+      }
+    });
+
+    if (changed) saveThoughtStore(store);
+  }
+
+  function removeCharacterMemoryArtifactsByMessageIds(messageIds) {
+    if (!messageIds.length) return;
+    var store = getMemoryStore();
+    var changed = false;
+
+    Object.keys(store).forEach(function (characterId) {
+      var next = (Array.isArray(store[characterId]) ? store[characterId] : []).filter(function (memory) {
+        if (!memory) return false;
+        if (memory.source === "manual") return true;
+        var relatedIds = Array.isArray(memory.relatedMessageIds) ? memory.relatedMessageIds : [];
+        if (!relatedIds.length) return true;
+        return !relatedIds.some(function (id) { return messageIds.indexOf(String(id || "")) !== -1; });
+      });
+      if (next.length !== (store[characterId] || []).length) {
+        store[characterId] = next;
+        changed = true;
+      }
+    });
+
+    if (changed) saveMemoryStore(store);
+  }
+
+  function removeChatMemoryArtifactsByMessageIds(messageIds, targetType, targetId) {
+    if (!messageIds.length) return;
+    var store = getChatMemoryStore();
+    var scopedKey = targetType && targetId ? getChatScopedKey(targetType, targetId) : "";
+    var changed = false;
+
+    Object.keys(store).forEach(function (key) {
+      if (scopedKey && key !== scopedKey) return;
+      var next = (Array.isArray(store[key]) ? store[key] : []).filter(function (memory) {
+        if (!memory) return false;
+        if (memory.source === "manual") return true;
+        var relatedIds = Array.isArray(memory.relatedMessageIds) ? memory.relatedMessageIds : [];
+        if (!relatedIds.length) return true;
+        return !relatedIds.some(function (id) { return messageIds.indexOf(String(id || "")) !== -1; });
+      });
+      if (next.length !== (store[key] || []).length) {
+        store[key] = next;
+        changed = true;
+      }
+    });
+
+    if (changed) saveChatMemoryStore(store);
+  }
+
+  function removeMessageArtifacts(options) {
+    var settings = options || {};
+    var messageIds = normalizeIdList(settings.messageIds);
+    var generationIds = normalizeGenerationIdList(settings.generationIds || []);
+    var relatedTurnMessageIds = normalizeIdList(settings.relatedTurnMessageIds || []);
+    var relatedTurnGenerationIds = normalizeGenerationIdList(settings.relatedTurnGenerationIds || []);
+    var targetType = settings.targetType;
+    var targetId = settings.targetId;
+
+    if (!messageIds.length && !generationIds.length && !relatedTurnMessageIds.length && !relatedTurnGenerationIds.length) return;
+
+    messageIds = messageIds.concat(relatedTurnMessageIds).filter(function (id, idx, arr) {
+      return arr.indexOf(id) === idx;
+    });
+    generationIds = generationIds.concat(relatedTurnGenerationIds).filter(function (id, idx, arr) {
+      return arr.indexOf(id) === idx;
+    });
+
+    if (settings.includeRelatedTurn && messageIds.length && targetType && targetId) {
+      var history = targetType === "group"
+        ? getGroupChatHistory(targetId)
+        : getChatHistory(targetId);
+      (Array.isArray(history) ? history : []).forEach(function (msg) {
+        if (messageIds.indexOf(String(msg.id || "")) !== -1 && msg.generationId) {
+          var gid = String(msg.generationId);
+          if (generationIds.indexOf(gid) === -1) generationIds.push(gid);
+        }
+      });
+    }
+
+    if (messageIds.length) {
+      removeThoughtArtifactsByMessageIds(messageIds);
+      removeCharacterMemoryArtifactsByMessageIds(messageIds);
+      removeChatMemoryArtifactsByMessageIds(messageIds, targetType, targetId);
+    }
+
+    if (generationIds.length) {
+      removeThoughtArtifacts(generationIds);
+      removeCharacterMemoryArtifacts(generationIds);
+      removeChatMemoryArtifacts(generationIds, targetType, targetId);
+      removeWalletLedgerArtifacts(generationIds);
+      if (targetType && targetId) {
+        restoreBodyStateBeforeGenerationIds(targetType, targetId, generationIds);
+      }
+    }
+  }
+
+  function purgeOrphanMemoryArtifacts() {
+    var existingMessageIds = {};
+    var existingGenerationIds = {};
+
+    function collectFromHistory(historyMap) {
+      Object.keys(historyMap || {}).forEach(function (id) {
+        (Array.isArray(historyMap[id]) ? historyMap[id] : []).forEach(function (msg) {
+          if (msg.id) existingMessageIds[String(msg.id)] = true;
+          if (msg.generationId) existingGenerationIds[String(msg.generationId)] = true;
+        });
+      });
+    }
+
+    collectFromHistory(getAllChatHistories());
+    collectFromHistory(getAllGroupChatHistories());
+
+    function isOrphan(item) {
+      if (!item) return true;
+      if (item.source === "manual") return false;
+      var relatedIds = Array.isArray(item.relatedMessageIds) ? item.relatedMessageIds : [];
+      var gid = String(item.generationId || item.sourceGenerationId || "");
+      if (!relatedIds.length && !gid) return false;
+      if (relatedIds.length && relatedIds.some(function (id) { return existingMessageIds[String(id || "")]; })) return false;
+      if (gid && existingGenerationIds[gid] && !relatedIds.length) return false;
+      return true;
+    }
+
+    var thoughtStore = getThoughtStore();
+    var thoughtChanged = false;
+    Object.keys(thoughtStore).forEach(function (characterId) {
+      var next = (Array.isArray(thoughtStore[characterId]) ? thoughtStore[characterId] : []).filter(function (t) { return !isOrphan(t); });
+      if (next.length !== (thoughtStore[characterId] || []).length) { thoughtStore[characterId] = next; thoughtChanged = true; }
+    });
+    if (thoughtChanged) saveThoughtStore(thoughtStore);
+
+    var memStore = getMemoryStore();
+    var memChanged = false;
+    Object.keys(memStore).forEach(function (characterId) {
+      var next = (Array.isArray(memStore[characterId]) ? memStore[characterId] : []).filter(function (m) { return !isOrphan(m); });
+      if (next.length !== (memStore[characterId] || []).length) { memStore[characterId] = next; memChanged = true; }
+    });
+    if (memChanged) saveMemoryStore(memStore);
+
+    var chatMemStore = getChatMemoryStore();
+    var chatMemChanged = false;
+    Object.keys(chatMemStore).forEach(function (key) {
+      var next = (Array.isArray(chatMemStore[key]) ? chatMemStore[key] : []).filter(function (m) { return !isOrphan(m); });
+      if (next.length !== (chatMemStore[key] || []).length) { chatMemStore[key] = next; chatMemChanged = true; }
+    });
+    if (chatMemChanged) saveChatMemoryStore(chatMemStore);
+
+    return { thoughtsCleared: thoughtChanged, memoriesCleared: memChanged, chatMemoriesCleared: chatMemChanged };
+  }
+
   window.AppStorage = {
     getCharacters: getCharacters,
     saveCharacters: saveCharacters,
@@ -5205,6 +5419,9 @@
     migrateWalletLedgerAmounts: migrateWalletLedgerAmounts,
     migrateMoneyMessagesInHistories: migrateMoneyMessagesInHistories,
     removeGenerationArtifacts: removeGenerationArtifacts,
+    removeMessageArtifacts: removeMessageArtifacts,
+    purgeOrphanMemoryArtifacts: purgeOrphanMemoryArtifacts,
+    collectDeletedTurnArtifactsBeforeDelete: collectDeletedTurnArtifactsBeforeDelete,
     recordMoneyMessage: recordMoneyMessage,
     receiveMoneyMessage: receiveMoneyMessage,
     returnMoneyMessage: returnMoneyMessage,

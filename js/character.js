@@ -1825,8 +1825,10 @@
 
   function deleteSelectedPrivateMessages() {
     var ids = selectedPrivateMessageIds.slice();
+    var allMessages;
     var messages;
     var scrollState;
+    var artifacts;
 
     if (!activeCharacterId || !ids.length) {
       return;
@@ -1837,10 +1839,26 @@
     }
 
     scrollState = captureChatScrollState(getElement("chatMessages"));
-    messages = window.AppStorage.getChatHistory(activeCharacterId).filter(function (message) {
+    allMessages = window.AppStorage.getChatHistory(activeCharacterId);
+
+    artifacts = window.AppStorage.collectDeletedTurnArtifactsBeforeDelete
+      ? window.AppStorage.collectDeletedTurnArtifactsBeforeDelete(allMessages, ids)
+      : { messageIds: ids, generationIds: [] };
+
+    messages = allMessages.filter(function (message) {
       return ids.indexOf(message.id) === -1;
     });
     window.AppStorage.saveChatHistory(activeCharacterId, messages);
+
+    if ((artifacts.messageIds && artifacts.messageIds.length) && window.AppStorage.removeMessageArtifacts) {
+      window.AppStorage.removeMessageArtifacts({
+        targetType: "private",
+        targetId: activeCharacterId,
+        messageIds: artifacts.messageIds,
+        generationIds: artifacts.generationIds,
+        includeRelatedTurn: false
+      });
+    }
 
     isPrivateMessageSelectionMode = false;
     selectedPrivateMessageIds = [];
@@ -1892,10 +1910,22 @@
 
     if (action === "delete") {
       var scrollState = captureChatScrollState(getElement("chatMessages"));
+      var artifacts = window.AppStorage.collectDeletedTurnArtifactsBeforeDelete
+        ? window.AppStorage.collectDeletedTurnArtifactsBeforeDelete(messages, [messageId])
+        : { messageIds: [messageId], generationIds: [] };
       messages = messages.filter(function (item) {
         return item.id !== messageId;
       });
       window.AppStorage.saveChatHistory(activeCharacterId, messages);
+      if ((artifacts.messageIds && artifacts.messageIds.length) && window.AppStorage.removeMessageArtifacts) {
+        window.AppStorage.removeMessageArtifacts({
+          targetType: "private",
+          targetId: activeCharacterId,
+          messageIds: artifacts.messageIds,
+          generationIds: artifacts.generationIds,
+          includeRelatedTurn: false
+        });
+      }
       suppressPrivateHistoryLoad(activeCharacterId);
       renderChatMessages(activeCharacterId, { skipScroll: true, restoreScrollState: scrollState });
       renderCharacterList();
@@ -2496,6 +2526,19 @@
         targetType: "private",
         targetId: requestCharacterId
       });
+    }
+
+    if ((oldMessages && oldMessages.length) && window.AppStorage.removeMessageArtifacts) {
+      var oldMessageIds = oldMessages.map(function (m) { return m.id; }).filter(Boolean);
+      if (oldMessageIds.length) {
+        window.AppStorage.removeMessageArtifacts({
+          targetType: "private",
+          targetId: requestCharacterId,
+          messageIds: oldMessageIds,
+          generationIds: oldGenerationIds,
+          includeRelatedTurn: false
+        });
+      }
     }
 
     window.AppStorage.saveChatHistory(requestCharacterId, before.concat([loadingMessage], after));
