@@ -113,27 +113,11 @@
   }
 
   function openPrivateOffline(characterId) {
-    chooseInlineScene(function (scene) {
-      enablePrivateInlineOffline(characterId, scene);
-    });
+    enablePrivateInlineOffline(characterId, null);
   }
 
   function openGroupOffline(groupId) {
-    chooseInlineScene(function (scene) {
-      enableGroupInlineOffline(groupId, scene);
-    });
-  }
-
-  function chooseInlineScene(callback) {
-    if (window.WeChatTools && window.WeChatTools.openOfflineSceneSheet) {
-      window.WeChatTools.openOfflineSceneSheet(callback);
-      return;
-    }
-
-    callback({
-      name: "家",
-      description: "熟悉、放松、适合日常互动的室内场景"
-    });
+    enableGroupInlineOffline(groupId, null);
   }
 
   function setCurrentInlineOfflineState(targetType, targetId, scene) {
@@ -153,7 +137,7 @@
       return false;
     }
 
-    setCurrentInlineOfflineState(stored.targetType || targetType, stored.targetId || targetId, stored.scene);
+    setCurrentInlineOfflineState(stored.targetType || targetType, stored.targetId || targetId, {});
     return true;
   }
 
@@ -363,6 +347,7 @@
         generationId: generationId,
         beforeMessages: historyForRequest,
         requestSnapshot: {
+          recentSceneHint: summarizeRecentScene(historyForRequest),
           previousReplyText: collectEventText(historyForRequest)
         }
       });
@@ -433,6 +418,7 @@
       participants: participants,
       offlineHistory: historyForRequest,
       sharedMemories: window.AppStorage.getMemoriesForCharacters(session.participantIds),
+      recentSceneHint: requestSnapshot.recentSceneHint || summarizeRecentScene(historyForRequest),
       chatMemories: generationContext.chatMemories,
       bodyStateEnabled: generationContext.bodyStateEnabled,
       bodyState: generationContext.bodyState,
@@ -595,10 +581,19 @@
   }
 
   function getLatestUserInput(history) {
-    var users = (history || []).filter(function (event) {
-      return event.role === "user" || event.type === "user";
-    });
-    return users.length ? users[users.length - 1].content : "";
+    var list = Array.isArray(history) ? history : [];
+    var index;
+
+    for (index = list.length - 1; index >= 0; index -= 1) {
+      if (!list[index] || list[index].type === "loading" || list[index].type === "error") {
+        continue;
+      }
+      return list[index].role === "user" || list[index].type === "user"
+        ? list[index].content
+        : "";
+    }
+
+    return "";
   }
 
   function removeLoadingEvents(history) {
@@ -687,6 +682,73 @@
     }).map(function (event) {
       return (event.characterName ? event.characterName + "：" : "") + event.content;
     }).join("\n");
+  }
+
+  function pushUnique(list, value) {
+    var text = String(value || "").trim();
+    if (text && list.indexOf(text) === -1) {
+      list.push(text);
+    }
+  }
+
+  function collectKeywordHits(text, keywords, output) {
+    var source = String(text || "");
+    (keywords || []).forEach(function (keyword) {
+      if (source.indexOf(keyword) !== -1) {
+        pushUnique(output, keyword);
+      }
+    });
+  }
+
+  function summarizeRecentScene(history) {
+    var timeHints = [];
+    var placeHints = [];
+    var positionHints = [];
+    var actionHints = [];
+    var recentLines = [];
+    var timeKeywords = ["深夜", "半夜", "凌晨", "夜里", "晚上", "傍晚", "黄昏", "清晨", "早晨", "上午", "中午", "下午", "白天", "天黑", "天亮", "阳光", "月光", "路灯", "雨", "雪"];
+    var placeKeywords = ["卧室", "房间", "床边", "床上", "门口", "走廊", "桌边", "书桌", "餐桌", "客厅", "厨房", "浴室", "玄关", "楼梯", "电梯", "教室", "宿舍", "办公室", "天台", "咖啡馆", "街边", "室外", "车里", "车上", "学校", "医院", "练习室"];
+    var positionKeywords = ["坐着", "坐下", "站着", "站起", "起身", "靠近", "贴近", "退开", "后退", "转身", "低头", "抬头", "倚着", "靠着", "蹲下", "躺着", "停在", "走到", "站在", "坐在", "离开"];
+    var actionKeywords = ["翻书", "写题", "写字", "沉默", "对峙", "收拾东西", "走过走廊", "推开门", "关门", "看着", "避开视线", "拿起", "放下", "递过去", "打字", "发消息", "等着", "停顿", "握住", "松开", "喝水", "皱眉", "笑", "哭", "争吵"];
+    var events = (Array.isArray(history) ? history : []).filter(function (event) {
+      return event && event.content && event.type !== "loading" && event.type !== "error" && (
+        event.type === "offlineAction"
+        || event.type === "offlineSpeech"
+        || event.type === "offlineUserAction"
+        || event.type === "action"
+        || event.type === "speech"
+        || event.role === "user"
+        || event.type === "user"
+      );
+    }).slice(-12);
+
+    events.forEach(function (event) {
+      var label = isInlineUserEvent(event)
+        ? "用户"
+        : (event.type === "offlineSpeech" || event.type === "speech" ? (event.characterName || "角色") : "旁白");
+      var content = normalizeDisplayText(event.content || "");
+      collectKeywordHits(content, timeKeywords, timeHints);
+      collectKeywordHits(content, placeKeywords, placeHints);
+      collectKeywordHits(content, positionKeywords, positionHints);
+      collectKeywordHits(content, actionKeywords, actionHints);
+      if (content) {
+        recentLines.push(label + "：" + content.slice(0, 80));
+      }
+    });
+
+    if (!timeHints.length && !placeHints.length && !positionHints.length && !actionHints.length && !recentLines.length) {
+      return "";
+    }
+
+    return [
+      "最近场景连续性提示（来自最近 12 条线下消息，优先于旧场景设置）：",
+      "时间：" + (timeHints.join("、") || "未明确，请从最近剧情自然推断，不默认白天/清晨"),
+      "地点：" + (placeHints.join("、") || "未明确，请从最近剧情自然推断，不默认家/学校"),
+      "人物位置/距离：" + (positionHints.join("、") || "未明确，沿用上一条动作的身体位置和距离"),
+      "正在做的事：" + (actionHints.join("、") || "未明确，推进当前场景里的动作、沉默、话题和情绪"),
+      recentLines.length ? "最近原文锚点：\n" + recentLines.slice(-6).join("\n") : "",
+      "连续性硬规则：如果时间包含晚上/深夜/夜里/凌晨，下一轮不能写白天、阳光、清晨或天亮；如果地点包含桌边/房间/床边/走廊/门口，不能无过渡跳到教室、咖啡馆、室外或其他新地点；如需换场景，必须先用 1-2 条 action 写收拾东西、起身离开、走过走廊、推开门、车程/路程或时间流逝。用户没有输入新动作时，只推进当前场景里的动作、距离、沉默、话题和情绪。"
+    ].filter(Boolean).join("\n");
   }
 
   function isInlineUserEvent(event) {
@@ -829,20 +891,21 @@
   function normalizeScene(scene) {
     var source = scene && typeof scene === "object" ? scene : {};
     return {
-      name: String(source.name || "家"),
-      description: String(source.description || "熟悉、放松、适合日常互动的室内场景")
+      name: String(source.name || ""),
+      description: String(source.description || "")
     };
   }
 
   function appendInlineSceneMessage(mode, targetId, participants) {
     var scene = inlineOfflineState.scene || {};
+    var sceneText = [scene.name, scene.description].filter(Boolean).join("，");
     var message = {
       id: String(Date.now() + Math.random()),
       role: "system",
       type: "system",
       characterId: "",
       characterName: "",
-      content: "已进入线下模式：" + (scene.name || "当前场景") + (scene.description ? "，" + scene.description : ""),
+      content: sceneText ? "已进入线下模式：" + sceneText : "已进入线下模式",
       scene: scene,
       createdAt: Date.now()
     };
@@ -864,15 +927,17 @@
       }
     }
 
-    (participants || []).forEach(function (character) {
-      if (character) {
-        window.AppStorage.addCharacterMemory(character.id, {
-          content: "线下模式场景：" + (scene.name || "未指定场景") + (scene.description ? "。" + scene.description : ""),
-          source: "offline",
-          createdAt: Date.now()
-        });
-      }
-    });
+    if (sceneText) {
+      (participants || []).forEach(function (character) {
+        if (character) {
+          window.AppStorage.addCharacterMemory(character.id, {
+            content: "线下模式场景：" + sceneText,
+            source: "offline",
+            createdAt: Date.now()
+          });
+        }
+      });
+    }
   }
 
   function appendInlineSystemMessage(mode, targetId, content) {
@@ -1027,7 +1092,7 @@
           rejectedReplyText: collectEventText(oldMessages),
           oldGenerationIds: oldGenerationIds,
           oldMessages: oldMessages,
-          scene: inlineOfflineState.scene
+          recentSceneHint: summarizeRecentScene(before)
         }
       });
       messages = null;
@@ -1086,7 +1151,7 @@
         generationId: generationId,
         beforeMessages: historyForRequest,
         requestSnapshot: {
-          scene: inlineOfflineState.scene,
+          recentSceneHint: summarizeRecentScene(historyForRequest),
           previousReplyText: collectEventText(historyForRequest)
         }
       });
@@ -1145,7 +1210,7 @@
         generationId: generationId,
         beforeMessages: historyForRequest,
         requestSnapshot: {
-          scene: inlineOfflineState.scene,
+          recentSceneHint: summarizeRecentScene(historyForRequest),
           previousReplyText: collectEventText(historyForRequest)
         }
       });
@@ -1207,10 +1272,10 @@
       participants: [character],
       history: historyForRequest,
       offlineHistory: historyForRequest,
-      userInput: getLatestInlineUserInput(historyForRequest) || "继续推进",
+      userInput: getLatestInlineUserInput(historyForRequest) || "继续推进当前场景",
       regenerateRequest: Boolean(requestSnapshot.regenerateRequest),
       regenerateInstruction: String(requestSnapshot.regenerateInstruction || "").trim(),
-      scene: requestSnapshot.scene || inlineOfflineState.scene,
+      recentSceneHint: requestSnapshot.recentSceneHint || summarizeRecentScene(historyForRequest),
       userSettings: character.chatSettings || {},
       memories: window.AppStorage.getMemoriesForCharacters([character.id]),
       sharedMemories: window.AppStorage.getMemoriesForCharacters([character.id]),
@@ -1301,10 +1366,10 @@
       participants: participants,
       history: historyForRequest,
       offlineHistory: historyForRequest,
-      userInput: getLatestInlineUserInput(historyForRequest) || "继续推进",
+      userInput: getLatestInlineUserInput(historyForRequest) || "继续推进当前场景",
       regenerateRequest: Boolean(requestSnapshot.regenerateRequest),
       regenerateInstruction: String(requestSnapshot.regenerateInstruction || "").trim(),
-      scene: requestSnapshot.scene || inlineOfflineState.scene,
+      recentSceneHint: requestSnapshot.recentSceneHint || summarizeRecentScene(historyForRequest),
       userSettings: group.settings || {},
       memories: window.AppStorage.getMemoriesForCharacters(group.memberIds || []),
       sharedMemories: window.AppStorage.getMemoriesForCharacters(group.memberIds || []),
@@ -1725,10 +1790,17 @@
   }
 
   function getLatestInlineUserInput(history) {
-    var users = (history || []).filter(function (event) {
-      return event.role === "user" || event.type === "offlineUserAction" || event.type === "user";
-    });
-    return users.length ? users[users.length - 1].content : "继续当前互动";
+    var list = Array.isArray(history) ? history : [];
+    var index;
+
+    for (index = list.length - 1; index >= 0; index -= 1) {
+      if (!list[index] || list[index].type === "loading" || list[index].type === "error") {
+        continue;
+      }
+      return isInlineUserEvent(list[index]) ? list[index].content : "";
+    }
+
+    return "";
   }
 
   function setInlineAdvanceState(mode, advancing) {
@@ -1764,6 +1836,7 @@
     openGroupOffline: openGroupOffline,
     enablePrivateInlineOffline: enablePrivateInlineOffline,
     enableGroupInlineOffline: enableGroupInlineOffline,
+    summarizeRecentScene: summarizeRecentScene,
     disableInlineOffline: disableInlineOffline,
     isInlineOfflineActive: isInlineOfflineActive,
     requestInlineOfflineAdvance: requestInlineOfflineAdvance,

@@ -1,5 +1,5 @@
-const CACHE_BASE = "ai-phone-cache-v20260429-";
-let CACHE_NAME = CACHE_BASE + "7";
+const CACHE_BASE = "ai-phone-cache-v20260502-";
+let CACHE_NAME = CACHE_BASE + "1";
 
 function parseCacheVersion(key) {
   if (!key || typeof key !== "string") {
@@ -16,8 +16,9 @@ function parseCacheVersion(key) {
 }
 
 function getNextCacheName(keys) {
-  var highestVersion = 0;
-  var selectedPrefix = CACHE_BASE;
+  var current = parseCacheVersion(CACHE_NAME);
+  var highestVersion = current ? current.version - 1 : 0;
+  var selectedPrefix = current ? current.prefix : CACHE_BASE;
 
   (keys || []).forEach(function (key) {
     var parsed = parseCacheVersion(key);
@@ -41,6 +42,7 @@ const APP_SHELL = [
   "./js/character.js",
   "./js/group.js",
   "./js/offline.js",
+  "./js/watch.js",
   "./assets/icons/icon-192.png",
   "./assets/icons/icon-512.png"
 ];
@@ -49,6 +51,27 @@ function isApiRequest(url) {
   return url.includes("/v1/")
     || url.includes("chat/completions")
     || url.includes("models");
+}
+
+function isNetworkFirstAsset(request, url) {
+  var path = url.pathname.toLowerCase();
+
+  return request.destination === "script"
+    || request.destination === "style"
+    || request.destination === "document"
+    || /\.(?:js|css|html?)$/.test(path);
+}
+
+function cacheFreshResponse(request, response) {
+  if (!response || response.status !== 200 || response.type === "opaque") {
+    return response;
+  }
+
+  var copy = response.clone();
+  caches.open(CACHE_NAME).then(function (cache) {
+    cache.put(request, copy);
+  });
+  return response;
 }
 
 self.addEventListener("install", function (event) {
@@ -103,6 +126,35 @@ self.addEventListener("fetch", function (event) {
     return;
   }
 
+  if (isNetworkFirstAsset(request, requestUrl)) {
+    event.respondWith(
+      fetch(request).then(function (response) {
+        return cacheFreshResponse(request, response);
+      }).catch(function () {
+        return caches.match(request).then(function (cached) {
+          if (cached) {
+            return cached;
+          }
+
+          return caches.match(request, { ignoreSearch: true }).then(function (fallbackCached) {
+            if (fallbackCached) {
+              return fallbackCached;
+            }
+
+            if (request.destination === "document" || /\.html?$/.test(requestUrl.pathname.toLowerCase())) {
+              return caches.match("./index.html").then(function (indexHtml) {
+                return indexHtml || Response.error();
+              });
+            }
+
+            return Response.error();
+          });
+        });
+      })
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(request).then(function (cached) {
       if (cached) {
@@ -110,15 +162,7 @@ self.addEventListener("fetch", function (event) {
       }
 
       return fetch(request).then(function (response) {
-        if (!response || response.status !== 200 || response.type === "opaque") {
-          return response;
-        }
-
-        var copy = response.clone();
-        caches.open(CACHE_NAME).then(function (cache) {
-          cache.put(request, copy);
-        });
-        return response;
+        return cacheFreshResponse(request, response);
       });
     })
   );

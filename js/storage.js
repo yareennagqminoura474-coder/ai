@@ -32,7 +32,8 @@
     notes: "myAiApp.notes",
     chatPrefix: "myAiApp.chat.",
     groupChatPrefix: "myAiApp.groupChat.",
-    offlinePrefix: "myAiApp.offline."
+    offlinePrefix: "myAiApp.offline.",
+    watchPrefix: "myAiApp.watch."
   };
   var debouncedPrivateChatSaves = {};
   var debouncedPrivateChatTimers = {};
@@ -40,6 +41,13 @@
   var debouncedGroupChatTimers = {};
   var debouncedOfflineSaves = {};
   var debouncedOfflineTimers = {};
+  var debouncedWatchSaves = {};
+  var debouncedWatchTimers = {};
+  var BODY_STATE_PART_ALIASES = {
+    "膝腿": "膝盖",
+    "其他受影响区域": "臀缝"
+  };
+  var DEFAULT_BODY_STATE_PARTS = ["手心", "臀部", "大腿", "臀腿连接处", "腰背", "肩颈", "膝盖", "臀缝"];
 
   function parseJson(value, fallback) {
     if (!value) {
@@ -722,6 +730,7 @@
       sourceGenerationId: String(memoryItem.sourceGenerationId || memoryItem.generationId || ""),
       targetType: String(memoryItem.targetType || ""),
       targetId: String(memoryItem.targetId || ""),
+      relatedCharacterIds: Array.isArray(memoryItem.relatedCharacterIds) ? memoryItem.relatedCharacterIds.map(String) : [],
       relatedMessageIds: Array.isArray(memoryItem.relatedMessageIds) ? memoryItem.relatedMessageIds.map(String) : [],
       createdAt: Number(memoryItem.createdAt) || Date.now()
     });
@@ -894,7 +903,16 @@
 
   function getBodyStateStore() {
     var states = parseJson(localStorage.getItem(STORAGE_KEYS.bodyStates), {});
-    return states && typeof states === "object" && !Array.isArray(states) ? states : {};
+    var migration;
+
+    states = states && typeof states === "object" && !Array.isArray(states) ? states : {};
+    migration = migrateBodyStateStoreParts(states);
+
+    if (migration.changed) {
+      saveBodyStateStore(migration.states);
+    }
+
+    return migration.states;
   }
 
   function saveBodyStateStore(states) {
@@ -1098,11 +1116,75 @@
     saveBodyStateStore({});
   }
 
-  function normalizeBodyState(bodyState) {
+  function migrateBodyStateStoreParts(states) {
+    var changed = false;
+    var normalized = {};
+
+    Object.keys(states || {}).forEach(function (key) {
+      var migration = migrateBodyStateParts(states[key]);
+      normalized[key] = migration.bodyState;
+      if (migration.changed) {
+        changed = true;
+      }
+    });
+
+    return { states: normalized, changed: changed };
+  }
+
+  function migrateBodyStateParts(bodyState) {
     var source = bodyState && typeof bodyState === "object" ? bodyState : {};
     var parts = source.parts && typeof source.parts === "object" && !Array.isArray(source.parts) ? source.parts : {};
+    var migratedParts = Object.assign({}, parts);
+    var changed = false;
+
+    Object.keys(BODY_STATE_PART_ALIASES).forEach(function (oldName) {
+      var newName = BODY_STATE_PART_ALIASES[oldName];
+
+      if (!Object.prototype.hasOwnProperty.call(migratedParts, oldName)) {
+        return;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(migratedParts, newName)) {
+        migratedParts[newName] = mergeBodyPartState(migratedParts[newName], migratedParts[oldName]);
+      } else {
+        migratedParts[newName] = migratedParts[oldName];
+      }
+
+      delete migratedParts[oldName];
+      changed = true;
+    });
+
+    if (!changed) {
+      return { bodyState: source, changed: false };
+    }
+
+    return {
+      bodyState: Object.assign({}, source, { parts: migratedParts }),
+      changed: true
+    };
+  }
+
+  function mergeBodyPartState(primary, legacy) {
+    var current = normalizeBodyPartState(primary || {});
+    var old = normalizeBodyPartState(legacy || {});
+
+    return {
+      status: current.status && current.status !== "正常" ? current.status : old.status,
+      soreness: current.soreness || old.soreness,
+      pain: current.pain || old.pain,
+      redness: current.redness || old.redness,
+      notes: [current.notes, old.notes].filter(Boolean).filter(function (note, index, list) {
+        return list.indexOf(note) === index;
+      }).join("；")
+    };
+  }
+
+  function normalizeBodyState(bodyState) {
+    var migration = migrateBodyStateParts(bodyState);
+    var source = migration.bodyState && typeof migration.bodyState === "object" ? migration.bodyState : {};
+    var parts = source.parts && typeof source.parts === "object" && !Array.isArray(source.parts) ? source.parts : {};
     var normalizedParts = {};
-    var defaultParts = ["手心", "臀部", "大腿", "臀腿连接处", "腰背", "肩颈", "膝腿", "其他受影响区域"];
+    var defaultParts = DEFAULT_BODY_STATE_PARTS;
 
     defaultParts.forEach(function (partName) {
       normalizedParts[partName] = normalizeBodyPartState(parts[partName] || {});
@@ -1218,6 +1300,7 @@
     Object.keys(debouncedPrivateChatSaves).forEach(flushChatHistorySave);
     Object.keys(debouncedGroupChatSaves).forEach(flushGroupChatHistorySave);
     Object.keys(debouncedOfflineSaves).forEach(flushOfflineSessionSave);
+    Object.keys(debouncedWatchSaves).forEach(flushWatchSessionSave);
   }
 
   function deleteOfflineSession(sessionId) {
@@ -1263,6 +1346,100 @@
 
   function getAllOfflineSessions() {
     return getAllPrefixedItems(STORAGE_KEYS.offlinePrefix);
+  }
+
+  function getWatchSession(sessionId) {
+    if (!sessionId) {
+      return null;
+    }
+
+    if (debouncedWatchSaves[sessionId]) {
+      return Object.assign({}, debouncedWatchSaves[sessionId], {
+        history: Array.isArray(debouncedWatchSaves[sessionId].history) ? debouncedWatchSaves[sessionId].history.slice() : []
+      });
+    }
+
+    return parseJson(localStorage.getItem(STORAGE_KEYS.watchPrefix + sessionId), null);
+  }
+
+  function saveWatchSession(session) {
+    if (!session || !session.id) {
+      return;
+    }
+
+    if (debouncedWatchTimers[session.id]) {
+      clearTimeout(debouncedWatchTimers[session.id]);
+      delete debouncedWatchTimers[session.id];
+    }
+    delete debouncedWatchSaves[session.id];
+    localStorage.setItem(STORAGE_KEYS.watchPrefix + session.id, JSON.stringify(session));
+  }
+
+  function saveWatchSessionDebounced(session, delay) {
+    if (!session || !session.id) {
+      return;
+    }
+
+    debouncedWatchSaves[session.id] = Object.assign({}, session, {
+      history: Array.isArray(session.history) ? session.history.slice() : []
+    });
+    if (debouncedWatchTimers[session.id]) {
+      clearTimeout(debouncedWatchTimers[session.id]);
+    }
+    debouncedWatchTimers[session.id] = setTimeout(function () {
+      flushWatchSessionSave(session.id);
+    }, Math.max(40, Number(delay) || 120));
+  }
+
+  function flushWatchSessionSave(sessionId) {
+    var pending = debouncedWatchSaves[sessionId];
+
+    if (debouncedWatchTimers[sessionId]) {
+      clearTimeout(debouncedWatchTimers[sessionId]);
+      delete debouncedWatchTimers[sessionId];
+    }
+
+    if (!pending) {
+      return;
+    }
+
+    delete debouncedWatchSaves[sessionId];
+    localStorage.setItem(STORAGE_KEYS.watchPrefix + sessionId, JSON.stringify(pending));
+  }
+
+  function deleteWatchSession(sessionId) {
+    if (!sessionId) {
+      return;
+    }
+
+    if (debouncedWatchTimers[sessionId]) {
+      clearTimeout(debouncedWatchTimers[sessionId]);
+      delete debouncedWatchTimers[sessionId];
+    }
+    delete debouncedWatchSaves[sessionId];
+    localStorage.removeItem(STORAGE_KEYS.watchPrefix + sessionId);
+  }
+
+  function getAllWatchSessions() {
+    var prefix = STORAGE_KEYS.watchPrefix;
+    var sessions = [];
+    var i;
+    var key;
+    var session;
+
+    for (i = 0; i < localStorage.length; i += 1) {
+      key = localStorage.key(i);
+      if (key && key.indexOf(prefix) === 0) {
+        session = parseJson(localStorage.getItem(key), null);
+        if (session && session.id) {
+          sessions.push(session);
+        }
+      }
+    }
+
+    return sessions.sort(function (a, b) {
+      return (b.updatedAt || b.createdAt || 0) - (a.updatedAt || a.createdAt || 0);
+    });
   }
 
   function getWorldBooks() {
@@ -1726,6 +1903,142 @@
     saveThoughtStore(store);
   }
 
+  function normalizeThoughtMood(thought, recentThoughts) {
+    var source = thought && typeof thought === "object" ? thought : {};
+    var currentMood = String(source.mood || "").trim();
+    var recentMoods = (Array.isArray(recentThoughts) ? recentThoughts : []).slice(0, 3).map(function (item) {
+      return String(item && item.mood || "").trim();
+    }).filter(Boolean);
+
+    if (currentMood && !isGenericThoughtMood(currentMood) && recentMoods.indexOf(currentMood) === -1) {
+      return currentMood;
+    }
+
+    return inferThoughtMood(source, recentMoods, currentMood);
+  }
+
+  function isGenericThoughtMood(mood) {
+    return ["复杂", "紧张", "平静", "烦躁"].indexOf(String(mood || "").trim()) !== -1;
+  }
+
+  function inferThoughtMood(thought, recentMoods, fallbackMood) {
+    var source = thought && typeof thought === "object" ? thought : {};
+    var text = [source.content, source.visibleSummary || source.summary].join(" ");
+    var candidates = [];
+    var fallbackCandidates = [
+      "嘴硬的在意",
+      "压着火",
+      "不想低头",
+      "被戳穿后的不快",
+      "心软但不认",
+      "试探",
+      "冷处理",
+      "占有欲上来",
+      "想靠近又克制",
+      "怕露怯",
+      "想压住你"
+    ];
+    var addIf = function (pattern, mood) {
+      if (pattern.test(text)) {
+        candidates.push(mood);
+      }
+    };
+    var choose;
+
+    addIf(/占有|吃醋|我的|不许|别碰|抢|独占|归我/, "占有欲上来");
+    addIf(/嘴硬|不承认|才不|没事|算了|别管|装作|不在意/, "嘴硬的在意");
+    addIf(/心软|舍不得|不忍|想哄|放不下|又疼|又想管/, "心软但不认");
+    addIf(/试探|看看|底线|逼问|套话|反问|探一探/, "试探");
+    addIf(/冷|不理|沉默|晾|回避|避开|淡下去/, "冷处理");
+    addIf(/低头|认错|服软|台阶|输了|让步|不肯/, "不想低头");
+    addIf(/戳穿|看穿|拆穿|说中|被发现|露馅/, "被戳穿后的不快");
+    addIf(/火|气|怒|烦|忍着|压住|不耐烦|发作/, "压着火");
+    addIf(/怕|慌|急|担心|不安|露怯|心虚/, "怕露怯");
+    addIf(/靠近|抱|亲|碰|贴|想要|克制|忍住/, "想靠近又克制");
+    addIf(/控制|管住|听话|规矩|边界|压制|掌控|上位/, "想压住你");
+
+    candidates = candidates.concat(fallbackCandidates);
+    choose = candidates.find(function (mood) {
+      return mood && recentMoods.indexOf(mood) === -1 && mood !== fallbackMood;
+    });
+
+    return choose || candidates[0] || fallbackMood || "试探";
+  }
+
+  function normalizeThoughtComparableText(text) {
+    return String(text || "")
+      .toLowerCase()
+      .replace(/[\s，。！？、；：,.!?;:"'“”‘’（）()[\]{}<>《》\-—_]/g, "");
+  }
+
+  function areThoughtTextsHighlySimilar(first, second) {
+    var a = normalizeThoughtComparableText(first);
+    var b = normalizeThoughtComparableText(second);
+    var chars;
+    var overlap = 0;
+
+    if (!a && !b) {
+      return true;
+    }
+
+    if (!a || !b) {
+      return false;
+    }
+
+    if (a === b) {
+      return true;
+    }
+
+    if (Math.min(a.length, b.length) >= 12 && (a.indexOf(b) !== -1 || b.indexOf(a) !== -1)) {
+      return true;
+    }
+
+    chars = Array.from(new Set(a.split("")));
+    chars.forEach(function (char) {
+      if (b.indexOf(char) !== -1) {
+        overlap += 1;
+      }
+    });
+
+    return Math.min(a.length, b.length) >= 16 && overlap / Math.max(chars.length, Array.from(new Set(b.split(""))).length) >= 0.86;
+  }
+
+  function shouldSkipThought(existingThoughts, newThought) {
+    var source = newThought && typeof newThought === "object" ? newThought : {};
+    var newMood = String(source.mood || "").trim();
+    var newContent = String(source.content || "").trim();
+    var newSummary = String(source.visibleSummary || source.summary || "").trim();
+    var last;
+
+    if (!existingThoughts || !existingThoughts.length) {
+      return false;
+    }
+
+    last = existingThoughts[0];
+
+    if (last) {
+      var lastMood = String(last.mood || "").trim();
+      var lastContent = String(last.content || "").trim();
+      var lastSummary = String(last.visibleSummary || "").trim();
+
+      if (areThoughtTextsHighlySimilar(newContent, lastContent)
+          && newMood
+          && lastMood === newMood
+          && areThoughtTextsHighlySimilar(newSummary, lastSummary)) {
+        return true;
+      }
+
+      if (areThoughtTextsHighlySimilar(newContent, lastContent)
+          && newMood
+          && lastMood === newMood
+          && areThoughtTextsHighlySimilar(newSummary || newContent, lastSummary || lastContent)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
   function addCharacterThought(characterId, thought) {
     var thoughts;
     var source = thought && typeof thought === "object" ? thought : {};
@@ -1735,6 +2048,14 @@
     }
 
     thoughts = getCharacterThoughts(characterId);
+    source = Object.assign({}, source, {
+      mood: normalizeThoughtMood(source, thoughts)
+    });
+
+    if (shouldSkipThought(thoughts, source)) {
+      return null;
+    }
+
     thoughts.unshift({
       id: String(source.id || Date.now() + Math.random()),
       source: source.source || "private",
@@ -3265,6 +3586,7 @@
             sourceGenerationId: String(item && (item.sourceGenerationId || item.generationId) || ""),
             targetType: String(item && item.targetType || ""),
             targetId: String(item && item.targetId || ""),
+            relatedCharacterIds: Array.isArray(item && item.relatedCharacterIds) ? item.relatedCharacterIds.map(String) : [],
             relatedMessageIds: Array.isArray(item && item.relatedMessageIds) ? item.relatedMessageIds.map(String) : [],
             createdAt: Number(item && item.createdAt) || Date.now()
           };
@@ -4220,6 +4542,12 @@
     getAllChatHistories: getAllChatHistories,
     getAllGroupChatHistories: getAllGroupChatHistories,
     getAllOfflineSessions: getAllOfflineSessions,
+    getWatchSession: getWatchSession,
+    saveWatchSession: saveWatchSession,
+    saveWatchSessionDebounced: saveWatchSessionDebounced,
+    flushWatchSessionSave: flushWatchSessionSave,
+    deleteWatchSession: deleteWatchSession,
+    getAllWatchSessions: getAllWatchSessions,
     getWorldBooks: getWorldBooks,
     saveWorldBooks: saveWorldBooks,
     addWorldBook: addWorldBook,
@@ -4232,6 +4560,7 @@
     getMatchedWorldBookEntries: getMatchedWorldBookEntries,
     getCharacterThoughts: getCharacterThoughts,
     saveCharacterThoughts: saveCharacterThoughts,
+    normalizeThoughtMood: normalizeThoughtMood,
     addCharacterThought: addCharacterThought,
     getRecentThoughts: getRecentThoughts,
     getUnreadThoughtCount: getUnreadThoughtCount,

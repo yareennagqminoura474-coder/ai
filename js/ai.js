@@ -12,6 +12,11 @@
   var HEART_VOICE_CONTEXT_LIMIT = 5;
   var OFFLINE_ACTION_MIN_COUNT = 4;
   var OFFLINE_ACTION_MAX_COUNT = 8;
+  var BODY_STATE_PART_ALIASES = {
+    "膝腿": "膝盖",
+    "其他受影响区域": "臀缝"
+  };
+  var DEFAULT_BODY_STATE_PARTS = ["手心", "臀部", "大腿", "臀腿连接处", "腰背", "肩颈", "膝盖", "臀缝"];
 
   function valueOrFallback(value) {
     return value ? String(value) : "未填写";
@@ -1564,11 +1569,11 @@
   }
 
   function buildPrivateMessageSchema(profile) {
-    return "{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[{\"type\":\"blockUser\",\"reason\":\"原因，仅强烈符合人设和剧情时使用\"}],\"thoughts\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}";
+    return "{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[{\"type\":\"blockUser\",\"reason\":\"原因，仅强烈符合人设和剧情时使用\"}],\"thoughts\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"嘴硬的在意\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}";
   }
 
   function buildGroupMessageSchema() {
-    return "{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"},{\"characterId\":\"角色id\",\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"characterId\":\"角色id\",\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"复杂\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}";
+    return "{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"},{\"characterId\":\"角色id\",\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"characterId\":\"角色id\",\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"试探\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}";
   }
 
   function buildOfflineEventSchema() {
@@ -1579,7 +1584,7 @@
         {"type": "action", "content": "【承接上一条 event 的具体情境，不重复已用动词/部位】"},
         {"type": "speech", "characterId": "角色ID", "content": "台词内容", "money": {"type": "transfer", "amount": "37.50", "direction": "income", "note": "备注"}}
       ],
-      "thoughts": [{"characterId": "角色ID", "content": "内心内容", "mood": "紧张", "visibleSummary": "一句摘要"}],
+      "thoughts": [{"characterId": "角色ID", "content": "内心内容", "mood": "压着火", "visibleSummary": "一句摘要"}],
       "memories": [{"characterId": "角色ID", "content": "要写入记忆的内容"}]
     });
   }
@@ -1730,6 +1735,8 @@
       "如果世界规则压住了角色，thoughts 可以写真实冲动或不甘，" + primary + " 必须体现被压住后的克制、距离、拒绝或回避。",
       "thoughts 必须能看出角色本轮的关系推进方向：拉近、拉远、压制、试探、暴露、转移、清算或沉默，不要只写泛泛心情。",
       "如果心声里在吃醋、生气、控制、试探、嘴硬或不安，可见回复要自然带出对应的别扭、压迫、反问、短促、回避或改口。",
+      "mood 必须是本轮具体情绪短词，不要只写“复杂、紧张、平静、烦躁”；优先使用“嘴硬的在意、压着火、不想低头、被戳穿后的不快、心软但不认、试探、冷处理、占有欲上来”等具体状态。",
+      "mood 不得连续复用最近心声里已经出现的 mood；如果 recentHeartVoice 已有同词，本轮必须换成更贴近当前内容的新短词。",
       "每条心声包含 characterId（私聊可省略）、content、mood、visibleSummary。visibleSummary 是用户能看到的一句短摘要，不要剧透真实动机。",
       mode === "group" ? "群聊心声只为本群相关成员生成，不要写群外角色。" : "私聊心声只为当前角色生成。"
     ].join("\n");
@@ -2207,6 +2214,7 @@
       "当前用户身体状态 JSON：",
       JSON.stringify(options.bodyState || {}),
       "本轮必须在同一次 JSON 里返回 bodyState。若没有变化，也返回承接当前状态后的完整状态。",
+      "bodyState.parts 只使用这些部位名：手心、臀部、大腿、臀腿连接处、腰背、肩颈、膝盖、臀缝；不要再输出“膝腿”或“其他受影响区域”。",
       "bodyState 要和剧情一致，记录用户身体感受、舒适度、参考建议和各部位状态；可以写体温、破皮/发热风险，但不要做医学诊断，不要渲染低俗露骨细节。",
       "recoverySuggestion 只作为参考提醒，不要写成强制停止剧情或强行中断互动的命令。",
       "若角色是陪伴管教型，可让用户身体状态成为后续关心、监督、休息安排和边界提醒的依据。"
@@ -2260,7 +2268,7 @@
   }
 
   function buildBodyStateSchemaText() {
-    return "\"bodyState\":{\"overallCondition\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"currentNote\":\"当前用户身体状态说明\",\"energy\":80,\"moodInfluence\":\"对用户情绪的影响\",\"sorenessLevel\":0,\"painLevel\":0,\"rednessLevel\":0,\"bruiseRisk\":\"低/中/高\",\"sittingComfort\":\"正常\",\"walkingComfort\":\"正常\",\"handUseComfort\":\"正常\",\"touchSensitivity\":\"正常\",\"bodyTemperature\":\"正常/偏热/发热风险\",\"feverRisk\":\"低/中/高\",\"skinBreakage\":\"无/轻微/需要处理\",\"restNeeded\":false,\"recoverySuggestion\":\"参考建议\",\"parts\":{\"手心\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀部\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"大腿\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀腿连接处\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"腰背\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"肩颈\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"膝腿\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"其他受影响区域\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"}}}";
+    return "\"bodyState\":{\"overallCondition\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"currentNote\":\"当前用户身体状态说明\",\"energy\":80,\"moodInfluence\":\"对用户情绪的影响\",\"sorenessLevel\":0,\"painLevel\":0,\"rednessLevel\":0,\"bruiseRisk\":\"低/中/高\",\"sittingComfort\":\"正常\",\"walkingComfort\":\"正常\",\"handUseComfort\":\"正常\",\"touchSensitivity\":\"正常\",\"bodyTemperature\":\"正常/偏热/发热风险\",\"feverRisk\":\"低/中/高\",\"skinBreakage\":\"无/轻微/需要处理\",\"restNeeded\":false,\"recoverySuggestion\":\"参考建议\",\"parts\":{\"手心\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀部\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"大腿\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀腿连接处\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"腰背\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"肩颈\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"膝盖\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀缝\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"}}}";
   }
 
   function appendOptionalSchema(schemaText, options) {
@@ -2978,6 +2986,19 @@
     };
   }
 
+  function buildOfflineSceneContinuityRules(recentSceneHint) {
+    return [
+      "【线下场景连续性】",
+      "当前时间、地点、光线、天气、人物站位、距离和正在做的事，必须从最近线下历史推断；最近场景提示优先于旧 scene 设置。",
+      recentSceneHint ? "最近场景提示：\n" + recentSceneHint : "没有明确场景时，根据最近历史自然推断，不默认白天/家/学校。",
+      "前文是晚上/深夜/夜里/凌晨，下一轮不能突然白天、清晨、天亮或阳光照进来。",
+      "前文在室内，下一轮不能突然室外；前文在桌边/床边/门口/走廊/房间，下一轮必须继续同一空间。",
+      "禁止无衔接地写“天亮了”“阳光照进来”“来到教室”“回到家”“坐在咖啡馆”。",
+      "如果需要换场景，必须先用 1-2 条 action 写清收拾东西、起身离开、走过走廊、推开门、车程/路程或时间流逝。",
+      "用户没有输入新动作时，只推进当前场景里的动作、距离、沉默、话题和情绪，不要重开一幕。"
+    ].filter(Boolean).join("\n");
+  }
+
   function buildInlineOfflineMessages(context) {
     var mode = context.mode === "group" ? "group" : "private";
     var participants = Array.isArray(context.participants) ? context.participants : [];
@@ -2988,12 +3009,11 @@
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines((context.history || []).slice(-CHARACTER_LINE_HISTORY_WINDOW), "", CHARACTER_LINE_EXTRACT_LIMIT));
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(participants, context.history);
     var timeGapInfo = detectRecentTimeGapText(context.history);
-    var scene = context.scene || {};
+    var recentSceneHint = String(context.recentSceneHint || "").trim();
     var userContext = buildUserContext(context.userSettings || {});
-    var sceneText = [
-      scene.name ? "场景：" + scene.name : "",
-      scene.description ? "场景描述：" + scene.description : ""
-    ].filter(Boolean).join("\n");
+    var sceneText = recentSceneHint
+      ? "最近场景连续性提示：\n" + recentSceneHint
+      : "";
     var selectedWorldBookIds = getSelectedWorldBookIds(mode, context.targetId || "", context);
     var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
     var contextText = buildWorldBookDecisionContext({
@@ -3012,7 +3032,7 @@
         userContext.persona || "暂无"
       ].join("\n"),
       relationshipStatus: userContext.relationshipName || "",
-      sceneText: sceneText || "未指定",
+      sceneText: sceneText || "未指定，请根据最近历史自然推断，不默认白天/家/学校",
       chatMemoryText: formatChatMemoryList(chatMemories),
       previousReplyText: context.previousReplyText || context.lastAssistantText || "",
       extraText: [
@@ -3091,6 +3111,7 @@
           buildRelationshipDriveRules(mode === "group" ? "group" : "private"),
           buildRelationshipProgressionRules("offline"),
           buildCharacterDecisionCore("offline", worldBookContext),
+          buildOfflineSceneContinuityRules(recentSceneHint),
           recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -3116,7 +3137,7 @@
           modeLabel: mode === "group" ? "群聊线下推进" : "私聊线下推进",
           taskMode: "offline",
           userInput: context.userInput,
-          sceneText: sceneText || "未指定",
+          sceneText: sceneText || "未指定，请根据最近历史自然推断，不默认白天/家/学校",
           beforeContext: "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           contextLabel: "最近 10-16 条聊天/剧情上下文：",
           recentHistory: historyText || "暂无历史",
@@ -3138,6 +3159,7 @@
             "speech 内容：只写说出口的话，台词要符合角色人设，不要全部温柔解释。",
             "不要使用固定模板台词，如“过来”“看着我”“别让我猜”“别逞强”“先回我”；台词要源自当前角色与情境。",
             "action 描写要连贯且不要重复同一动作细节，避免使用简单套话式动作。",
+            buildOfflineSceneContinuityRules(recentSceneHint),
             "如果线下剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
             "memories 是长期记忆，不要为了凑数额外生成。"
           ].join("\n")
@@ -3176,11 +3198,14 @@
     var participants = Array.isArray(context.participants) ? context.participants : [];
     var validIds = participants.map(function (p) { return p.id; });
     var fallbackId = validIds[0] || "";
+    var recentSceneHint = String(context.recentSceneHint || "").trim();
     var scene = context.scene || context.offlineScene || {};
-    var sceneText = [
-      scene.name ? "场景：" + scene.name : "",
-      scene.description ? "场景描述：" + scene.description : ""
-    ].filter(Boolean).join("\n");
+    var sceneText = recentSceneHint
+      ? "最近场景连续性提示：\n" + recentSceneHint
+      : [
+        scene.name ? "场景：" + scene.name : "",
+        scene.description ? "场景描述：" + scene.description : ""
+      ].filter(Boolean).join("\n");
 
     var offlineHistory = Array.isArray(context.offlineHistory) ? context.offlineHistory : [];
     var inlineHistory = Array.isArray(context.history) ? context.history : [];
@@ -3211,7 +3236,10 @@
           "4. 每条新增 action 必须承接前一条 event 的情境，由当前场景和角色状态自然生成，不得使用固定句库。",
           "5. 同一轮中不得重复动词、视线方向或身体部位描写；避免反复使用「垂眼」「偏头」「靠近」「转身」「目光一沉」「停在原地」等泛用动作词。",
           "6. action 用第三人称写，有镜头感，一条写一个完整画面，不超过三句。",
-          "7. 只输出修复后的完整 events 数组，JSON 格式：{\"events\":[...]}"
+          "7. repair 只补动作和节奏，不得为了补 action 改时间、地点、光线、天气、站位或正在做的事；必须保留原场景。",
+          "8. 前文是晚上不能修成白天/清晨/阳光；前文在室内、桌边、床边、门口或走廊，不能修成室外、教室、咖啡馆或其他新地点。",
+          "9. 如果原 events 已经换场景但没有过渡，只能补 1-2 条过渡 action（收拾东西、起身离开、走过走廊、推开门、车程/路程/时间流逝），不能直接硬切。",
+          "10. 只输出修复后的完整 events 数组，JSON 格式：{\"events\":[...]}"
         ].join("\n")
       },
       {
@@ -3312,11 +3340,15 @@
     var participants = Array.isArray(context.participants) ? context.participants : [];
     var sharedMemories = context.sharedMemories || {};
     var chatMemories = getChatMemoriesForPrompt("offline", context.targetId || "", context.chatMemories);
+    var recentSceneHint = String(context.recentSceneHint || "").trim();
     var scene = context.scene || context.offlineScene || {};
     var sceneText = [
       scene.name ? "场景：" + scene.name : "",
       scene.description ? "场景描述：" + scene.description : ""
     ].filter(Boolean).join("\n");
+    if (recentSceneHint) {
+      sceneText = "最近场景连续性提示：\n" + recentSceneHint + (sceneText ? "\n旧场景弱参考（不得覆盖最近剧情）：\n" + sceneText : "");
+    }
     var offlineEvents = (Array.isArray(context.offlineHistory) ? context.offlineHistory : [])
       .filter(function (event) {
         return event && event.content && event.type !== "loading" && event.type !== "error";
@@ -3432,6 +3464,7 @@
           buildRelationshipDriveRules(context.mode === "group" ? "group" : "private"),
           buildRelationshipProgressionRules("offline"),
           buildCharacterDecisionCore("offline", worldBookContext),
+          buildOfflineSceneContinuityRules(recentSceneHint),
           recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -3479,6 +3512,7 @@
             "speech 内容：只写说出口的话，台词要符合角色人设，不要全部温柔解释。",
             "不要使用固定模板台词，如“过来”“看着我”“别让我猜”“别逞强”“先回我”；台词要源自当前角色与情境。",
             "action 描写要连贯且不要重复同一动作细节，避免使用简单套话式动作。",
+            buildOfflineSceneContinuityRules(recentSceneHint),
             "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。"
           ].join("\n")
         })
@@ -4261,7 +4295,8 @@
     }
 
     parts = source.parts && typeof source.parts === "object" && !Array.isArray(source.parts) ? source.parts : {};
-    ["手心", "臀部", "大腿", "臀腿连接处", "腰背", "肩颈", "膝腿", "其他受影响区域"].forEach(function (partName) {
+    parts = migrateBodyStateResultParts(parts);
+    DEFAULT_BODY_STATE_PARTS.forEach(function (partName) {
       normalizedParts[partName] = normalizeBodyPartResult(parts[partName] || {});
     });
     Object.keys(parts).forEach(function (partName) {
@@ -4288,6 +4323,43 @@
       recoverySuggestion: String(source.recoverySuggestion || "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。"),
       parts: normalizedParts,
       updatedAt: Date.now()
+    };
+  }
+
+  function migrateBodyStateResultParts(parts) {
+    var migratedParts = Object.assign({}, parts || {});
+
+    Object.keys(BODY_STATE_PART_ALIASES).forEach(function (oldName) {
+      var newName = BODY_STATE_PART_ALIASES[oldName];
+
+      if (!Object.prototype.hasOwnProperty.call(migratedParts, oldName)) {
+        return;
+      }
+
+      if (Object.prototype.hasOwnProperty.call(migratedParts, newName)) {
+        migratedParts[newName] = mergeBodyPartResult(migratedParts[newName], migratedParts[oldName]);
+      } else {
+        migratedParts[newName] = migratedParts[oldName];
+      }
+
+      delete migratedParts[oldName];
+    });
+
+    return migratedParts;
+  }
+
+  function mergeBodyPartResult(primary, legacy) {
+    var current = normalizeBodyPartResult(primary || {});
+    var old = normalizeBodyPartResult(legacy || {});
+
+    return {
+      status: current.status && current.status !== "正常" ? current.status : old.status,
+      soreness: current.soreness || old.soreness,
+      pain: current.pain || old.pain,
+      redness: current.redness || old.redness,
+      notes: [current.notes, old.notes].filter(Boolean).filter(function (note, index, list) {
+        return list.indexOf(note) === index;
+      }).join("；")
     };
   }
 
@@ -7900,6 +7972,143 @@
       }).join("\n");
   }
 
+  function summarizeWatchRecentScene(watchHistory) {
+    var events = (Array.isArray(watchHistory) ? watchHistory : []).filter(function (event) {
+      return event && event.content;
+    }).slice(-12);
+    var lines = events.map(function (event) {
+      if (event.type === "action" || event.role === "action") {
+        return "旁白：" + limitText(event.content || "", 100);
+      }
+      return (event.characterName || event.characterId || "角色") + "：" + limitText(event.content || "", 100);
+    });
+
+    return lines.length
+      ? "最近观看历史锚点：\n" + lines.join("\n")
+      : "";
+  }
+
+  function buildWatchSystemPrompt(session, characters, watchHistory, options) {
+    var requestOptions = options || {};
+    var scene = session && session.scene || {};
+    var participantCount = (characters || []).length;
+    var hasWatchHistory = Array.isArray(watchHistory) && watchHistory.length > 0;
+    var recentWatchSceneHint = summarizeWatchRecentScene(watchHistory);
+
+    var characterSections = (characters || []).map(function (char) {
+      var memories = getMemoryForCharacter(char.id);
+      var recentThoughts = window.AppStorage && window.AppStorage.getRecentThoughts
+        ? (window.AppStorage.getRecentThoughts(char.id, 8) || [])
+        : [];
+      var chatSettings = char.chatSettings || {};
+      var privateMemories = window.AppStorage && window.AppStorage.getChatMemories
+        ? window.AppStorage.getChatMemories("private", char.id).slice(0, 5)
+        : [];
+      var thoughtsText = recentThoughts.slice(0, 3).filter(function (t) {
+        return t && (t.content || t.mood);
+      }).map(function (t, i) {
+        return (i + 1) + ". " + limitText(t.content || "", 120)
+          + (t.mood ? "（心情：" + t.mood + "）" : "");
+      }).join("\n") || "暂无";
+      var privateMemoText = privateMemories.length
+        ? privateMemories.map(function (m) { return "- " + limitText(m.content || "", 80); }).join("\n")
+        : "暂无";
+
+      return [
+        "【角色：" + valueOrFallback(char.name) + "（ID：" + char.id + "）】",
+        "人设：" + valueOrFallback(buildMergedCharacterPersona(char)),
+        "当前情绪：" + valueOrFallback(char.currentMood || chatSettings.currentMood),
+        "说话禁忌：" + valueOrFallback(char.taboo || chatSettings.taboo),
+        "长期记忆（最近）：\n" + (formatMemoryList(memories) || "暂无"),
+        "与用户的聊天记忆摘要：\n" + privateMemoText,
+        "最近心声：\n" + thoughtsText
+      ].filter(Boolean).join("\n");
+    }).join("\n\n");
+
+    var historyText = (Array.isArray(watchHistory) ? watchHistory : []).slice(-20).map(function (event) {
+      if (event.type === "action" || event.role === "action") {
+        return "【旁白】" + (event.content || "");
+      }
+      return (event.characterName || event.characterId || "?") + "：" + (event.content || "");
+    }).join("\n") || "（对话刚开始，还没有历史记录）";
+
+    var directorNote = String(requestOptions.directorNote || "").trim();
+
+    var countHint = participantCount === 1
+      ? "当前只有 1 个角色。请让该角色独白、做某件事、给未入场的人发消息、回忆某人。禁止让用户出场。"
+      : "当前有 " + participantCount + " 个角色。每轮生成 3-10 条消息。至少 2 个角色参与。不要平均轮流，要有自然的插话、打断、冷场、转移话题。";
+
+    return [
+      "A. 观看模式 watchMode",
+      "当前是观看模式（watch mode）。用户是旁观者，不在场，不参与，不发言。",
+      "禁止：替用户说话、替用户行动、让角色集体突然对用户说话、让用户以任何身份出现在场景里。",
+      "你的任务是生成角色之间的自然互动、独白或场景动作，就像旁观者在观看一段正在发生的剧情。",
+      "",
+      "B. 角色档案（每个角色都有独立视角，A 对 B 的记忆不等于 B 对 A 的记忆）",
+      characterSections,
+      "",
+      "C. 场景连续性",
+      hasWatchHistory
+        ? "后续推进优先沿用 watch history 里最近发生的时间、地点、光线、天气、人物站位、距离和正在做的事。"
+        : "第一轮可以使用用户填写的场景/氛围作为开场。",
+      "初始场景名称：" + valueOrFallback(scene.name || "未指定"),
+      "初始场景描述：" + valueOrFallback(scene.description || "无"),
+      recentWatchSceneHint,
+      "如果导演提示没有要求换场景，不要突然换时间/地点；如果导演提示要求换场景，也必须先写过渡 action。",
+      "禁止无衔接地从夜晚跳到白天、从室内跳到室外、从房间/桌边/床边/走廊跳到教室/咖啡馆等新地点。",
+      "",
+      "D. 当前对话历史（最近 20 条）",
+      historyText,
+      "",
+      directorNote ? "E. 导演提示 / 场景补充\n" + directorNote : "",
+      "",
+      "F. " + countHint,
+      "",
+      "G. 输出规则",
+      "1. 必须输出合法 JSON，格式：",
+      '{"messages":[{"characterId":"角色ID","type":"text","content":"发言"},{"type":"action","content":"旁白动作"}],"thoughts":[{"characterId":"角色ID","content":"内心独白","mood":"具体心情","visibleSummary":"摘要"}],"memories":[{"characterId":"角色ID","content":"值得记录的事件","relatedCharacterIds":["其他角色ID"]}]}',
+      "2. messages 的 type 只能是 text 或 action；action 类型不填 characterId。",
+      "3. thoughts 每个角色最多 1 条；mood 要具体，例如：压着火 / 嘴硬的在意 / 冷处理 / 试探 / 被戳穿后的不快 / 心软但不认 / 占有欲上来 / 不想低头。",
+      "4. memories 只在发生了值得角色记住的事情时才填，不要每轮都写；A 和 B 的记忆要分别写，视角不同。",
+      "5. memories.content 要写成角色真实经历过的记忆，不要写“观看模式里”“旁观者看到”“用户设置”等元信息；如果没有值得记住的事，memories 返回空数组。",
+      "6. content 里禁止出现“观看模式”“用户”“旁观者”“系统”“AI”等词。",
+      "7. 角色的记忆、人设、心声必须影响本轮语气，但不能直接说出来。",
+      "8. 每个角色保持自己的声音，不要让所有角色语气都趋于温柔陪聊。"
+    ].filter(Boolean).join("\n");
+  }
+
+  async function sendWatchRequest(session, characters, options) {
+    var requestOptions = options || {};
+    var watchHistory = session && Array.isArray(session.history) ? session.history : [];
+
+    var systemPrompt = buildWatchSystemPrompt(session, characters, watchHistory, requestOptions);
+    var userMessage = requestOptions.directorNote
+      ? "请根据导演提示继续推进场景。"
+      : "请推进场景，生成角色互动。";
+
+    var messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage }
+    ];
+
+    var rawContent = await sendConfiguredChatMessages(messages);
+    var parsed = parseJsonFromText(rawContent);
+    var validIds = (characters || []).map(function (c) { return c.id; });
+
+    return {
+      messages: Array.isArray(parsed && parsed.messages) ? parsed.messages.filter(function (m) {
+        return m && m.content && (m.type === "action" || (m.characterId && validIds.indexOf(m.characterId) !== -1));
+      }) : [],
+      thoughts: Array.isArray(parsed && parsed.thoughts) ? parsed.thoughts.filter(function (t) {
+        return t && t.characterId && validIds.indexOf(t.characterId) !== -1 && t.content;
+      }) : [],
+      memories: Array.isArray(parsed && parsed.memories) ? parsed.memories.filter(function (m) {
+        return m && m.characterId && validIds.indexOf(m.characterId) !== -1 && m.content;
+      }) : [],
+      rawContent: rawContent
+    };
+  }
+
   window.AIService = {
     MISSING_SETTINGS_MESSAGE: MISSING_SETTINGS_MESSAGE,
     buildSystemPrompt: buildSystemPrompt,
@@ -7913,6 +8122,7 @@
     sendGroupChatRequest: sendGroupChatRequest,
     sendInlineOfflineRequest: sendInlineOfflineRequest,
     sendOfflineRequest: sendOfflineRequest,
+    sendWatchRequest: sendWatchRequest,
     buildWorldBookContext: buildWorldBookContext,
     generateCharacterDiary: generateCharacterDiary,
     generateMomentWithComments: generateMomentWithComments,

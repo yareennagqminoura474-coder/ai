@@ -11,6 +11,7 @@
   var selectedGroupMessageIds = [];
   var INITIAL_GROUP_RENDER_LIMIT = 60;
   var groupVisibleMessageCounts = {};
+  var groupHistoryLoadSuppressedUntil = {};
   var groupInputDrafts = {};
   var currentGroupRenderToken = "";
   var collapsedAnnouncements = {};
@@ -103,6 +104,48 @@
     var value = normalizeDisplayText(text);
 
     return value.length > 0 && value.length <= 6 && value.indexOf("\n") === -1 ? " short-text" : "";
+  }
+
+  function captureChatScrollState(wrap) {
+    if (!wrap) {
+      return null;
+    }
+
+    return {
+      scrollTop: wrap.scrollTop,
+      scrollHeight: wrap.scrollHeight,
+      nearBottom: wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight <= 80
+    };
+  }
+
+  function restoreChatScrollState(wrap, state, isStillActive) {
+    if (!wrap || !state) {
+      return;
+    }
+
+    requestAnimationFrame(function () {
+      var maxScrollTop;
+
+      if (typeof isStillActive === "function" && !isStillActive()) {
+        return;
+      }
+
+      if (state.nearBottom) {
+        wrap.scrollTop = wrap.scrollHeight;
+        return;
+      }
+
+      maxScrollTop = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
+      wrap.scrollTop = Math.min(Math.max(0, state.scrollTop), maxScrollTop);
+    });
+  }
+
+  function suppressGroupHistoryLoad(groupId) {
+    groupHistoryLoadSuppressedUntil[groupId] = Date.now() + 700;
+  }
+
+  function isGroupHistoryLoadSuppressed(groupId) {
+    return Date.now() < (groupHistoryLoadSuppressedUntil[groupId] || 0);
   }
 
   function getCharacterById(characterId) {
@@ -703,7 +746,7 @@
           return [
             '<div class="message-row user message-action-target" data-message-id="' + messageId + '">',
             selectCheck,
-            '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + renderGroupMessageContent(message) + "</div>",
+            '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + renderGroupMessageContent(message) + renderEditedMark(message) + "</div>",
             userAvatar,
             "</div>"
           ].join("");
@@ -713,7 +756,7 @@
           return [
             '<div class="message-row system message-action-target" data-message-id="' + messageId + '">',
             selectCheck,
-            '  <div class="group-system-message">' + escapeHtml(message.content) + "</div>",
+            '  <div class="group-system-message">' + escapeHtml(message.content) + renderEditedMark(message) + "</div>",
             "</div>"
           ].join("");
         }
@@ -733,7 +776,11 @@
       bindGroupHistoryScrollLoader(wrap, groupId);
     }
 
-    if (!isGroupMessageSelectionMode && !renderOptions.skipScroll) {
+    if (renderOptions.restoreScrollState) {
+      restoreChatScrollState(wrap, renderOptions.restoreScrollState, function () {
+        return groupId === activeGroupId;
+      });
+    } else if (!isGroupMessageSelectionMode && !renderOptions.skipScroll) {
       if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
         window.AppApiJobs.scheduleScrollToBottom(wrap);
       } else {
@@ -751,11 +798,14 @@
 
   function getGroupVisibleMessages(groupId, messages, options) {
     var allMessages = Array.isArray(messages) ? messages : [];
-    var forceFull = options && options.forceFull || isGroupMessageSelectionMode;
+    var forceFull = options && options.forceFull;
+    var selectionFull = isGroupMessageSelectionMode;
     var current = groupVisibleMessageCounts[groupId] || INITIAL_GROUP_RENDER_LIMIT;
-    var count = forceFull ? allMessages.length : Math.min(allMessages.length, Math.max(INITIAL_GROUP_RENDER_LIMIT, current));
+    var count = forceFull || selectionFull ? allMessages.length : Math.min(allMessages.length, Math.max(INITIAL_GROUP_RENDER_LIMIT, current));
 
-    groupVisibleMessageCounts[groupId] = count;
+    if (!selectionFull || forceFull) {
+      groupVisibleMessageCounts[groupId] = count;
+    }
     return {
       messages: allMessages.slice(Math.max(0, allMessages.length - count)),
       hiddenCount: Math.max(0, allMessages.length - count)
@@ -790,6 +840,10 @@
 
     wrap.__groupHistoryLoaderBound = groupId;
     wrap.addEventListener("scroll", function () {
+      if (isGroupHistoryLoadSuppressed(groupId)) {
+        return;
+      }
+
       if (activeGroupId !== groupId || wrap.scrollTop > 28) {
         return;
       }
@@ -923,7 +977,7 @@
       '    <span class="group-message-name">' + escapeHtml(message.characterName || "角色") + "</span>",
       isStandaloneMessage(message)
         ? renderStandaloneGroupMessage(message)
-        : '    <div class="' + bubbleClass + '">' + renderGroupMessageContent(message) + "</div>",
+        : '    <div class="' + bubbleClass + '">' + renderGroupMessageContent(message) + renderEditedMark(message) + "</div>",
       "  </div>",
       "</div>"
     ].join("");
@@ -944,7 +998,7 @@
     return [
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + "</div>",
+      '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + renderEditedMark(message) + "</div>",
       renderGroupUserMessageAvatar(group, settings),
       "</div>"
     ].join("");
@@ -954,7 +1008,7 @@
     return [
       '<div class="message-row system offline-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="inline-offline-action-card"><i aria-hidden="true">✦</i><span>' + escapeHtml(message.content) + "</span></div>",
+      '  <div class="inline-offline-action-card"><i aria-hidden="true">✦</i><span>' + escapeHtml(message.content) + renderEditedMark(message) + "</span></div>",
       "</div>"
     ].join("");
   }
@@ -968,7 +1022,7 @@
       renderAvatar(speaker, "message-avatar"),
       '  <div class="group-message-main">',
       '    <span class="group-message-name">' + escapeHtml(message.characterName || speaker.name || "角色") + "</span>",
-      '    <div class="inline-offline-speech-bubble">' + escapeHtml(message.content) + "</div>",
+      '    <div class="inline-offline-speech-bubble">' + escapeHtml(message.content) + renderEditedMark(message) + "</div>",
       '    <span class="inline-offline-time">' + formatInlineTime(message.createdAt) + "</span>",
       "  </div>",
       "</div>"
@@ -982,6 +1036,10 @@
 
   function renderGroupMessageContent(message) {
     return escapeHtml(normalizeDisplayText(message.content));
+  }
+
+  function renderEditedMark(message) {
+    return message && message.edited ? '<span class="message-edited-mark">已编辑</span>' : "";
   }
 
   function isStandaloneMessage(message) {
@@ -1346,6 +1404,18 @@
     return Boolean(message && message.id && message.type !== "loading");
   }
 
+  function isGroupMessageEditable(message) {
+    var type = String(message && message.type || "text");
+
+    return Boolean(message && message.id && message.content && (
+      type === "text"
+      || type === "offlineUserAction"
+      || type === "offlineSpeech"
+      || type === "offlineAction"
+      || type === "error"
+    ));
+  }
+
   function getSelectableGroupMessages(messages) {
     return (Array.isArray(messages) ? messages : []).filter(isGroupMessageSelectable);
   }
@@ -1440,6 +1510,7 @@
   function deleteSelectedGroupMessages() {
     var ids = selectedGroupMessageIds.slice();
     var messages;
+    var scrollState;
 
     if (!activeGroupId || !ids.length) {
       return;
@@ -1449,6 +1520,7 @@
       return;
     }
 
+    scrollState = captureChatScrollState(getElement("groupChatMessages"));
     messages = window.AppStorage.getGroupChatHistory(activeGroupId).filter(function (message) {
       return ids.indexOf(message.id) === -1;
     });
@@ -1456,7 +1528,8 @@
 
     isGroupMessageSelectionMode = false;
     selectedGroupMessageIds = [];
-    renderGroupChatMessages(activeGroupId);
+    suppressGroupHistoryLoad(activeGroupId);
+    renderGroupChatMessages(activeGroupId, { skipScroll: true, restoreScrollState: scrollState });
     renderGroupList();
   }
 
@@ -1467,6 +1540,7 @@
 
     window.MessageActionMenu.open({
       canRegenerate: message.role === "user",
+      canEdit: isGroupMessageEditable(message),
       onAction: function (action) {
         handleGroupMessageAction(action, message.id);
       }
@@ -1496,12 +1570,19 @@
       return;
     }
 
+    if (action === "edit") {
+      openGroupMessageEditSheet(messageId);
+      return;
+    }
+
     if (action === "delete") {
+      var scrollState = captureChatScrollState(getElement("groupChatMessages"));
       messages = messages.filter(function (item) {
         return item.id !== messageId;
       });
       window.AppStorage.saveGroupChatHistory(group.id, messages);
-      renderGroupChatMessages(group.id);
+      suppressGroupHistoryLoad(group.id);
+      renderGroupChatMessages(group.id, { skipScroll: true, restoreScrollState: scrollState });
       renderGroupList();
       return;
     }
@@ -1515,6 +1596,46 @@
     if (action === "regenerate" && message.role === "user") {
       openGroupRegenerateReplySheet(messageId);
     }
+  }
+
+  function openGroupMessageEditSheet(messageId) {
+    var groupId = activeGroupId;
+    var messages = groupId ? window.AppStorage.getGroupChatHistory(groupId) : [];
+    var message = messages.find(function (item) {
+      return item.id === messageId;
+    });
+
+    if (!message || !isGroupMessageEditable(message) || !window.WeChatTools || !window.WeChatTools.openMessageEditSheet) {
+      return;
+    }
+
+    window.WeChatTools.openMessageEditSheet(message, function (content) {
+      var scrollState = captureChatScrollState(getElement("groupChatMessages"));
+      var editedAt = Date.now();
+      var changed = false;
+      var nextMessages = window.AppStorage.getGroupChatHistory(groupId).map(function (item) {
+        if (item.id !== messageId) {
+          return item;
+        }
+
+        changed = true;
+        return Object.assign({}, item, {
+          content: normalizeDisplayText(content),
+          edited: true,
+          editedAt: editedAt
+        });
+      });
+
+      if (!changed) {
+        return false;
+      }
+
+      window.AppStorage.saveGroupChatHistory(groupId, nextMessages);
+      suppressGroupHistoryLoad(groupId);
+      renderGroupChatMessages(groupId, { skipScroll: true, restoreScrollState: scrollState });
+      renderGroupList();
+      return true;
+    });
   }
 
   function copyText(text) {

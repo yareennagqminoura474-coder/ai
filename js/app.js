@@ -24,7 +24,10 @@
     "worldBookScreen",
     "diaryScreen",
     "characterSpaceScreen",
-    "thoughtsScreen"
+    "thoughtsScreen",
+    "watchListScreen",
+    "watchSetupScreen",
+    "watchScreen"
   ];
   var activePage = "homeScreen";
   var currentMessageAction = null;
@@ -68,6 +71,7 @@
   var desktopApps = [
     { id: "wechat", name: "微信", icon: "微", className: "desktop-wechat", action: "wechat" },
     { id: "photo", name: "相册", icon: "相", className: "desktop-photo", action: "photo" },
+    { id: "watch", name: "观看", icon: "眼", className: "desktop-watch", action: "watch" },
     { id: "worldbook", name: "世界书", icon: "世", className: "desktop-worldbook", action: "worldbook" },
     { id: "diary", name: "日记", icon: "日", className: "desktop-diary", action: "diary" },
     { id: "theme", name: "美化", icon: "美", className: "desktop-theme", action: "theme" },
@@ -217,6 +221,12 @@
 
     if (pageId === "offlineScreen") {
       window.OfflineManager.renderOfflineMessages();
+    }
+
+    if (pageId === "watchListScreen") {
+      if (window.WatchManager && window.WatchManager.renderSessionList) {
+        window.WatchManager.renderSessionList();
+      }
     }
 
     if (pageId === "themeScreen") {
@@ -456,8 +466,19 @@
       setActivePage("wechatScreen");
       return;
     }
+    if (action === "watch") {
+      openWatchListScreen();
+      return;
+    }
     if (action === "emoji") {
       window.alert("表情包图库在聊天表情面板里导入和使用。");
+    }
+  }
+
+  function openWatchListScreen() {
+    setActivePage("watchListScreen");
+    if (window.WatchManager && window.WatchManager.renderSessionList) {
+      window.WatchManager.renderSessionList();
     }
   }
 
@@ -605,6 +626,13 @@
 
     if (action === "group") {
       window.GroupManager.openCreateGroupScreen();
+      return;
+    }
+
+    if (action === "watch") {
+      if (window.WatchManager && window.WatchManager.openSetup) {
+        window.WatchManager.openSetup("wechatScreen");
+      }
       return;
     }
 
@@ -2247,6 +2275,7 @@
     getElement("thoughtsBackBtn").addEventListener("click", function () {
       setActivePage(thoughtsReturnPage || "homeScreen");
     });
+    getElement("watchListBackBtn").addEventListener("click", goHome);
   }
 
   function bindForms() {
@@ -2650,6 +2679,7 @@
   function openMessageActionMenu(options) {
     var sheet = getElement("messageActionSheet");
     var regenerateButton = sheet ? sheet.querySelector('[data-action="regenerate"]') : null;
+    var editButton = sheet ? sheet.querySelector('[data-action="edit"]') : null;
 
     if (!sheet) {
       return;
@@ -2659,6 +2689,10 @@
 
     if (regenerateButton) {
       regenerateButton.classList.toggle("hidden", Boolean(options && options.canRegenerate === false));
+    }
+
+    if (editButton) {
+      editButton.classList.toggle("hidden", !options || options.canEdit !== true);
     }
 
     sheet.classList.remove("hidden");
@@ -2704,6 +2738,58 @@
 
     emojiSendCallback = null;
     imageSendCallback = null;
+  }
+
+  function openMessageEditSheet(message, onSave) {
+    var source = message || {};
+    var original = String(source.content || "");
+
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <span></span>',
+      "  <h3>编辑消息</h3>",
+      '  <button type="button" data-close-sheet>取消</button>',
+      "</div>",
+      '<form id="messageEditForm" class="wechat-sheet-form" autocomplete="off">',
+      '  <label class="wechat-sheet-field"><span>内容</span><textarea id="messageEditContent" maxlength="4000">' + escapeHtml(original) + "</textarea></label>",
+      '  <p id="messageEditError" class="sheet-error" role="alert"></p>',
+      '  <div class="wechat-sheet-actions"><button type="button" class="outline-button" data-close-sheet>取消</button><button type="submit" class="full-button">保存</button></div>',
+      "</form>"
+    ].join(""), function (sheet) {
+      var form = sheet.querySelector("#messageEditForm");
+      var textarea = sheet.querySelector("#messageEditContent");
+      var error = sheet.querySelector("#messageEditError");
+
+      bindSheetCloseButtons(sheet);
+
+      requestAnimationFrame(function () {
+        if (textarea) {
+          textarea.focus();
+          textarea.setSelectionRange(textarea.value.length, textarea.value.length);
+        }
+      });
+
+      form.addEventListener("submit", function (event) {
+        var nextContent = textarea.value.trim();
+        var saved;
+
+        event.preventDefault();
+
+        if (!nextContent) {
+          error.textContent = "内容不能为空。";
+          return;
+        }
+
+        if (typeof onSave === "function") {
+          saved = onSave(nextContent);
+          if (saved === false) {
+            return;
+          }
+        }
+
+        closeWeChatSheet();
+      });
+    });
   }
 
   function openChatSearchSheet(options) {
@@ -2837,7 +2923,6 @@
 
   function openOfflineSceneSheet(onSelect) {
     var scenes = [
-      { name: "家", description: "熟悉、放松、适合日常互动的室内场景" },
       { name: "学校", description: "走廊、教室和课间氛围都可以自然出现" },
       { name: "图书馆", description: "安静、书架和低声交谈的空间" },
       { name: "咖啡店", description: "有饮品香气、靠窗座位和轻松谈话" },
@@ -7218,6 +7303,7 @@
     openImagePicker: openImagePicker,
     openVoiceSheet: openVoiceSheet,
     showMessageDetail: showMessageDetail,
+    openMessageEditSheet: openMessageEditSheet,
     openChatSearchSheet: openChatSearchSheet,
     openChatWorldBookSelector: openChatWorldBookSelector,
     openOfflineSceneSheet: openOfflineSceneSheet,

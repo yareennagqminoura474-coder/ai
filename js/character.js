@@ -13,6 +13,7 @@
   var selectedPrivateMessageIds = [];
   var INITIAL_PRIVATE_RENDER_LIMIT = 60;
   var privateVisibleMessageCounts = {};
+  var privateHistoryLoadSuppressedUntil = {};
   var privateInputDrafts = {};
   var currentChatRenderToken = "";
 
@@ -112,6 +113,48 @@
     var value = normalizeDisplayText(text);
 
     return value.length > 0 && value.length <= 6 && value.indexOf("\n") === -1 ? " short-text" : "";
+  }
+
+  function captureChatScrollState(wrap) {
+    if (!wrap) {
+      return null;
+    }
+
+    return {
+      scrollTop: wrap.scrollTop,
+      scrollHeight: wrap.scrollHeight,
+      nearBottom: wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight <= 80
+    };
+  }
+
+  function restoreChatScrollState(wrap, state, isStillActive) {
+    if (!wrap || !state) {
+      return;
+    }
+
+    requestAnimationFrame(function () {
+      var maxScrollTop;
+
+      if (typeof isStillActive === "function" && !isStillActive()) {
+        return;
+      }
+
+      if (state.nearBottom) {
+        wrap.scrollTop = wrap.scrollHeight;
+        return;
+      }
+
+      maxScrollTop = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
+      wrap.scrollTop = Math.min(Math.max(0, state.scrollTop), maxScrollTop);
+    });
+  }
+
+  function suppressPrivateHistoryLoad(characterId) {
+    privateHistoryLoadSuppressedUntil[characterId] = Date.now() + 700;
+  }
+
+  function isPrivateHistoryLoadSuppressed(characterId) {
+    return Date.now() < (privateHistoryLoadSuppressedUntil[characterId] || 0);
   }
 
   function getActivePage() {
@@ -965,7 +1008,11 @@
       bindPrivateHistoryScrollLoader(messagesWrap, characterId);
     }
 
-    if (!isPrivateMessageSelectionMode && !renderOptions.skipScroll) {
+    if (renderOptions.restoreScrollState) {
+      restoreChatScrollState(messagesWrap, renderOptions.restoreScrollState, function () {
+        return characterId === activeCharacterId;
+      });
+    } else if (!isPrivateMessageSelectionMode && !renderOptions.skipScroll) {
       if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
         window.AppApiJobs.scheduleScrollToBottom(messagesWrap);
       } else {
@@ -984,11 +1031,14 @@
 
   function getPrivateVisibleMessages(characterId, messages, options) {
     var allMessages = Array.isArray(messages) ? messages : [];
-    var forceFull = options && options.forceFull || isPrivateMessageSelectionMode;
+    var forceFull = options && options.forceFull;
+    var selectionFull = isPrivateMessageSelectionMode;
     var current = privateVisibleMessageCounts[characterId] || INITIAL_PRIVATE_RENDER_LIMIT;
-    var count = forceFull ? allMessages.length : Math.min(allMessages.length, Math.max(INITIAL_PRIVATE_RENDER_LIMIT, current));
+    var count = forceFull || selectionFull ? allMessages.length : Math.min(allMessages.length, Math.max(INITIAL_PRIVATE_RENDER_LIMIT, current));
 
-    privateVisibleMessageCounts[characterId] = count;
+    if (!selectionFull || forceFull) {
+      privateVisibleMessageCounts[characterId] = count;
+    }
     return {
       messages: allMessages.slice(Math.max(0, allMessages.length - count)),
       hiddenCount: Math.max(0, allMessages.length - count)
@@ -1023,6 +1073,10 @@
 
     wrap.__privateHistoryLoaderBound = characterId;
     wrap.addEventListener("scroll", function () {
+      if (isPrivateHistoryLoadSuppressed(characterId)) {
+        return;
+      }
+
       if (activeCharacterId !== characterId || wrap.scrollTop > 28) {
         return;
       }
@@ -1109,6 +1163,10 @@
     var bubbleClass = "message-bubble" + getBubbleTextClass(message.content);
     var selectCheck = renderPrivateMessageSelectCheck(message);
 
+    if (message.type === "offlineUserAction") {
+      return renderOfflineUserActionMessage(message, selectCheck);
+    }
+
     if (message.type === "offlineAction") {
       return renderOfflineActionMessage(message, selectCheck);
     }
@@ -1121,7 +1179,7 @@
       return [
         '<div class="message-row system message-action-target" data-message-id="' + messageId + '">',
         selectCheck,
-        '  <div class="group-system-message">' + escapeHtml(message.content) + "</div>",
+        '  <div class="group-system-message">' + escapeHtml(message.content) + renderEditedMark(message) + "</div>",
         "</div>"
       ].join("");
     }
@@ -1147,8 +1205,8 @@
       '<div class="message-row ' + roleClass + ' message-action-target" data-message-id="' + messageId + '">',
       selectCheck,
       roleClass === "user"
-        ? '  <div class="' + bubbleClass + '">' + renderMessageContent(message) + "</div>" + avatar
-        : avatar + '  <div class="' + bubbleClass + '">' + renderMessageContent(message) + "</div>",
+        ? '  <div class="' + bubbleClass + '">' + renderMessageContent(message) + renderEditedMark(message) + "</div>" + avatar
+        : avatar + '  <div class="' + bubbleClass + '">' + renderMessageContent(message) + renderEditedMark(message) + "</div>",
       "</div>"
     ].join("");
   }
@@ -1168,7 +1226,7 @@
     return [
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + "</div>",
+      '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + renderEditedMark(message) + "</div>",
       renderPrivateUserMessageAvatar(getCharacterById(activeCharacterId)),
       "</div>"
     ].join("");
@@ -1178,7 +1236,7 @@
     return [
       '<div class="message-row system offline-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="inline-offline-action-card"><i aria-hidden="true">✦</i><span>' + escapeHtml(message.content) + "</span></div>",
+      '  <div class="inline-offline-action-card"><i aria-hidden="true">✦</i><span>' + escapeHtml(message.content) + renderEditedMark(message) + "</span></div>",
       "</div>"
     ].join("");
   }
@@ -1192,7 +1250,7 @@
       renderAvatar(speaker, "message-avatar"),
       '  <div class="group-message-main">',
       '    <span class="group-message-name">' + escapeHtml(message.characterName || speaker.name || "角色") + "</span>",
-      '    <div class="inline-offline-speech-bubble">' + escapeHtml(message.content) + "</div>",
+      '    <div class="inline-offline-speech-bubble">' + escapeHtml(message.content) + renderEditedMark(message) + "</div>",
       '    <span class="inline-offline-time">' + formatInlineTime(message.createdAt) + "</span>",
       "  </div>",
       "</div>"
@@ -1206,6 +1264,10 @@
 
   function renderMessageContent(message) {
     return escapeHtml(normalizeDisplayText(message.content));
+  }
+
+  function renderEditedMark(message) {
+    return message && message.edited ? '<span class="message-edited-mark">已编辑</span>' : "";
   }
 
   function isStandaloneMessage(message) {
@@ -1569,6 +1631,18 @@
     return Boolean(message && message.id && message.type !== "loading");
   }
 
+  function isPrivateMessageEditable(message) {
+    var type = String(message && message.type || "text");
+
+    return Boolean(message && message.id && message.content && (
+      type === "text"
+      || type === "offlineUserAction"
+      || type === "offlineSpeech"
+      || type === "offlineAction"
+      || type === "error"
+    ));
+  }
+
   function getSelectablePrivateMessages(messages) {
     return (Array.isArray(messages) ? messages : []).filter(isPrivateMessageSelectable);
   }
@@ -1663,6 +1737,7 @@
   function deleteSelectedPrivateMessages() {
     var ids = selectedPrivateMessageIds.slice();
     var messages;
+    var scrollState;
 
     if (!activeCharacterId || !ids.length) {
       return;
@@ -1672,6 +1747,7 @@
       return;
     }
 
+    scrollState = captureChatScrollState(getElement("chatMessages"));
     messages = window.AppStorage.getChatHistory(activeCharacterId).filter(function (message) {
       return ids.indexOf(message.id) === -1;
     });
@@ -1679,7 +1755,8 @@
 
     isPrivateMessageSelectionMode = false;
     selectedPrivateMessageIds = [];
-    renderChatMessages(activeCharacterId);
+    suppressPrivateHistoryLoad(activeCharacterId);
+    renderChatMessages(activeCharacterId, { skipScroll: true, restoreScrollState: scrollState });
     renderCharacterList();
   }
 
@@ -1690,6 +1767,7 @@
 
     window.MessageActionMenu.open({
       canRegenerate: message.role === "user",
+      canEdit: isPrivateMessageEditable(message),
       onAction: function (action) {
         handlePrivateMessageAction(action, message.id);
       }
@@ -1718,12 +1796,19 @@
       return;
     }
 
+    if (action === "edit") {
+      openPrivateMessageEditSheet(messageId);
+      return;
+    }
+
     if (action === "delete") {
+      var scrollState = captureChatScrollState(getElement("chatMessages"));
       messages = messages.filter(function (item) {
         return item.id !== messageId;
       });
       window.AppStorage.saveChatHistory(activeCharacterId, messages);
-      renderChatMessages(activeCharacterId);
+      suppressPrivateHistoryLoad(activeCharacterId);
+      renderChatMessages(activeCharacterId, { skipScroll: true, restoreScrollState: scrollState });
       renderCharacterList();
       return;
     }
@@ -1741,6 +1826,46 @@
     if (action === "regenerate" && message.role === "user") {
       openPrivateRegenerateReplySheet(messageId);
     }
+  }
+
+  function openPrivateMessageEditSheet(messageId) {
+    var characterId = activeCharacterId;
+    var messages = characterId ? window.AppStorage.getChatHistory(characterId) : [];
+    var message = messages.find(function (item) {
+      return item.id === messageId;
+    });
+
+    if (!message || !isPrivateMessageEditable(message) || !window.WeChatTools || !window.WeChatTools.openMessageEditSheet) {
+      return;
+    }
+
+    window.WeChatTools.openMessageEditSheet(message, function (content) {
+      var scrollState = captureChatScrollState(getElement("chatMessages"));
+      var editedAt = Date.now();
+      var changed = false;
+      var nextMessages = window.AppStorage.getChatHistory(characterId).map(function (item) {
+        if (item.id !== messageId) {
+          return item;
+        }
+
+        changed = true;
+        return Object.assign({}, item, {
+          content: normalizeDisplayText(content),
+          edited: true,
+          editedAt: editedAt
+        });
+      });
+
+      if (!changed) {
+        return false;
+      }
+
+      window.AppStorage.saveChatHistory(characterId, nextMessages);
+      suppressPrivateHistoryLoad(characterId);
+      renderChatMessages(characterId, { skipScroll: true, restoreScrollState: scrollState });
+      renderCharacterList();
+      return true;
+    });
   }
 
   function copyText(text) {

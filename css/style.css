@@ -4488,8 +4488,11 @@ textarea::placeholder {
 }
 
 .message-bubble.short-text {
-  min-width: 72px;
+  min-width: auto;
+  width: fit-content;
   white-space: nowrap;
+  padding-left: 12px;
+  padding-right: 12px;
 }
 
 .message-row.character .message-bubble {
@@ -4562,6 +4565,19 @@ textarea::placeholder {
 .message-action-target {
   -webkit-touch-callout: none;
   user-select: none;
+}
+
+.message-edited-mark {
+  display: inline-block;
+  margin-left: 6px;
+  color: rgba(120, 128, 124, 0.74);
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 500;
+}
+
+.message-row.user .message-edited-mark {
+  color: rgba(255, 255, 255, 0.76);
 }
 
 .money-card,
@@ -7578,4 +7594,334 @@ textarea::placeholder {
   border: 1px solid rgba(255, 255, 255, 0.28);
   background: rgba(31, 38, 34, 0.18);
   color: #fff;
+}
+
+/* ============================================================
+   观看模式 Watch Mode
+   ============================================================ */
+
+.watch-screen {
+  background: var(--bg, #f6f7f4);
+}
+
+.watch-nav {
+  background: rgba(246, 247, 244, 0.96);
+}
+
+.watch-title-text {
+  font-size: 15px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* ── Messages area ── */
+
+.watch-messages {
+  flex: 1;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  padding: 14px 14px 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+}
+
+.watch-empty {
+  flex: 1;
+  display: grid;
+  place-items: center;
+  color: var(--muted, #73817a);
+  font-size: 14px;
+  text-align: center;
+  padding: 40px 20px;
+}
+
+/* ── Character speech ── */
+
+.watch-speech-row {
+  display: flex;
+  align-items: flex-start;
+  gap: 9px;
+  margin-bottom: 12px;
+}
+
+.watch-avatar {
+  width: 36px;
+  height: 36px;
+  flex: 0 0 36px;
+  border-radius: 50%;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background: linear-gradient(135deg, var(--blue, #5b9fe6), var(--green, #68bea3));
+  color: #fff;
+  font-size: 13px;
+  font-weight: 700;
+  object-fit: cover;
+}
+
+.watch-speech-main {
+  min-width: 0;
+  max-width: 80%;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 3px;
+}
+
+.watch-name {
+  color: var(--muted, #73817a);
+  font-size: 11px;
+  font-weight: 700;
+  padding-left: 2px;
+}
+
+.watch-bubble {
+  max-width: min(80vw, 360px);
+  padding: 9px 12px;
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--text, #1d2521);
+  font-size: 14px;
+  line-height: 1.55;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+  white-space: pre-wrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.07);
+  border: 1px solid rgba(0,0,0,0.06);
+}
+
+/* ── Action / narration line ── */
+
+.watch-action-line {
+  margin: 8px auto 12px;
+  max-width: 90%;
+  text-align: center;
+  color: var(--muted, #73817a);
+  font-size: 12.5px;
+  font-style: italic;
+  line-height: 1.5;
+  padding: 0 4px;
+  opacity: 0.85;
+}
+
+/* ── Loading indicator ── */
+
+.watch-loading {
+  display: flex;
+  justify-content: center;
+  padding: 12px 0;
+  margin-bottom: 8px;
+}
+
+.watch-loading-dots {
+  display: flex;
+  gap: 6px;
+}
+
+.watch-loading-dots em {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--muted, #73817a);
+  animation: watchDotPulse 1.2s ease-in-out infinite;
+  font-style: normal;
+}
+
+.watch-loading-dots em:nth-child(2) { animation-delay: 0.2s; }
+.watch-loading-dots em:nth-child(3) { animation-delay: 0.4s; }
+
+@keyframes watchDotPulse {
+  0%, 80%, 100% { opacity: 0.25; transform: scale(0.8); }
+  40%           { opacity: 1;    transform: scale(1); }
+}
+
+/* ── Composer ── */
+
+.watch-composer {
+  flex: 0 0 auto;
+  padding: 8px 12px calc(8px + env(safe-area-inset-bottom));
+  background: var(--surface, #fff);
+  border-top: 1px solid rgba(0,0,0,0.07);
+  display: flex;
+  flex-direction: column;
+  gap: 7px;
+}
+
+.watch-note-row {
+  width: 100%;
+}
+
+.watch-director-input {
+  width: 100%;
+  box-sizing: border-box;
+  padding: 8px 10px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 8px;
+  background: var(--bg, #f6f7f4);
+  color: var(--text, #1d2521);
+  font-size: 13px;
+  line-height: 1.4;
+  resize: none;
+  font-family: inherit;
+}
+
+.watch-director-input::placeholder {
+  color: var(--muted, #73817a);
+  opacity: 0.7;
+}
+
+.watch-controls {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.watch-advance-btn {
+  flex: 1;
+  padding: 9px 0;
+  background: var(--blue, #5b9fe6);
+  color: #fff;
+  border: none;
+  border-radius: 8px;
+  font-size: 14px;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.watch-advance-btn:active {
+  opacity: 0.82;
+}
+
+.watch-auto-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--muted, #73817a);
+  white-space: nowrap;
+  cursor: pointer;
+  user-select: none;
+}
+
+.watch-auto-label input[type="checkbox"] {
+  width: 16px;
+  height: 16px;
+  cursor: pointer;
+}
+
+.watch-clear-btn,
+.watch-end-btn {
+  padding: 9px 10px;
+  border: 1px solid rgba(0,0,0,0.12);
+  border-radius: 8px;
+  background: var(--surface, #fff);
+  color: var(--muted, #73817a);
+  font-size: 13px;
+  cursor: pointer;
+  white-space: nowrap;
+}
+
+.watch-end-btn {
+  color: #c0392b;
+  border-color: rgba(192,57,43,0.25);
+}
+
+.watch-clear-btn:active,
+.watch-end-btn:active {
+  opacity: 0.75;
+}
+
+/* ── Session list ── */
+
+.watch-session-card {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 14px 16px;
+  background: var(--surface, #fff);
+  border-bottom: 1px solid rgba(0,0,0,0.06);
+  cursor: pointer;
+  gap: 12px;
+}
+
+.watch-session-card:active {
+  background: rgba(0,0,0,0.04);
+}
+
+.watch-session-info {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+
+.watch-session-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text, #1d2521);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.watch-session-preview {
+  font-size: 12px;
+  color: var(--muted, #73817a);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-style: normal;
+}
+
+.watch-session-count {
+  flex: 0 0 auto;
+  font-size: 12px;
+  color: var(--muted, #73817a);
+  white-space: nowrap;
+}
+
+/* ── Desktop app icon ── */
+
+.desktop-watch {
+  background: linear-gradient(135deg, #8b5cf6, #6366f1);
+}
+
+/* ── Dark theme overrides ── */
+
+[data-theme="dark"] .watch-nav {
+  background: rgba(21, 25, 22, 0.96);
+}
+
+[data-theme="dark"] .watch-messages {
+  background: var(--bg);
+}
+
+[data-theme="dark"] .watch-bubble {
+  background: var(--surface);
+  border-color: rgba(255,255,255,0.08);
+}
+
+[data-theme="dark"] .watch-composer {
+  background: var(--surface);
+  border-top-color: rgba(255,255,255,0.08);
+}
+
+[data-theme="dark"] .watch-director-input {
+  background: var(--bg);
+  border-color: rgba(255,255,255,0.12);
+  color: var(--text);
+}
+
+[data-theme="dark"] .watch-clear-btn,
+[data-theme="dark"] .watch-end-btn {
+  background: var(--surface);
+  border-color: rgba(255,255,255,0.12);
+}
+
+@media (max-width: 400px) {
+  .watch-clear-btn {
+    display: none;
+  }
 }
