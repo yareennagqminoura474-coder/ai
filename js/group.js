@@ -2163,6 +2163,7 @@
         targetId: group.id,
         createdAt: createdAt
       });
+      writeGroupReplyMemoryForListeners(group, message, extra);
     });
 
     return {
@@ -2217,6 +2218,7 @@
           targetId: group.id,
           createdAt: createdAt
         });
+        writeGroupReplyMemoryForListeners(group, message, extra);
         saveGroupHistoryDebounced(group.id, baseMessages.concat(shown, suffix));
         if (activeGroupId === group.id) {
           scheduleGroupRender(group.id);
@@ -2410,6 +2412,7 @@
           source: "group",
           generationId: extra.generationId || "",
           sourceGenerationId: extra.generationId || "",
+          relatedCharacterIds: Array.isArray(memory.relatedCharacterIds) ? memory.relatedCharacterIds.map(String) : [],
           relatedMessageIds: extra.relatedMessageIds || [],
           targetType: "group",
           targetId: group.id,
@@ -2541,6 +2544,30 @@
         content: content,
         source: "group",
         createdAt: Date.now()
+      });
+    });
+  }
+
+  function writeGroupReplyMemoryForListeners(group, message, extra) {
+    if (!group || !message || !Array.isArray(group.memberIds) || group.settings && group.settings.memorySharingEnabled === false) {
+      return;
+    }
+
+    (group.memberIds || []).forEach(function (memberId) {
+      if (!memberId || memberId === message.characterId) {
+        return;
+      }
+
+      window.AppStorage.addCharacterMemory(memberId, {
+        content: "群聊《" + (group.name || "群聊") + "》" + (message.characterName || "某人") + " 说：" + getMessageMemoryText(message),
+        source: "group",
+        generationId: extra.generationId || "",
+        sourceGenerationId: extra.generationId || "",
+        relatedCharacterIds: message.characterId ? [message.characterId] : [],
+        relatedMessageIds: [message.id],
+        targetType: "group",
+        targetId: group.id,
+        createdAt: message.createdAt || Date.now()
       });
     });
   }

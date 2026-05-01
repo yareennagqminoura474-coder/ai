@@ -834,6 +834,53 @@
     saveActivePrivateInputDraft();
   }
 
+  function syncRecentGroupContextToPrivateMemory(characterId) {
+    if (!window.GroupManager || !window.AppStorage || !window.AppStorage.addChatMemory || !window.AppStorage.getGroups || !window.AppStorage.getGroupChatHistory) {
+      return;
+    }
+
+    var groupId = window.GroupManager.getActiveGroupId && window.GroupManager.getActiveGroupId();
+    if (!groupId) {
+      return;
+    }
+
+    var group = (window.AppStorage.getGroups() || []).find(function (item) {
+      return item && item.id === groupId;
+    });
+    if (!group || !Array.isArray(group.memberIds) || group.memberIds.indexOf(characterId) === -1) {
+      return;
+    }
+
+    var history = (window.AppStorage.getGroupChatHistory(groupId) || []).filter(function (message) {
+      return message && message.content && message.type !== "loading" && message.type !== "error";
+    }).slice(-4).map(function (message) {
+      return (message.role === "user" ? "你：" : (message.characterName || "角色") + "：") + message.content;
+    }).join("\n");
+
+    if (!history) {
+      return;
+    }
+
+    var title = "来自群聊《" + (group.name || "群聊") + "》的最近上下文";
+    var existing = window.AppStorage.getChatMemories("private", characterId);
+    if (Array.isArray(existing) && existing.some(function (item) { return item && item.title === title; })) {
+      return;
+    }
+
+    window.AppStorage.addChatMemory("private", characterId, {
+      title: title,
+      content: "最近你在群聊《" + (group.name || "群聊") + "》中的互动如下：\n" + history,
+      sourceTime: Date.now(),
+      type: "auto",
+      source: "group",
+      generationId: "",
+      sourceGenerationId: "",
+      targetType: "private",
+      targetId: characterId,
+      createdAt: Date.now()
+    });
+  }
+
   function openChatScreen(characterId) {
     var character = getCharacterById(characterId);
     var token;
@@ -845,6 +892,7 @@
     }
 
     saveActivePrivateInputDraft();
+    syncRecentGroupContextToPrivateMemory(characterId);
     activeCharacterId = characterId;
     if (window.GroupManager && window.GroupManager.deactivateActiveGroup) {
       window.GroupManager.deactivateActiveGroup();

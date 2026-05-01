@@ -800,7 +800,7 @@
           return;
         }
 
-        if (message.role === "user" || (message.role === "character" && message.characterId === characterId)) {
+        if (message.role === "user" || message.role === "character") {
           items.push({
             groupName: group.name || "群聊",
             createdAt: Number(message.createdAt) || 0,

@@ -149,6 +149,13 @@
       buildRelationshipDriveRules("private"),
       buildRelationshipProgressionRules("private"),
       buildCharacterDecisionCore("private", worldBookContext),
+      source.recentGroupContextText ? [
+        "当前你刚经历过下面这些群聊内容：",
+        "不要说‘记录显示’、‘系统记忆’、‘群聊上下文里’。",
+        "如果用户提到‘刚才’、‘群里’、‘你刚刚’、‘他们刚刚’，必须优先回忆下面的群聊片段。",
+        "如果用户没提，也可以让群聊余波自然影响你的态度和措辞，但不要直接复述群聊对话。",
+        "群聊刚发生在最近 30 分钟内，第一轮私聊可以带出别扭、追问、回避、生气、继续刚才话题或对群里某人的残留反应。"
+      ].join("\n") : "",
       recentHeartVoiceText,
       buildMemoryStream({
         userContext: userContext,
@@ -1078,7 +1085,7 @@
       "用户没把话说满时，也要用这些关系痕迹去读潜台词，而不是把对方当陌生用户处理。",
       "最近连续时间线（按发生顺序，控制在 3-8 条）：",
       source.recentTimelineText || "暂无",
-      source.recentGroupContextText ? "最近群聊参考（只用于语境延续）：\n" + source.recentGroupContextText : "",
+      source.recentGroupContextText ? "最近共同群聊上下文 recentGroupContext：\n" + source.recentGroupContextText : "",
       source.privateReferenceText ? "相关私聊参考摘要（只用于关系惯性，不要照抄）：\n" + source.privateReferenceText : "",
       source.relationshipPhaseHint ? "当前关系阶段锚点（根据最近心声和记忆推断，不要打破这个阶段）：\n" + source.relationshipPhaseHint : "",
       source.recentHeartVoiceText ? "最近心声摘要（只用于延续情绪惯性）：\n" + source.recentHeartVoiceText : "",
@@ -1783,6 +1790,10 @@
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages.slice(-CHARACTER_LINE_HISTORY_WINDOW), profile.id, CHARACTER_LINE_EXTRACT_LIMIT));
     var timeGapInfo = detectRecentTimeGapText(recentHistory);
     var chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, null));
+    var recentGroupContextText = profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
+      ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 10)
+      : "";
+    console.debug("[AI Debug] private chat role", profile.id, "recentGroupContextText=", recentGroupContextText ? recentGroupContextText.slice(0, 100) : "(empty)");
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, {});
     var contextText = buildWorldBookDecisionContext({
       modeLabel: "线上私聊",
