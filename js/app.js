@@ -7020,6 +7020,28 @@
         context.targetId,
         context.memorySummaryDue ? (savedSummary ? 0 : Math.max(0, context.memorySummaryRounds - 1)) : context.currentRound
       );
+
+      if (context.targetType === "group" && savedSummary && summary && summary.content && window.AppStorage.getGroups) {
+        var group = (window.AppStorage.getGroups() || []).find(function (item) {
+          return item && item.id === context.targetId;
+        });
+
+        if (group && group.settings && group.settings.memorySharingEnabled === false) {
+          // Group memory sharing is disabled, do not sync summary into individual memories.
+        } else if (group && Array.isArray(group.memberIds)) {
+          group.memberIds.forEach(function (memberId) {
+            window.AppStorage.addCharacterMemory(memberId, {
+              content: "群聊《" + (group.name || "群聊") + "》中的总结：" + summary.content,
+              source: "group",
+              generationId: context.generationId || "",
+              sourceGenerationId: context.generationId || "",
+              targetType: "group",
+              targetId: context.targetId,
+              createdAt: Date.now()
+            });
+          });
+        }
+      }
     }
 
     if (context.bodyStateEnabled && result && result.bodyState && window.AppStorage.saveBodyState) {

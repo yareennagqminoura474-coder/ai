@@ -103,6 +103,9 @@
     var userContext = buildUserContext(chatSettings);
     var memoryText = chatSettings.memoryEnabled === false ? "" : formatMemoryList(memories || getMemoryForCharacter(profile.id));
     var chatMemoryText = source.chatMemoryText || formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, source.chatMemories));
+    var recentGroupContextText = profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
+      ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 6)
+      : "";
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, source);
     var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
     var contextText = buildWorldBookDecisionContext({
@@ -152,6 +155,7 @@
         chatMemoryText: chatMemoryText || "暂无",
         longTermMemoryText: memoryText,
         recentTimelineText: source.recentHistory || "",
+        recentGroupContextText: source.recentGroupContextText || recentGroupContextText,
         recentHeartVoiceText: recentHeartVoiceText
       }),
       buildThoughtReplyBindingRules("private"),
@@ -1074,6 +1078,7 @@
       "用户没把话说满时，也要用这些关系痕迹去读潜台词，而不是把对方当陌生用户处理。",
       "最近连续时间线（按发生顺序，控制在 3-8 条）：",
       source.recentTimelineText || "暂无",
+      source.recentGroupContextText ? "最近群聊参考（只用于语境延续）：\n" + source.recentGroupContextText : "",
       source.privateReferenceText ? "相关私聊参考摘要（只用于关系惯性，不要照抄）：\n" + source.privateReferenceText : "",
       source.relationshipPhaseHint ? "当前关系阶段锚点（根据最近心声和记忆推断，不要打破这个阶段）：\n" + source.relationshipPhaseHint : "",
       source.recentHeartVoiceText ? "最近心声摘要（只用于延续情绪惯性）：\n" + source.recentHeartVoiceText : "",
@@ -1822,6 +1827,7 @@
           timeGapText: timeGapInfo,
           timeGapInfo: timeGapInfo,
           chatMemoryText: chatMemoryText,
+          recentGroupContextText: recentGroupContextText,
           selectedWorldBookIds: selectedWorldBookIds,
           worldBookContext: worldBookContext
         })

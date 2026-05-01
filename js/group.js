@@ -1691,6 +1691,9 @@
       window.AppStorage.addCharacterMemory(memberId, {
         content: (isOffline ? "用户在群聊《" + group.name + "》线下模式中说/做：" : "用户在群聊「" + group.name + "」中说：") + content,
         source: isOffline ? "offline" : "group",
+        targetType: "group",
+        targetId: group.id,
+        relatedMessageIds: [String(now)],
         createdAt: now
       });
     });
@@ -1762,7 +1765,7 @@
     }
 
     messages = window.AppStorage.getGroupChatHistory(group.id);
-    messages.push({
+    var toolMessage = {
       id: String(now),
       role: role,
       characterId: "",
@@ -1770,13 +1773,17 @@
       content: content,
       type: type,
       createdAt: now
-    });
+    };
+    messages.push(toolMessage);
 
     if (role === "user") {
       group.memberIds.forEach(function (memberId) {
         window.AppStorage.addCharacterMemory(memberId, {
           content: "用户在群聊《" + group.name + "》中发送了：" + content,
           source: "group",
+          targetType: "group",
+          targetId: group.id,
+          relatedMessageIds: [toolMessage.id],
           createdAt: now
         });
       });
@@ -1863,6 +1870,9 @@
       window.AppStorage.addCharacterMemory(memberId, {
         content: "用户在群聊《" + group.name + "》中发送了：" + getMessageMemoryText(message),
         source: "group",
+        targetType: "group",
+        targetId: group.id,
+        relatedMessageIds: [message.id],
         createdAt: now
       });
     });
@@ -2375,6 +2385,22 @@
     try {
       (result.memories || []).forEach(function (memory) {
         var characterId = memory.characterId;
+        if (!characterId) {
+          (group.memberIds || []).forEach(function (memberId) {
+            window.AppStorage.addCharacterMemory(memberId, {
+              content: memory.content,
+              source: "group",
+              generationId: extra.generationId || "",
+              sourceGenerationId: extra.generationId || "",
+              relatedMessageIds: extra.relatedMessageIds || [],
+              targetType: "group",
+              targetId: group.id,
+              createdAt: now
+            });
+          });
+          return;
+        }
+
         if (!getCharacterById(characterId)) {
           return;
         }

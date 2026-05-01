@@ -755,6 +755,74 @@
     return result;
   }
 
+  function formatRecentGroupMessageForContext(message) {
+    if (!message || !message.content) {
+      return "";
+    }
+
+    if (message.type === "redPacket") {
+      return "红包：" + (message.content || "恭喜发财，大吉大利");
+    }
+    if (message.type === "transfer") {
+      return "转账：" + (normalizeMoneyAmount(message.amount) || "");
+    }
+    if (message.type === "location") {
+      return "位置：" + ((message.location && message.location.name) || message.content || "");
+    }
+    if (message.type === "emoji") {
+      return message.emoji && message.emoji.type === "text"
+        ? "表情：" + message.emoji.value
+        : "图片表情";
+    }
+    if (message.type === "voice") {
+      return "语音：" + ((message.voice && message.voice.text) || message.content || "");
+    }
+
+    return message.content;
+  }
+
+  function getRecentGroupContextForCharacter(characterId, limit) {
+    var groups = getGroups();
+    var max = Math.max(3, Math.min(12, Number(limit) || 6));
+    var items = [];
+
+    if (!characterId || !groups.length) {
+      return "";
+    }
+
+    groups.forEach(function (group) {
+      if (!group || !Array.isArray(group.memberIds) || group.memberIds.indexOf(characterId) === -1) {
+        return;
+      }
+
+      (getGroupChatHistory(group.id) || []).forEach(function (message) {
+        if (!message || !message.content || message.type === "loading" || message.type === "error") {
+          return;
+        }
+
+        if (message.role === "user" || (message.role === "character" && message.characterId === characterId)) {
+          items.push({
+            groupName: group.name || "群聊",
+            createdAt: Number(message.createdAt) || 0,
+            role: message.role,
+            characterName: message.characterName || "",
+            text: formatRecentGroupMessageForContext(message)
+          });
+        }
+      });
+    });
+
+    items.sort(function (a, b) {
+      return b.createdAt - a.createdAt;
+    });
+
+    return items.slice(0, max).reverse().map(function (item) {
+      return "群聊《" + item.groupName + "》" + (item.role === "user"
+        ? "用户："
+        : (item.characterName || "你") + "：") + item.text;
+    }).join("\n");
+  }
+
   function clearCharacterMemory(characterId) {
     var memory = getMemoryStore();
     delete memory[characterId];
@@ -4564,6 +4632,7 @@
     saveCharacterMemory: saveCharacterMemory,
     addCharacterMemory: addCharacterMemory,
     getMemoriesForCharacters: getMemoriesForCharacters,
+    getRecentGroupContextForCharacter: getRecentGroupContextForCharacter,
     clearCharacterMemory: clearCharacterMemory,
     getChatMemories: getChatMemories,
     saveChatMemories: saveChatMemories,
