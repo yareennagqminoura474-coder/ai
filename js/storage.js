@@ -783,11 +783,24 @@
 
   function getRecentGroupContextForCharacter(characterId, limit) {
     var groups = getGroups();
-    var max = Math.max(3, Math.min(12, Number(limit) || 6));
-    var items = [];
+    var perGroupLimit = Math.max(6, Math.min(16, Number(limit) || 16));
+    var maxTotalLength = 1500;
+    var now = Date.now();
+    var recentWindowMs = 20 * 60 * 1000; // 20 minutes
+    var summaries = [];
 
     if (!characterId || !groups.length) {
       return "";
+    }
+
+    // try to resolve character name for simple mention detection
+    var characterName = "";
+    try {
+      var chars = getCharacters();
+      var found = (chars || []).find(function (c) { return c && String(c.id) === String(characterId); });
+      characterName = found && found.name ? String(found.name) : "";
+    } catch (e) {
+      characterName = "";
     }
 
     groups.forEach(function (group) {
@@ -795,32 +808,94 @@
         return;
       }
 
-      (getGroupChatHistory(group.id) || []).forEach(function (message) {
-        if (!message || !message.content || message.type === "loading" || message.type === "error") {
-          return;
+      var history = (getGroupChatHistory(group.id) || []).filter(function (message) {
+        return message && message.content && message.type !== "loading" && message.type !== "error";
+      });
+
+      if (!history.length) {
+        return;
+      }
+
+      // score and pick candidates
+      var candidates = history.map(function (m) {
+        var score = 0;
+        if (!m || !m.content) {
+          return null;
+        }
+        if (m.role === "user") {
+          score += 40;
+        }
+        if (m.role === "character" && String(m.characterId) === String(characterId)) {
+          score += 60;
+        }
+        if (characterName && m.content.indexOf(characterName) !== -1) {
+          score += 35;
+        }
+        if (now - Number(m.createdAt || 0) <= recentWindowMs) {
+          score += 20;
+        }
+        // small bonus for short, direct messages
+        if (typeof m.content === "string" && m.content.length < 120) {
+          score += 5;
         }
 
-        if (message.role === "user" || message.role === "character") {
-          items.push({
-            groupName: group.name || "群聊",
-            createdAt: Number(message.createdAt) || 0,
-            role: message.role,
-            characterName: message.characterName || "",
-            text: formatRecentGroupMessageForContext(message)
-          });
+        return { msg: m, score: score, ts: Number(m.createdAt) || 0 };
+      }).filter(Boolean);
+
+      if (!candidates.length) {
+        return;
+      }
+
+      candidates.sort(function (a, b) {
+        if (b.score !== a.score) {
+          return b.score - a.score;
         }
+        return b.ts - a.ts;
+      });
+
+      var picked = candidates.slice(0, perGroupLimit);
+      var lines = picked.map(function (it) {
+        var m = it.msg;
+        var actor = m.role === "user" ? "用户" : (String(m.characterId) === String(characterId) ? "你" : (m.characterName || "某人"));
+        return "- " + actor + "：" + formatRecentGroupMessageForContext(m);
+      });
+
+      // explicit current-role summary for this group
+      var own = history.filter(function (m) { return m && m.role === "character" && String(m.characterId) === String(characterId); }).slice(-3).map(function (m) { return formatRecentGroupMessageForContext(m); });
+      if (own.length) {
+        lines.push("- 当前角色当时说/听到：" + own.join(" / "));
+      }
+
+      summaries.push({
+        groupName: group.name || "群聊",
+        createdAt: picked.length ? (Number(picked[0].msg.createdAt) || now) : now,
+        text: "群聊《" + (group.name || "群聊") + "》刚刚发生：\n" + lines.join("\n")
       });
     });
 
-    items.sort(function (a, b) {
-      return b.createdAt - a.createdAt;
-    });
+    if (!summaries.length) {
+      return "";
+    }
 
-    return items.slice(0, max).reverse().map(function (item) {
-      return "群聊《" + item.groupName + "》" + (item.role === "user"
-        ? "用户："
-        : (item.characterName || "你") + "：") + item.text;
-    }).join("\n");
+    // sort by recent group activity
+    summaries.sort(function (a, b) { return b.createdAt - a.createdAt; });
+
+    var out = [];
+    var total = 0;
+    for (var i = 0; i < summaries.length; i++) {
+      var s = summaries[i].text;
+      if (total + s.length > maxTotalLength) {
+        var remaining = Math.max(0, maxTotalLength - total);
+        if (remaining > 20) {
+          out.push(s.slice(0, remaining));
+        }
+        break;
+      }
+      out.push(s);
+      total += s.length;
+    }
+
+    return out.join("\n\n");
   }
 
   function clearCharacterMemory(characterId) {

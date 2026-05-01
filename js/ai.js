@@ -104,7 +104,7 @@
     var memoryText = chatSettings.memoryEnabled === false ? "" : formatMemoryList(memories || getMemoryForCharacter(profile.id));
     var chatMemoryText = source.chatMemoryText || formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, source.chatMemories));
     var recentGroupContextText = profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
-      ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 6)
+      ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 16)
       : "";
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, source);
     var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
@@ -1791,9 +1791,9 @@
     var timeGapInfo = detectRecentTimeGapText(recentHistory);
     var chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, null));
     var recentGroupContextText = profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
-      ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 10)
+      ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 16)
       : "";
-    console.debug("[AI Debug] private chat role", profile.id, "recentGroupContextText=", recentGroupContextText ? recentGroupContextText.slice(0, 100) : "(empty)");
+    console.debug("[AI Debug] private chat role", profile.id, "recentGroupContextText.length=", recentGroupContextText ? recentGroupContextText.length : 0, "preview=", recentGroupContextText ? recentGroupContextText.slice(0, 200) : "(empty)");
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, {});
     var contextText = buildWorldBookDecisionContext({
       modeLabel: "线上私聊",
@@ -1826,6 +1826,21 @@
       timeGapInfo: timeGapInfo
     };
 
+    // combine recent private history and recent group context into the user task when available
+    var combinedRecentHistory = history || "暂无历史消息";
+    var groupAfterRules = "";
+    if (recentGroupContextText) {
+      combinedRecentHistory = "【最近私聊】\n" + (history || "暂无历史消息") + "\n【刚刚共同群聊】\n" + recentGroupContextText;
+      requestOptions.recentGroupContextText = recentGroupContextText;
+      groupAfterRules = [
+        "注意：下面是最近共同群聊片段（recentGroupContext），私聊时请像亲历一样承接：",
+        "1. 如果用户提到“刚才”、“群里”、“你刚刚”、“他们刚刚”，必须优先承接下面的群聊片段，并体现临场反应；不要说‘记录显示’或‘系统记忆’。",
+        "2. 本轮第一条回复不要表现像没经历过群聊；可以带出尴尬、追问、回避、生气或继续刚才话题的自然反应。",
+        "3. 不要直接复述群聊对话原文；把它融入态度、措辞和下意识反应里。",
+        "4. 群聊余波优先于无关的长期记忆，但请尊重角色人设与世界书限制。"
+      ].join("\n");
+    }
+
     return [
       {
         role: "system",
@@ -1850,12 +1865,13 @@
           modeLabel: "线上私聊",
           taskMode: "private",
           userInput: latestUserInput,
-          recentHistory: history || "暂无历史消息",
+          recentHistory: combinedRecentHistory,
           requestOptions: requestOptions,
           schemaText: buildPrivateMessageSchema(profile),
           moneyScope: "私聊",
           primaryField: "messages",
-          selfCheckMode: "private"
+          selfCheckMode: "private",
+          afterRules: groupAfterRules
         })
       }
     ];
@@ -3768,6 +3784,14 @@
 
     if (!apiUrl || !apiKey || !modelName) {
       throw new Error(MISSING_SETTINGS_MESSAGE);
+    }
+
+    try {
+      var msgSummary = Array.isArray(messages) ? messages.map(function (m) { return (m && m.role ? m.role + ":" : "") + (m && m.content ? String(m.content).slice(0,200) : ""); }).join("\n---\n") : "";
+      var hasGroupCtx = Array.isArray(messages) && messages.some(function (m) { return m && m.content && (m.content.indexOf("最近共同群聊") !== -1 || m.content.indexOf("刚刚共同群聊") !== -1 || m.content.indexOf("刚刚共同群聊片段") !== -1); });
+      console.debug("[AI Debug] sendConfiguredChatMessages: messagesCount=", Array.isArray(messages) ? messages.length : 0, "hasRecentGroupContext=", hasGroupCtx, "preview=", msgSummary.slice(0,1000));
+    } catch (e) {
+      /* ignore debug errors */
     }
 
     chatUrl = buildChatCompletionsUrl(apiUrl);

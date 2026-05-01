@@ -862,23 +862,64 @@
     }
 
     var title = "来自群聊《" + (group.name || "群聊") + "》的最近上下文";
-    var existing = window.AppStorage.getChatMemories("private", characterId);
-    if (Array.isArray(existing) && existing.some(function (item) { return item && item.title === title; })) {
-      return;
+    var existing = window.AppStorage.getChatMemories("private", characterId) || [];
+    var newContent = "最近你在群聊《" + (group.name || "群聊") + "》中的互动如下：\n" + history;
+
+    // find existing memory for same group (prefer groupId match if present)
+    var foundIndex = -1;
+    for (var i = 0; i < existing.length; i++) {
+      var item = existing[i];
+      if (!item) { continue; }
+      if (item.groupId && String(item.groupId) === String(group.id)) {
+        foundIndex = i;
+        break;
+      }
+      if (item.title && item.title.indexOf("来自群聊《" + (group.name || "群聊") + "》") === 0) {
+        foundIndex = i;
+        break;
+      }
     }
 
-    window.AppStorage.addChatMemory("private", characterId, {
-      title: title,
-      content: "最近你在群聊《" + (group.name || "群聊") + "》中的互动如下：\n" + history,
-      sourceTime: Date.now(),
-      type: "auto",
-      source: "group",
-      generationId: "",
-      sourceGenerationId: "",
-      targetType: "private",
-      targetId: characterId,
-      createdAt: Date.now()
-    });
+    if (foundIndex !== -1 && existing[foundIndex] && existing[foundIndex].id) {
+      // update existing memory content and timestamps
+      try {
+        window.AppStorage.updateChatMemory("private", characterId, existing[foundIndex].id, {
+          content: newContent,
+          updatedAt: Date.now(),
+          sourceTime: Date.now(),
+          groupId: group.id
+        });
+      } catch (e) {
+        // fallback to add if update not supported
+        window.AppStorage.addChatMemory("private", characterId, {
+          title: title,
+          content: newContent,
+          sourceTime: Date.now(),
+          type: "auto",
+          source: "group",
+          generationId: "",
+          sourceGenerationId: "",
+          targetType: "private",
+          targetId: characterId,
+          groupId: group.id,
+          createdAt: Date.now()
+        });
+      }
+    } else {
+      window.AppStorage.addChatMemory("private", characterId, {
+        title: title,
+        content: newContent,
+        sourceTime: Date.now(),
+        type: "auto",
+        source: "group",
+        generationId: "",
+        sourceGenerationId: "",
+        targetType: "private",
+        targetId: characterId,
+        groupId: group.id,
+        createdAt: Date.now()
+      });
+    }
   }
 
   function openChatScreen(characterId) {

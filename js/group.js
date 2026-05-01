@@ -2138,17 +2138,19 @@
     var startAt = Date.now();
     var extra = meta || {};
     var generated = [];
-
-    (replies || []).slice(0, 50).forEach(function (reply, index) {
+    var items = (replies || []).slice(0, 50);
+    var memWriteCount = 0;
+    for (var i = 0; i < items.length; i++) {
+      var reply = items[i];
       var character = getCharacterById(reply.characterId) || characters[0];
       var createdAt;
       var message;
 
       if (!character || !reply.content) {
-        return;
+        continue;
       }
 
-      createdAt = startAt + index;
+      createdAt = startAt + i;
       message = createGroupCharacterReplyMessage(reply, character, createdAt, extra);
       message = recordGroupMoneyMessage(message, group, character);
       messages.push(message);
@@ -2163,8 +2165,12 @@
         targetId: group.id,
         createdAt: createdAt
       });
-      writeGroupReplyMemoryForListeners(group, message, extra);
-    });
+
+      if (memWriteCount < 8) {
+        writeGroupReplyMemoryForListeners(group, message, extra);
+        memWriteCount++;
+      }
+    }
 
     return {
       messages: messages,
@@ -2192,6 +2198,7 @@
       return Promise.resolve(appended.generated);
     }
 
+    var streamingMemWriteCount = 0;
     return window.AppStream.appendMessagesWithStreamEffect({
       targetType: "group",
       targetId: group.id,
@@ -2218,7 +2225,10 @@
           targetId: group.id,
           createdAt: createdAt
         });
-        writeGroupReplyMemoryForListeners(group, message, extra);
+        if (streamingMemWriteCount < 8) {
+          writeGroupReplyMemoryForListeners(group, message, extra);
+          streamingMemWriteCount++;
+        }
         saveGroupHistoryDebounced(group.id, baseMessages.concat(shown, suffix));
         if (activeGroupId === group.id) {
           scheduleGroupRender(group.id);
@@ -2385,7 +2395,7 @@
     }
 
     try {
-      (result.memories || []).forEach(function (memory) {
+      (result.memories || []).slice(0, 8).forEach(function (memory) {
         var characterId = memory.characterId;
         if (!characterId) {
           (group.memberIds || []).forEach(function (memberId) {
