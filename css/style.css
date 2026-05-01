@@ -8064,3 +8064,138 @@ textarea::placeholder {
   font-weight: 700;
   color: var(--text, #1d2521);
 }
+/* ===== 账单页按钮和操作区美化 ===== */
+
+.bill-filter-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  margin-bottom: 16px;
+}
+
+.bill-filter-row button {
+  appearance: none;
+  border: 1px solid #dfe8e3;
+  background: #ffffff;
+  color: var(--text);
+  border-radius: 999px;
+  min-height: 40px;
+  padding: 0 16px;
+  font-size: 14px;
+  font-weight: 800;
+  line-height: 40px;
+  box-shadow: 0 6px 14px rgba(29, 37, 33, 0.06);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, background 0.12s ease;
+}
+
+.bill-filter-row button:active {
+  transform: scale(0.98);
+}
+
+.bill-filter-row button.active {
+  border-color: transparent;
+  background: linear-gradient(135deg, rgba(104, 190, 163, 0.96), rgba(91, 159, 230, 0.94));
+  color: #ffffff;
+  box-shadow: 0 8px 18px rgba(91, 159, 230, 0.18);
+}
+
+.bill-clear-button {
+  background: #fff4f4 !important;
+  color: #cf4e4e !important;
+  border-color: #ffd5d5 !important;
+}
+
+.bill-dedupe-button {
+  background: #f1fbf6 !important;
+  color: #228a58 !important;
+  border-color: #cfeedd !important;
+}
+
+/* ===== 单条账单布局优化 ===== */
+
+.bill-record {
+  min-height: 96px;
+  padding: 14px;
+  display: grid;
+  grid-template-columns: 44px minmax(0, 1fr) auto;
+  grid-template-areas:
+    "icon main amount"
+    "icon main actions";
+  column-gap: 12px;
+  row-gap: 10px;
+  align-items: center;
+}
+
+.bill-record > .bill-icon {
+  grid-area: icon;
+}
+
+.bill-record > .bill-main {
+  grid-area: main;
+  align-self: center;
+}
+
+.bill-record > b {
+  grid-area: amount;
+  justify-self: end;
+  align-self: end;
+  font-size: 18px;
+  font-weight: 900;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.bill-actions {
+  grid-area: actions;
+  justify-self: end;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: nowrap;
+}
+
+.bill-actions button {
+  appearance: none;
+  border: 0;
+  border-radius: 999px;
+  height: 34px;
+  padding: 0 14px;
+  min-width: 60px;
+  font-size: 13px;
+  font-weight: 800;
+  line-height: 34px;
+  white-space: nowrap;
+  box-shadow: 0 6px 14px rgba(29, 37, 33, 0.08);
+  transition: transform 0.12s ease, opacity 0.12s ease;
+}
+
+.bill-actions button:active {
+  transform: scale(0.97);
+}
+
+.bill-edit-btn {
+  background: #eef5ff;
+  color: #3b73d9;
+}
+
+.bill-delete-btn {
+  background: #fff1f1;
+  color: #d45454;
+}
+
+/* 小屏再稳一点 */
+@media (max-width: 420px) {
+  .bill-filter-row {
+    gap: 8px;
+  }
+
+  .bill-filter-row button {
+    padding: 0 14px;
+    font-size: 13px;
+  }
+
+  .bill-actions button {
+    min-width: 56px;
+    padding: 0 12px;
+  }
+}
