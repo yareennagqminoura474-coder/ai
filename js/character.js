@@ -1070,6 +1070,15 @@
   }
 
   function renderChatMessages(characterId, options) {
+    if (!characterId || !getCharacterById(characterId)) {
+      activeCharacterId = "";
+      currentChatRenderToken = "";
+      if (window.setActivePage) {
+        window.setActivePage("wechatScreen");
+      }
+      return;
+    }
+
     if (characterId !== activeCharacterId) {
       return;
     }
@@ -4215,13 +4224,20 @@
 
     window.AppStorage.deleteCharacter(character.id);
 
-    if (activeCharacterId === character.id) {
+    var wasActive = activeCharacterId === character.id;
+    if (wasActive) {
       activeCharacterId = "";
+      currentChatRenderToken = "";
     }
 
     renderCharacterList();
     refreshHomeSummary();
-    window.setActivePage("characterListScreen");
+    if (wasActive) {
+      if (window.setWechatTab) window.setWechatTab("wechat");
+      window.setActivePage("wechatScreen");
+    } else {
+      window.setActivePage("characterListScreen");
+    }
   }
 
   function deactivateActiveCharacter() {

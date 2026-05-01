@@ -409,7 +409,8 @@
       window.AppStorage.deleteGroup(groupId);
     });
 
-    if (ids.indexOf(activeGroupId) !== -1) {
+    var wasActiveDeleted = ids.indexOf(activeGroupId) !== -1;
+    if (wasActiveDeleted) {
       activeGroupId = "";
       currentGroupRenderToken = "";
     }
@@ -418,6 +419,10 @@
     selectedGroupIds = [];
     renderGroupList();
     refreshHomeSummary();
+    if (wasActiveDeleted) {
+      if (window.setWechatTab) window.setWechatTab("wechat");
+      window.setActivePage("wechatScreen");
+    }
   }
 
   function getGroupLastPreview(groupId) {
@@ -691,6 +696,15 @@
   }
 
   function renderGroupChatMessages(groupId, options) {
+    if (!groupId || !getGroupById(groupId)) {
+      activeGroupId = "";
+      currentGroupRenderToken = "";
+      if (window.setActivePage) {
+        window.setActivePage("wechatScreen");
+      }
+      return;
+    }
+
     if (groupId !== activeGroupId) {
       return;
     }

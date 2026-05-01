@@ -158,9 +158,39 @@
       .replace(/'/g, "&#039;");
   }
 
+  function canOpenPrivateChatScreen() {
+    var id = window.CharacterManager && window.CharacterManager.getActiveCharacterId
+      ? window.CharacterManager.getActiveCharacterId()
+      : "";
+    if (!id) return false;
+    return (window.AppStorage.getCharacters() || []).some(function (c) {
+      return c && String(c.id) === String(id);
+    });
+  }
+
+  function canOpenGroupChatScreen() {
+    var id = window.GroupManager && window.GroupManager.getActiveGroupId
+      ? window.GroupManager.getActiveGroupId()
+      : "";
+    if (!id) return false;
+    return (window.AppStorage.getGroups() || []).some(function (g) {
+      return g && String(g.id) === String(id);
+    });
+  }
+
   function setActivePage(pageId) {
     if (pageIds.indexOf(pageId) === -1) {
       return;
+    }
+
+    if (pageId === "chatScreen" && !canOpenPrivateChatScreen()) {
+      setWechatTab("wechat");
+      pageId = "wechatScreen";
+    }
+
+    if (pageId === "groupChatScreen" && !canOpenGroupChatScreen()) {
+      setWechatTab("wechat");
+      pageId = "wechatScreen";
     }
 
     if (window.CharacterManager && window.CharacterManager.closeAllMenus) {
@@ -2261,10 +2291,20 @@
       returnFromWechatChild();
     });
     getElement("privateChatSettingsBackBtn").addEventListener("click", function () {
-      setActivePage("chatScreen");
+      if (canOpenPrivateChatScreen()) {
+        setActivePage("chatScreen");
+      } else {
+        setWechatTab("wechat");
+        setActivePage("wechatScreen");
+      }
     });
     getElement("groupSettingsBackBtn").addEventListener("click", function () {
-      setActivePage("groupChatScreen");
+      if (canOpenGroupChatScreen()) {
+        setActivePage("groupChatScreen");
+      } else {
+        setWechatTab("wechat");
+        setActivePage("wechatScreen");
+      }
     });
     getElement("worldBookBackBtn").addEventListener("click", goHome);
     getElement("diaryBackBtn").addEventListener("click", function () {
@@ -7413,6 +7453,7 @@
   }
 
   window.setActivePage = setActivePage;
+  window.setWechatTab = setWechatTab;
   window.goHome = goHome;
   window.initApp = initApp;
   window.MessageActionMenu = {
