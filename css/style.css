@@ -4102,14 +4102,18 @@ textarea::placeholder {
 }
 
 .chat-screen {
-  background: #eef2ef;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
   position: relative;
+  background: #eef2ef;
 }
 
 .new-msg-btn {
   position: absolute;
-  bottom: 68px;
   left: 50%;
+  bottom: calc(72px + env(safe-area-inset-bottom));
   transform: translateX(-50%);
   z-index: 60;
   padding: 6px 16px;
@@ -4215,7 +4219,10 @@ textarea::placeholder {
 }
 
 .chat-messages {
-  padding: 18px 14px calc(96px + env(safe-area-inset-bottom));
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 14px 12px;
   background:
     radial-gradient(circle at 20% 0%, rgba(255, 240, 245, 0.7), transparent 28%),
     linear-gradient(180deg, #f9faf7 0%, #f6f8f7 52%, #fff8fb 100%);
@@ -5627,10 +5634,11 @@ textarea::placeholder {
 }
 
 .chat-composer {
-  position: absolute;
-  left: 0;
-  right: 0;
-  bottom: 0;
+  flex: 0 0 auto;
+  position: relative;
+  z-index: 20;
+  width: 100%;
+  box-sizing: border-box;
   min-height: 72px;
   padding: 10px 12px calc(12px + env(safe-area-inset-bottom));
   display: grid;

@@ -652,7 +652,7 @@
       if (currentGroupRenderToken !== token || activeGroupId !== groupId) {
         return;
       }
-      renderGroupChatMessages(groupId);
+      renderGroupChatMessages(groupId, { autoScrollToBottom: true });
     });
   }
 

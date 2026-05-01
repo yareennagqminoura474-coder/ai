@@ -970,7 +970,7 @@
       if (currentChatRenderToken !== token || activeCharacterId !== characterId) {
         return;
       }
-      renderChatMessages(characterId);
+      renderChatMessages(characterId, { autoScrollToBottom: true });
     });
   }
 
