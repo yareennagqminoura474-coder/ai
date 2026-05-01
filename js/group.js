@@ -3156,11 +3156,9 @@
         }
         var checked = settings.memoryBridge && Array.isArray(settings.memoryBridge.privateCharacterIds) && settings.memoryBridge.privateCharacterIds.indexOf(character.id) !== -1;
         return [
-          '<label class="member-option ' + (checked ? "active" : "") + '">',
-          '<input class="visually-hidden" data-memory-bridge-character-id="' + escapeHtml(character.id) + '" type="checkbox"' + (checked ? " checked" : "") + '>',
-          renderAvatar(character, "member-option-avatar"),
-          '<span class="member-option-text"><strong>' + escapeHtml(character.name) + '</strong><em>' + escapeHtml(getCharacterPersonaPreview(character) || "未写人设") + '</em></span>',
-          '<span class="member-check" aria-hidden="true">' + (checked ? "✓" : "") + '</span>',
+          '<label class="bridge-member-option">',
+          '  <span class="bridge-member-name">' + escapeHtml(character.name) + '</span>',
+          '  <input class="bridge-member-checkbox" data-memory-bridge-character-id="' + escapeHtml(character.id) + '" type="checkbox"' + (checked ? " checked" : "") + '>',
           '</label>'
         ].join("");
       }).join("") + '</div><small class="field-help">开启后，群成员会带着自己和用户的私聊记忆进入群聊。</small></div>',
@@ -3168,7 +3166,7 @@
     ].join("");
 
     form.onchange = function (event) {
-      var option = event.target.closest(".member-option");
+      var option = event.target.closest(".member-option, .bridge-member-option");
       var backgroundInput = event.target.closest("[data-group-settings-file='background']");
       var file = backgroundInput && backgroundInput.files && backgroundInput.files[0];
 
@@ -3184,7 +3182,10 @@
 
       if (option) {
         option.classList.toggle("active", event.target.checked);
-        option.querySelector(".member-check").textContent = event.target.checked ? "✓" : "";
+        var checkMark = option.querySelector(".member-check");
+        if (checkMark) {
+          checkMark.textContent = event.target.checked ? "✓" : "";
+        }
       }
     };
     form.onclick = handleGroupSettingsAction;

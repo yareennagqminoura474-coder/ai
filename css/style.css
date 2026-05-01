@@ -4015,6 +4015,40 @@ textarea::placeholder {
   background: #e7ece8;
 }
 
+.bridge-group-option,
+.bridge-member-option {
+  width: 100%;
+  min-height: 52px;
+  padding: 0 14px;
+  border: 1px solid rgba(228, 232, 226, 0.95);
+  border-radius: 14px;
+  background: #fff;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  box-sizing: border-box;
+}
+
+.bridge-group-name,
+.bridge-member-name {
+  min-width: 0;
+  flex: 1;
+  font-size: 16px;
+  font-weight: 800;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bridge-group-checkbox,
+.bridge-member-checkbox {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  accent-color: var(--blue);
+}
+
 .soft-empty {
   padding: 18px 12px;
   border-radius: 8px;

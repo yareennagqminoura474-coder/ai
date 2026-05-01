@@ -3672,17 +3672,11 @@
 
     return joinedGroups.map(function (group) {
       var checked = settings.memoryBridge && Array.isArray(settings.memoryBridge.groupIds) && settings.memoryBridge.groupIds.indexOf(group.id) !== -1;
-      var history = window.AppStorage.getGroupChatHistory ? window.AppStorage.getGroupChatHistory(group.id) : [];
-      var preview = (history || []).slice().reverse().find(function (message) {
-        return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system";
-      });
-      var previewText = preview ? (preview.role === "user" ? "你：" : (preview.characterName || "成员") + "：") + String(preview.content || "") : "暂无近期消息";
-
       return [
-        '<label class="member-option ' + (checked ? "active" : "") + '">',
-        '<input class="visually-hidden" data-private-memory-bridge-group-id="' + escapeHtml(group.id) + '" type="checkbox"' + (checked ? " checked" : "") + '>','<span class="member-option-text"><strong>' + escapeHtml(group.name || "群聊") + '</strong><em>成员 ' + ((group.memberIds || []).length || 0) + ' 人</em><small>' + escapeHtml(previewText) + '</small></span>',
-        '<span class="member-check" aria-hidden="true">' + (checked ? "✓" : "") + '</span>',
-        "</label>"
+        '<label class="bridge-group-option">',
+        '  <span class="bridge-group-name">' + escapeHtml(group.name || "群聊") + '</span>',
+        '  <input class="bridge-group-checkbox" data-private-memory-bridge-group-id="' + escapeHtml(group.id) + '" type="checkbox"' + (checked ? " checked" : "") + '>',
+        '</label>'
       ].join("");
     }).join("");
   }
@@ -3762,6 +3756,17 @@
 
     form.onclick = handlePrivateSettingsAction;
     form.onchange = handlePrivateSettingsChange;
+
+    form.querySelectorAll(".bridge-group-option").forEach(function (label) {
+      label.addEventListener("click", function (event) {
+        event.stopPropagation();
+      });
+    });
+    form.querySelectorAll("[data-private-memory-bridge-group-id]").forEach(function (input) {
+      input.addEventListener("click", function (event) {
+        event.stopPropagation();
+      });
+    });
   }
 
   function renderTimestampStyleOptions(value) {
