@@ -3023,6 +3023,13 @@
         name: "",
         avatar: "",
         persona: ""
+      },
+      memoryBridge: {
+        privateEnabled: false,
+        privateCharacterIds: [],
+        privateRounds: 5,
+        includePrivateSummary: true,
+        includeRawPrivateMessages: true
       }
     }, group && group.settings || {});
   }
@@ -3137,6 +3144,26 @@
       '<button class="outline-button" type="button" data-group-settings-action="view-memory">查看本群聊记忆</button>',
       '<button class="outline-button danger" type="button" data-group-settings-action="clear-chat-memory">清空本群聊记忆</button>',
       '<button class="outline-button danger" type="button" data-group-settings-action="clear-group-memory">清空成员群聊记忆</button>',
+      "</section>",
+      '<section class="form-section">',
+      '<div class="section-title-row"><h3>私聊记忆互通 🔗</h3><span>桥接</span></div>',
+      '<label class="switch-row"><input data-group-settings-field="privateEnabled" type="checkbox"' + (settings.memoryBridge && settings.memoryBridge.privateEnabled ? " checked" : "") + '>开启私聊记忆互通</label>',
+      '<div class="field-group"><label>每人最近读取轮数</label><input data-group-settings-field="privateRounds" type="number" min="3" max="10" value="' + escapeHtml(settings.memoryBridge && Number(settings.memoryBridge.privateRounds) || 5) + '"></div>',
+      '<div class="field-group"><label>选择要同步的成员</label><div class="member-select-list">' + (group.memberIds || []).map(function (characterId) {
+        var character = getCharacterById(characterId);
+        if (!character) {
+          return "";
+        }
+        var checked = settings.memoryBridge && Array.isArray(settings.memoryBridge.privateCharacterIds) && settings.memoryBridge.privateCharacterIds.indexOf(character.id) !== -1;
+        return [
+          '<label class="member-option ' + (checked ? "active" : "") + '">',
+          '<input class="visually-hidden" data-memory-bridge-character-id="' + escapeHtml(character.id) + '" type="checkbox"' + (checked ? " checked" : "") + '>',
+          renderAvatar(character, "member-option-avatar"),
+          '<span class="member-option-text"><strong>' + escapeHtml(character.name) + '</strong><em>' + escapeHtml(getCharacterPersonaPreview(character) || "未写人设") + '</em></span>',
+          '<span class="member-check" aria-hidden="true">' + (checked ? "✓" : "") + '</span>',
+          '</label>'
+        ].join("");
+      }).join("") + '</div><small class="field-help">开启后，群成员会带着自己和用户的私聊记忆进入群聊。</small></div>',
       "</section>"
     ].join("");
 
@@ -3250,6 +3277,15 @@
           name: getGroupSettingField("userName"),
           avatar: getGroupSettingField("userAvatar"),
           persona: getGroupSettingField("userPersona")
+        },
+        memoryBridge: {
+          privateEnabled: getGroupSettingChecked("privateEnabled"),
+          privateCharacterIds: Array.prototype.map.call(form.querySelectorAll("[data-memory-bridge-character-id]:checked"), function (input) {
+            return input.dataset.memoryBridgeCharacterId;
+          }),
+          privateRounds: Math.max(3, Math.min(10, Number(getGroupSettingField("privateRounds")) || 5)),
+          includePrivateSummary: true,
+          includeRawPrivateMessages: true
         }
       }
     };

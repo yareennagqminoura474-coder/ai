@@ -1085,6 +1085,8 @@
       "用户没把话说满时，也要用这些关系痕迹去读潜台词，而不是把对方当陌生用户处理。",
       "最近连续时间线（按发生顺序，控制在 3-8 条）：",
       source.recentTimelineText || "暂无",
+      source.privateBridgeText ? "【群成员私聊记忆互通】\n" + source.privateBridgeText :
+      source.memoryBridgeText ? "【刚刚/近期互通群聊记忆】\n" + source.memoryBridgeText :
       source.recentGroupContextText ? "最近共同群聊上下文 recentGroupContext：\n" + source.recentGroupContextText : "",
       source.privateReferenceText ? "相关私聊参考摘要（只用于关系惯性，不要照抄）：\n" + source.privateReferenceText : "",
       source.relationshipPhaseHint ? "当前关系阶段锚点（根据最近心声和记忆推断，不要打破这个阶段）：\n" + source.relationshipPhaseHint : "",
@@ -1100,6 +1102,28 @@
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
+  }
+
+  function buildPrivateMemoryBridgeSection(text) {
+    if (!text) {
+      return "";
+    }
+
+    return [
+      "【刚刚/近期互通群聊记忆】",
+      text
+    ].join("\n");
+  }
+
+  function buildGroupPrivateMemoryBridgeSection(text) {
+    if (!text) {
+      return "";
+    }
+
+    return [
+      "【群成员私聊记忆互通】",
+      text
+    ].join("\n");
   }
 
   function buildRelationshipPhaseHint(heartVoiceText, chatMemoryText, longMemoryText) {
@@ -1790,10 +1814,21 @@
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages.slice(-CHARACTER_LINE_HISTORY_WINDOW), profile.id, CHARACTER_LINE_EXTRACT_LIMIT));
     var timeGapInfo = detectRecentTimeGapText(recentHistory);
     var chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("private", profile.id, null));
-    var recentGroupContextText = profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
+    var memoryBridgeSettings = chatSettings.memoryBridge || {};
+    var bridgeGroupText = "";
+    if (profile.id && memoryBridgeSettings.groupEnabled && Array.isArray(memoryBridgeSettings.groupIds) && memoryBridgeSettings.groupIds.length && window.AppStorage && typeof window.AppStorage.getPrivateMemoryBridgeContext === "function") {
+      bridgeGroupText = window.AppStorage.getPrivateMemoryBridgeContext(profile.id, {
+        groupIds: memoryBridgeSettings.groupIds,
+        rounds: memoryBridgeSettings.groupRounds || 10
+      });
+      console.debug("[AI Debug] private chat role", profile.id, "memoryBridge.groupEnabled=", memoryBridgeSettings.groupEnabled, "groupIds=", memoryBridgeSettings.groupIds, "groupBridgeText.length=", bridgeGroupText ? bridgeGroupText.length : 0, "preview=", bridgeGroupText ? bridgeGroupText.slice(0, 200) : "(empty)");
+    }
+    var recentGroupContextText = bridgeGroupText || (profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
       ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 16)
-      : "";
-    console.debug("[AI Debug] private chat role", profile.id, "recentGroupContextText.length=", recentGroupContextText ? recentGroupContextText.length : 0, "preview=", recentGroupContextText ? recentGroupContextText.slice(0, 200) : "(empty)");
+      : "");
+    if (!bridgeGroupText) {
+      console.debug("[AI Debug] private chat role", profile.id, "recentGroupContextText.length=", recentGroupContextText ? recentGroupContextText.length : 0, "preview=", recentGroupContextText ? recentGroupContextText.slice(0, 200) : "(empty)");
+    }
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, {});
     var contextText = buildWorldBookDecisionContext({
       modeLabel: "线上私聊",
@@ -1830,10 +1865,11 @@
     var combinedRecentHistory = history || "暂无历史消息";
     var groupAfterRules = "";
     if (recentGroupContextText) {
-      combinedRecentHistory = "【最近私聊】\n" + (history || "暂无历史消息") + "\n【刚刚共同群聊】\n" + recentGroupContextText;
+      combinedRecentHistory = "【最近私聊】\n" + (history || "暂无历史消息") + "\n【刚刚/近期互通群聊记忆】\n" + recentGroupContextText;
       requestOptions.recentGroupContextText = recentGroupContextText;
+      requestOptions.memoryBridgeText = bridgeGroupText || recentGroupContextText;
       groupAfterRules = [
-        "注意：下面是最近共同群聊片段（recentGroupContext），私聊时请像亲历一样承接：",
+        "注意：下面是最近群聊片段，私聊时请像亲历一样承接：",
         "1. 如果用户提到“刚才”、“群里”、“你刚刚”、“他们刚刚”，必须优先承接下面的群聊片段，并体现临场反应；不要说‘记录显示’或‘系统记忆’。",
         "2. 本轮第一条回复不要表现像没经历过群聊；可以带出尴尬、追问、回避、生气或继续刚才话题的自然反应。",
         "3. 不要直接复述群聊对话原文；把它融入态度、措辞和下意识反应里。",
@@ -1854,6 +1890,7 @@
           timeGapInfo: timeGapInfo,
           chatMemoryText: chatMemoryText,
           recentGroupContextText: recentGroupContextText,
+          memoryBridgeText: requestOptions.memoryBridgeText || "",
           selectedWorldBookIds: selectedWorldBookIds,
           worldBookContext: worldBookContext
         })
@@ -2659,6 +2696,8 @@
           return (character.name || character.id) + "：" + (formatMemoryList(sharedMemories && sharedMemories[character.id] || []) || "暂无");
         }).join("\n"),
         recentTimelineText: requestOptions.recentHistory || requestOptions.recentWorldHistory || "暂无",
+        memoryBridgeText: requestOptions.memoryBridgeText,
+        privateBridgeText: requestOptions.privateBridgeText,
         privateReferenceText: privateReferenceText,
         recentHeartVoiceText: recentHeartVoiceText,
         relationshipPhaseHint: relationshipPhaseHint,
@@ -2875,6 +2914,15 @@
     var timeGapInfo = detectRecentTimeGapText(promptMessages);
     latestUserInput = getLatestUserInputForPrompt(groupHistory);
     chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("group", group && group.id, requestOptions.chatMemories));
+    var groupBridgeSettings = group && group.settings && group.settings.memoryBridge || {};
+    var privateBridgeText = "";
+    if (group && groupBridgeSettings.privateEnabled && Array.isArray(groupBridgeSettings.privateCharacterIds) && groupBridgeSettings.privateCharacterIds.length && window.AppStorage && typeof window.AppStorage.getGroupPrivateMemoryBridgeContext === "function") {
+      privateBridgeText = window.AppStorage.getGroupPrivateMemoryBridgeContext(group.id, {
+        characterIds: groupBridgeSettings.privateCharacterIds,
+        rounds: groupBridgeSettings.privateRounds || 5
+      });
+      console.debug("[AI Debug] group chat", group.id, "memoryBridge.privateEnabled=", groupBridgeSettings.privateEnabled, "privateCharacterIds=", groupBridgeSettings.privateCharacterIds, "privateBridgeText.length=", privateBridgeText ? privateBridgeText.length : 0, "preview=", privateBridgeText ? privateBridgeText.slice(0, 200) : "(empty)");
+    }
     contextText = buildWorldBookDecisionContext({
       modeLabel: requestOptions.regenerateRequest ? "线上群聊重回" : (requestOptions.blockReaction ? "线上群聊 blockReaction" : "线上群聊"),
       userInput: latestUserInput,
@@ -2925,6 +2973,7 @@
     requestOptions.recentCharacterLinesMap = recentCharacterLinesMap;
     requestOptions.timeGapText = timeGapInfo;
     requestOptions.timeGapInfo = timeGapInfo;
+    requestOptions.privateBridgeText = privateBridgeText;
     groupSettingsText = group && group.settings
       ? [
         "群公告：" + (group.settings.announcement || "暂无"),

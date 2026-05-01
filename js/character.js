@@ -3595,7 +3595,14 @@
         avatar: "",
         persona: ""
       },
-      memoryEnabled: true
+      memoryEnabled: true,
+      memoryBridge: {
+        groupEnabled: false,
+        groupIds: [],
+        groupRounds: 10,
+        includeGroupSummary: true,
+        includeRawGroupMessages: true
+      }
     }, character && character.chatSettings || {});
   }
 
@@ -3651,6 +3658,33 @@
         return '<option value="' + escapeHtml(persona.id) + '"' + (selectedId === persona.id ? " selected" : "") + ">" + escapeHtml(persona.name || "未命名人设") + "</option>";
       }).join("")
     ].join("");
+  }
+
+  function renderPrivateGroupMemoryBridgeOptions(character, settings) {
+    var groups = window.AppStorage.getGroups ? window.AppStorage.getGroups() : [];
+    var joinedGroups = (groups || []).filter(function (group) {
+      return group && Array.isArray(group.memberIds) && group.memberIds.indexOf(character.id) !== -1;
+    });
+
+    if (!joinedGroups.length) {
+      return '<div class="field-help">当前角色未加入任何群聊</div>';
+    }
+
+    return joinedGroups.map(function (group) {
+      var checked = settings.memoryBridge && Array.isArray(settings.memoryBridge.groupIds) && settings.memoryBridge.groupIds.indexOf(group.id) !== -1;
+      var history = window.AppStorage.getGroupChatHistory ? window.AppStorage.getGroupChatHistory(group.id) : [];
+      var preview = (history || []).slice().reverse().find(function (message) {
+        return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system";
+      });
+      var previewText = preview ? (preview.role === "user" ? "你：" : (preview.characterName || "成员") + "：") + String(preview.content || "") : "暂无近期消息";
+
+      return [
+        '<label class="member-option ' + (checked ? "active" : "") + '">',
+        '<input class="visually-hidden" data-private-memory-bridge-group-id="' + escapeHtml(group.id) + '" type="checkbox"' + (checked ? " checked" : "") + '>','<span class="member-option-text"><strong>' + escapeHtml(group.name || "群聊") + '</strong><em>成员 ' + ((group.memberIds || []).length || 0) + ' 人</em><small>' + escapeHtml(previewText) + '</small></span>',
+        '<span class="member-check" aria-hidden="true">' + (checked ? "✓" : "") + '</span>',
+        "</label>"
+      ].join("");
+    }).join("");
   }
 
   function renderPrivateChatSettings(character) {
@@ -3710,6 +3744,12 @@
         return '<option value="' + escapeHtml(card.id) + '"' + (settings.familyCardId === card.id ? " selected" : "") + ">" + escapeHtml(card.name) + "（剩余 ¥" + escapeHtml(formatAmount(Math.max(0, card.totalLimit - card.usedAmount))) + "）</option>";
       }).join("") + '</select><small class="field-help">可在钱包 > 亲属卡新增；聊天输入栏也可以使用亲属卡支付。</small></div>',
       '<button class="outline-button danger" type="button" data-private-action="clear-history">清空聊天记录</button>',
+      "</section>",
+      '<section class="form-section">',
+      '<div class="section-title-row"><h3>群聊记忆互通 💬</h3><span>桥接</span></div>',
+      '<label class="switch-row"><input data-private-field="groupMemoryBridgeEnabled" type="checkbox"' + (settings.memoryBridge && settings.memoryBridge.groupEnabled ? " checked" : "") + '>开启群聊记忆互通</label>',
+      '<div class="field-group"><label>每个群读取最近轮数</label><input data-private-field="groupMemoryBridgeRounds" type="number" min="3" max="20" value="' + escapeHtml(settings.memoryBridge && Number(settings.memoryBridge.groupRounds) || 10) + '"></div>',
+      '<div class="field-group"><label>选择要读取的群聊</label>' + renderPrivateGroupMemoryBridgeOptions(character, settings) + '<small class="field-help">勾选后，当前角色私聊会读取所选群聊最近内容。勾选过多可能导致上下文过长。</small></div>',
       "</section>",
       '<section class="form-section">',
       '<div class="section-title-row"><h3>记忆设置</h3><span>长期记忆</span></div>',
@@ -3872,7 +3912,16 @@
           avatar: userPersonaOverride.avatar || "",
           persona: getPrivateField("userPersona")
         },
-        memoryEnabled: getPrivateChecked("memoryEnabled")
+        memoryEnabled: getPrivateChecked("memoryEnabled"),
+        memoryBridge: {
+          groupEnabled: getPrivateChecked("groupMemoryBridgeEnabled"),
+          groupIds: Array.prototype.map.call(form.querySelectorAll("[data-private-memory-bridge-group-id]:checked"), function (input) {
+            return input.dataset.privateMemoryBridgeGroupId;
+          }),
+          groupRounds: Math.max(3, Math.min(20, Number(getPrivateField("groupMemoryBridgeRounds")) || 10)),
+          includeGroupSummary: true,
+          includeRawGroupMessages: true
+        }
       }
     };
 

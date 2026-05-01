@@ -898,6 +898,220 @@
     return out.join("\n\n");
   }
 
+  function normalizeBridgeText(text) {
+    return String(text || "").replace(/\s+/g, " ").trim();
+  }
+
+  function truncateBridgeText(text, maxLength) {
+    text = String(text || "");
+    if (text.length <= maxLength) {
+      return text;
+    }
+    return text.slice(0, Math.max(0, maxLength - 3)) + "...";
+  }
+
+  function collectRecentChatRounds(messages, rounds) {
+    var result = [];
+    var current = [];
+    var i;
+
+    if (!Array.isArray(messages) || !messages.length || !Number.isFinite(rounds) || rounds <= 0) {
+      return result;
+    }
+
+    for (i = messages.length - 1; i >= 0 && result.length < rounds; i -= 1) {
+      var msg = messages[i];
+      if (!msg || !msg.content || msg.type === "loading" || msg.type === "error" || msg.type === "system") {
+        continue;
+      }
+      if (msg.role === "user") {
+        current.unshift(msg);
+        result.unshift(current.slice());
+        current = [];
+        continue;
+      }
+      if (msg.role === "character") {
+        current.unshift(msg);
+      }
+    }
+
+    if (current.length && result.length < rounds) {
+      result.unshift(current.slice());
+    }
+
+    return result;
+  }
+
+  function buildBridgeMessageLine(message, currentCharacterId, userName) {
+    if (!message || !message.content) {
+      return "";
+    }
+
+    var content = normalizeBridgeText(message.content);
+    if (message.role === "user") {
+      return "- 用户：" + content;
+    }
+
+    if (message.role === "character") {
+      if (String(message.characterId) === String(currentCharacterId)) {
+        return "- 当前角色：" + content;
+      }
+      return "- " + (String(message.characterName || "角色")) + "：" + content;
+    }
+
+    return "";
+  }
+
+  function containsMention(text, keys) {
+    var content = normalizeBridgeText(text).toLowerCase();
+    return (keys || []).some(function (key) {
+      return key && content.indexOf(String(key || "").toLowerCase()) !== -1;
+    });
+  }
+
+  function getPrivateMemoryBridgeContext(characterId, options) {
+    var params = options && typeof options === "object" ? options : {};
+    var characterIds = Array.isArray(params.characterIds) ? params.characterIds.map(String).filter(Boolean) : [];
+    var groupIds = Array.isArray(params.groupIds) ? params.groupIds.map(String).filter(Boolean) : [];
+    var rounds = Number(params.rounds) || 10;
+    var maxLength = 2200;
+    var groups = getGroups();
+    var characters = getCharacters();
+    var character = characters.find(function (c) { return String(c.id) === String(characterId); });
+    var userName = "用户";
+    var out = [];
+
+    if (!characterId || !groupIds.length || !groups.length) {
+      return "";
+    }
+
+    (groups || []).forEach(function (group) {
+      if (!group || !Array.isArray(group.memberIds) || groupIds.indexOf(String(group.id)) === -1) {
+        return;
+      }
+      if (group.memberIds.indexOf(String(characterId)) === -1) {
+        return;
+      }
+
+      var history = (getGroupChatHistory(group.id) || []).filter(function (message) {
+        return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system";
+      });
+      if (!history.length) {
+        return;
+      }
+
+      var roundsList = collectRecentChatRounds(history, rounds);
+      if (!roundsList.length) {
+        return;
+      }
+
+      var groupName = group.name || "群聊";
+      var lines = [];
+      roundsList.forEach(function (round) {
+        round.forEach(function (message) {
+          if (!message || !message.content) {
+            return;
+          }
+          if (message.role === "user") {
+            lines.push(buildBridgeMessageLine(message, characterId, userName));
+            return;
+          }
+          if (message.role === "character") {
+            if (String(message.characterId) === String(characterId)) {
+              lines.push(buildBridgeMessageLine(message, characterId, userName));
+              return;
+            }
+            if (containsMention(message.content, [character.name, userName])) {
+              lines.push(buildBridgeMessageLine(message, characterId, userName));
+            }
+          }
+        });
+      });
+
+      if (!lines.length) {
+        return;
+      }
+
+      var groupText = "群聊《" + groupName + "》最近发生：\n" + lines.join("\n");
+      if (out.join("\n").length + groupText.length > maxLength) {
+        groupText = truncateBridgeText(groupText, Math.max(0, maxLength - out.join("\n").length));
+      }
+      if (groupText) {
+        out.push(groupText);
+      }
+    });
+
+    if (!out.length) {
+      return "";
+    }
+
+    var result = out.join("\n\n");
+    return truncateBridgeText(result, maxLength);
+  }
+
+  function getGroupPrivateMemoryBridgeContext(groupId, options) {
+    var params = options && typeof options === "object" ? options : {};
+    var characterIds = Array.isArray(params.characterIds) ? params.characterIds.map(String).filter(Boolean) : [];
+    var rounds = Number(params.rounds) || 5;
+    var maxLength = 2200;
+    var group = getGroups().find(function (g) { return String(g.id) === String(groupId); });
+    var characters = getCharacters();
+    var out = [];
+
+    if (!group || !Array.isArray(group.memberIds) || !characterIds.length) {
+      return "";
+    }
+
+    characterIds.forEach(function (characterId) {
+      if (group.memberIds.indexOf(String(characterId)) === -1) {
+        return;
+      }
+
+      var character = characters.find(function (c) { return String(c.id) === String(characterId); });
+      var history = (getChatHistory(characterId) || []).filter(function (message) {
+        return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system";
+      });
+
+      if (!history.length) {
+        return;
+      }
+
+      var roundsList = collectRecentChatRounds(history, rounds);
+      if (!roundsList.length) {
+        return;
+      }
+
+      var lines = [];
+      roundsList.forEach(function (round) {
+        round.forEach(function (message) {
+          if (!message || !message.content) {
+            return;
+          }
+          lines.push(buildBridgeMessageLine(message, characterId, "用户"));
+        });
+      });
+
+      if (!lines.length) {
+        return;
+      }
+
+      var name = (character && character.name) ? character.name : "角色";
+      var section = "角色 " + name + " 最近和用户私聊：\n" + lines.join("\n");
+      if (out.join("\n").length + section.length > maxLength) {
+        section = truncateBridgeText(section, Math.max(0, maxLength - out.join("\n").length));
+      }
+      if (section) {
+        out.push(section);
+      }
+    });
+
+    if (!out.length) {
+      return "";
+    }
+
+    return truncateBridgeText(out.join("\n\n"), maxLength);
+  }
+
   function clearCharacterMemory(characterId) {
     var memory = getMemoryStore();
     delete memory[characterId];
@@ -3643,6 +3857,30 @@
     };
   }
 
+  function normalizePrivateMemoryBridgeSettings(source) {
+    source = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+
+    return {
+      groupEnabled: source.groupEnabled === true,
+      groupIds: Array.isArray(source.groupIds) ? source.groupIds.map(String).filter(Boolean) : [],
+      groupRounds: Math.max(3, Math.min(20, Number(source.groupRounds) || 10)),
+      includeGroupSummary: source.includeGroupSummary !== false,
+      includeRawGroupMessages: source.includeRawGroupMessages !== false
+    };
+  }
+
+  function normalizeGroupMemoryBridgeSettings(source) {
+    source = source && typeof source === "object" && !Array.isArray(source) ? source : {};
+
+    return {
+      privateEnabled: source.privateEnabled === true,
+      privateCharacterIds: Array.isArray(source.privateCharacterIds) ? source.privateCharacterIds.map(String).filter(Boolean) : [],
+      privateRounds: Math.max(3, Math.min(10, Number(source.privateRounds) || 5)),
+      includePrivateSummary: source.includePrivateSummary !== false,
+      includeRawPrivateMessages: source.includeRawPrivateMessages !== false
+    };
+  }
+
   function normalizePrivateChatSettings(settings) {
     var source = settings && typeof settings === "object" ? settings : {};
     var persona = source.userPersonaOverride && typeof source.userPersonaOverride === "object" ? source.userPersonaOverride : {};
@@ -3673,7 +3911,8 @@
         extra: String(persona.extra || persona.persona || ""),
         persona: String(persona.persona || persona.extra || "")
       },
-      memoryEnabled: source.memoryEnabled !== false
+      memoryEnabled: source.memoryEnabled !== false,
+      memoryBridge: normalizePrivateMemoryBridgeSettings(source.memoryBridge || {})
     };
   }
 
@@ -3704,7 +3943,8 @@
         speakingStyle: String(persona.speakingStyle || ""),
         extra: String(persona.extra || persona.persona || ""),
         persona: String(persona.persona || persona.extra || "")
-      }
+      },
+      memoryBridge: normalizeGroupMemoryBridgeSettings(source.memoryBridge || {})
     };
   }
 
@@ -4708,6 +4948,8 @@
     addCharacterMemory: addCharacterMemory,
     getMemoriesForCharacters: getMemoriesForCharacters,
     getRecentGroupContextForCharacter: getRecentGroupContextForCharacter,
+    getPrivateMemoryBridgeContext: getPrivateMemoryBridgeContext,
+    getGroupPrivateMemoryBridgeContext: getGroupPrivateMemoryBridgeContext,
     clearCharacterMemory: clearCharacterMemory,
     getChatMemories: getChatMemories,
     saveChatMemories: saveChatMemories,
