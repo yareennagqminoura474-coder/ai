@@ -47,7 +47,8 @@
     chatId: "",
     characterFilter: "all",
     sourceFilter: "all",
-    moodFilter: "all"
+    moodFilter: "all",
+    origin: ""
   };
   var thoughtsDrawerState = {
     title: "心声",
@@ -457,7 +458,7 @@
     if (action === "thoughts") {
       renderThoughtsScreen("全部心声", window.AppStorage.getCharacters().map(function (character) {
         return character.id;
-      }));
+      }), "", "global");
       setActivePage("thoughtsScreen");
       return;
     }
@@ -5129,7 +5130,7 @@
   function openThoughtsForCharacter(characterId, returnPage) {
     var character = getCharacterById(characterId);
     thoughtsReturnPage = returnPage || getActivePage() || "homeScreen";
-    renderThoughtsScreen(character ? character.name + "的心声" : "心声", characterId ? [characterId] : []);
+    renderThoughtsScreen(character ? character.name + "的心声" : "心声", characterId ? [characterId] : [], characterId, "private");
     setActivePage("thoughtsScreen");
   }
 
@@ -5138,11 +5139,11 @@
       return item.id === groupId;
     });
     thoughtsReturnPage = returnPage || getActivePage() || "homeScreen";
-    renderThoughtsScreen(group ? group.name + " · 成员心声" : "成员心声", group ? group.memberIds || [] : [], groupId);
+    renderThoughtsScreen(group ? group.name + " · 成员心声" : "成员心声", group ? group.memberIds || [] : [], groupId, "group");
     setActivePage("thoughtsScreen");
   }
 
-  function renderThoughtsScreen(title, characterIds, chatId) {
+  function renderThoughtsScreen(title, characterIds, chatId, origin) {
     var titleNode = getElement("thoughtsTitle");
     var content = getElement("thoughtsContent");
     var items = [];
@@ -5157,6 +5158,12 @@
       thoughtsState.characterFilter = "all";
       thoughtsState.sourceFilter = "all";
       thoughtsState.moodFilter = "all";
+      thoughtsState.origin = String(origin || "");
+    }
+
+    if (thoughtsState.characterIds.length > 1 && thoughtsState.characterFilter === "all"
+      && (String(thoughtsState.origin || "").indexOf("group") === 0 || String(thoughtsState.origin || "").indexOf("offline") === 0)) {
+      thoughtsState.characterFilter = thoughtsState.characterIds[0] || "all";
     }
 
     if (titleNode) {
@@ -5195,7 +5202,7 @@
 
     content.innerHTML = [
       '<section class="thought-filter-bar">',
-      '  <label><span>角色</span><select data-thought-filter="character"><option value="all">全部角色</option>' + (thoughtsState.characterIds || []).map(function (characterId) {
+      '  <label><span>角色</span><select data-thought-filter="character">' + (String(thoughtsState.origin || "").indexOf("group") === 0 || String(thoughtsState.origin || "").indexOf("offline") === 0 ? "" : '<option value="all">全部角色</option>') + (thoughtsState.characterIds || []).map(function (characterId) {
         var character = getCharacterById(characterId);
         return '<option value="' + escapeHtml(characterId) + '"' + (thoughtsState.characterFilter === characterId ? " selected" : "") + ">" + escapeHtml(character ? character.name : "角色") + "</option>";
       }).join("") + "</select></label>",
@@ -5237,6 +5244,10 @@
 
       if (field.dataset.thoughtFilter === "character") {
         thoughtsState.characterFilter = field.value;
+        if ((String(thoughtsState.origin || "").indexOf("group") === 0 || String(thoughtsState.origin || "").indexOf("offline") === 0)
+          && thoughtsState.characterFilter === "all") {
+          thoughtsState.characterFilter = thoughtsState.characterIds[0] || "all";
+        }
       }
       if (field.dataset.thoughtFilter === "source") {
         thoughtsState.sourceFilter = field.value;
@@ -5395,6 +5406,7 @@
     var source = options || {};
     var characterIds = Array.isArray(source.characterIds) ? source.characterIds.filter(Boolean) : [];
     var chatId = String(source.chatId || "");
+    var origin = String(source.origin || "");
     var mask = getElement("thoughtsDrawerMask");
 
     thoughtsDrawerState = {
@@ -5404,8 +5416,13 @@
       characterFilter: source.characterFilter || "all",
       mode: source.mode === "history" ? "history" : "latest",
       open: true,
-      origin: source.origin || ""
+      origin: origin
     };
+
+    if (characterIds.length > 1 && thoughtsDrawerState.characterFilter === "all"
+      && (origin.indexOf("group") === 0 || origin.indexOf("offline") === 0)) {
+      thoughtsDrawerState.characterFilter = characterIds[0];
+    }
 
     markThoughtsRead(characterIds, chatId);
     renderThoughtsDrawer();
@@ -5549,6 +5566,8 @@
 
   function renderThoughtDrawerTabs(items) {
     var ids = thoughtsDrawerState.characterIds || [];
+    var isGroupOrOffline = String(thoughtsDrawerState.origin || "").indexOf("group") === 0
+      || String(thoughtsDrawerState.origin || "").indexOf("offline") === 0;
 
     if (ids.length <= 1) {
       return '<div class="thoughts-drawer-count">' + items.length + " 条心声</div>";
@@ -5556,7 +5575,7 @@
 
     return [
       '<div class="thoughts-drawer-tabs" aria-label="按角色筛选心声">',
-      '<button type="button" data-drawer-character="all" class="' + (thoughtsDrawerState.characterFilter === "all" ? "active" : "") + '">全部</button>',
+      isGroupOrOffline ? "" : '<button type="button" data-drawer-character="all" class="' + (thoughtsDrawerState.characterFilter === "all" ? "active" : "") + '">全部</button>',
       ids.map(function (characterId) {
         var character = getCharacterById(characterId);
         return '<button type="button" data-drawer-character="' + escapeHtml(characterId) + '" class="' + (thoughtsDrawerState.characterFilter === characterId ? "active" : "") + '">' + escapeHtml(character ? character.name : "角色") + "</button>";
@@ -5622,9 +5641,14 @@
       }
 
       if (filter) {
-        thoughtsDrawerState.characterFilter = filter.dataset.drawerCharacter || "all";
-        thoughtsDrawerState.mode = "latest";
-        renderThoughtsDrawer();
+        var nextFilter = filter.dataset.drawerCharacter || "all";
+        var isGroupOrOffline = String(thoughtsDrawerState.origin || "").indexOf("group") === 0
+          || String(thoughtsDrawerState.origin || "").indexOf("offline") === 0;
+        if (!isGroupOrOffline || nextFilter !== "all") {
+          thoughtsDrawerState.characterFilter = nextFilter;
+          thoughtsDrawerState.mode = "latest";
+          renderThoughtsDrawer();
+        }
       }
     });
   }
