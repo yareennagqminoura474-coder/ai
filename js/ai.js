@@ -238,11 +238,12 @@
     return [
       "",
       "本轮最重要的输入优先级：",
-      "1. 角色原文人设和 personaVoiceFingerprint",
-      "2. 本轮用户输入",
-      "3. 最近心声 recentHeartVoice",
-      "4. 最近 10-16 条时间线",
-      "5. 当前聊天记忆和世界书命中",
+      "1. 角色核心人设和身份不能被覆盖。",
+      "2. 本轮用户输入。",
+      "3. 已命中的世界书强规则、禁忌、身份边界、场景事实。",
+      "4. 最近聊天时间线和群聊互通。",
+      "5. 最近心声和长期记忆。",
+      "注意：世界书不能把角色变成别人，但命中的强规则必须限制角色能不能做、能不能说、能不能透露、能不能靠近。",
       "先抓这 5 个，再生成 JSON。",
       personaReminder
     ].filter(Boolean).join("\n");
@@ -1514,6 +1515,32 @@
     var modeLabel = source.modeLabel || getTaskModeLabel(taskMode);
     var schemaText = appendOptionalSchema(source.schemaText || "{}", requestOptions || source);
 
+    var effectiveWorldBookContext = String(
+      source.worldBookContext ||
+      requestOptions.worldBookContext ||
+      ""
+    ).trim();
+
+    var effectiveSelectedWorldBookIds = normalizeWorldBookIdList(
+      source.selectedWorldBookIds ||
+      requestOptions.selectedWorldBookIds ||
+      []
+    );
+
+    var worldBookSection = effectiveWorldBookContext
+      ? [
+          "【本轮世界书命中】",
+          effectiveWorldBookContext,
+          "世界书执行要求：",
+          "1. 先判断命中规则是否限制角色能不能说、做、靠近、离开、透露、改称呼、改关系。",
+          "2. 强规则、禁止规则、身份边界、场景事实必须优先于普通聊天记忆和群聊互通记忆。",
+          "3. 不能为了顺用户话而违反世界书。",
+          "4. 不要在可见回复里说「世界书写着」「设定里说」「规则要求」，只自然表现。"
+        ].join("\n")
+      : (effectiveSelectedWorldBookIds.length
+          ? "【本轮世界书状态】当前聊天绑定了世界书，但本轮没有命中具体条目；不要编造未命中设定。"
+          : "【本轮世界书状态】当前聊天未绑定世界书；不要编造世界规则。");
+
     return [
       "本轮任务（Part B：只放本轮要做的事）",
       source.instruction || "",
@@ -1522,15 +1549,15 @@
       valueOrFallback(source.userInput),
       source.sceneText ? "当前场景：\n" + source.sceneText : "",
       source.beforeContext || "",
-      source.worldBookContext ? "本轮世界书命中内容：\n" + source.worldBookContext : "",
+      worldBookSection,
       source.contextLabel || "最近 10-16 条上下文：",
       source.recentHistory || "暂无",
       buildTemporalAwarenessRules(requestOptions),
       buildCurrentTask(taskMode, {
         userInput: source.userInput,
         requestOptions: requestOptions,
-        selectedWorldBookIds: source.selectedWorldBookIds,
-        worldBookContext: source.worldBookContext,
+        selectedWorldBookIds: effectiveSelectedWorldBookIds,
+        worldBookContext: effectiveWorldBookContext,
         regenerateRequest: source.regenerateRequest,
         regenerateInstruction: source.regenerateInstruction,
         primaryField: primaryField,
@@ -2552,6 +2579,14 @@
       relatedTargetIds: profile && profile.id ? [profile.id] : [],
       characterIds: profile && profile.id ? [profile.id] : []
     });
+    console.debug("[WorldBook Debug][private actual prompt]", {
+      scope: "private",
+      targetId: profile && profile.id,
+      selectedWorldBookIds: selectedWorldBookIds,
+      selectedCount: selectedWorldBookIds.length,
+      worldBookContextLength: worldBookContext ? worldBookContext.length : 0,
+      preview: worldBookContext ? worldBookContext.slice(0, 500) : "(empty)"
+    });
     var recentHeartVoiceText = buildRecentHeartVoiceContext(profile.id, "private", profile.id);
     var relationshipPhaseHint = buildRelationshipPhaseHint(recentHeartVoiceText, formatChatMemoryList(chatMemories), formatMemoryList(memories));
 
@@ -2648,6 +2683,8 @@
           beforeContext: "用户在角色眼里：" + userContext.name + "；" + (userContext.persona || "无补充资料"),
           contextLabel: recentGroupContextText ? "最近私聊 + 互通群聊记忆（按顺序）：" : "最近 10-16 条聊天上下文：",
           recentHistory: combinedRecentHistory,
+          worldBookContext: worldBookContext,
+          selectedWorldBookIds: selectedWorldBookIds,
           requestOptions: requestOptions,
           regenerateRequest: requestOptions.regenerateRequest,
           regenerateInstruction: String(requestOptions.regenerateInstruction || "").trim(),
@@ -3031,6 +3068,14 @@
     requestOptions.timeGapText = timeGapInfo;
     requestOptions.timeGapInfo = timeGapInfo;
     requestOptions.privateBridgeText = privateBridgeText;
+    console.debug("[WorldBook Debug][group actual prompt]", {
+      scope: "group",
+      targetId: group && group.id,
+      selectedWorldBookIds: selectedWorldBookIds,
+      selectedCount: selectedWorldBookIds.length,
+      worldBookContextLength: worldBookContext ? worldBookContext.length : 0,
+      preview: worldBookContext ? worldBookContext.slice(0, 500) : "(empty)"
+    });
     groupSettingsText = group && group.settings
       ? [
         "群公告：" + (group.settings.announcement || "暂无"),
@@ -3056,6 +3101,8 @@
           modeLabel: requestOptions.regenerateRequest ? "线上群聊重回" : (requestOptions.blockReaction ? "线上群聊 blockReaction" : "线上群聊"),
           taskMode: groupTaskMode,
           userInput: latestUserInput,
+          worldBookContext: worldBookContext,
+          selectedWorldBookIds: selectedWorldBookIds,
           beforeContext: [
             "群聊设置：",
             groupSettingsText || "暂无",
@@ -3219,6 +3266,14 @@
     context.recentCharacterLinesMap = recentCharacterLinesMap;
     context.timeGapText = timeGapInfo;
     context.timeGapInfo = timeGapInfo;
+    console.debug("[WorldBook Debug][offline actual prompt]", {
+      scope: mode,
+      targetId: context.targetId,
+      selectedWorldBookIds: selectedWorldBookIds,
+      selectedCount: selectedWorldBookIds.length,
+      worldBookContextLength: worldBookContext ? worldBookContext.length : 0,
+      preview: worldBookContext ? worldBookContext.slice(0, 500) : "(empty)"
+    });
     var recentHeartVoiceText = mode === "group"
       ? buildRecentHeartVoiceForCharacters(participants, "group", context.targetId || "")
       : (participants.length === 1
@@ -3291,6 +3346,8 @@
           modeLabel: mode === "group" ? "群聊线下推进" : "私聊线下推进",
           taskMode: "offline",
           userInput: context.userInput,
+          worldBookContext: worldBookContext,
+          selectedWorldBookIds: selectedWorldBookIds,
           sceneText: sceneText || "未指定，请根据最近历史自然推断，不默认白天/家/学校",
           beforeContext: "私聊模式只有当前角色参与；群聊模式允许所有群成员自然参与，多个角色可以说话。",
           contextLabel: "最近 10-16 条聊天/剧情上下文：",

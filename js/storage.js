@@ -2203,6 +2203,10 @@
         return;
       }
 
+      var bookEnabledCount = (book.entries || []).filter(function (e) {
+        return e && e.enabled;
+      }).length;
+
       (book.entries || []).forEach(function (entry) {
         if (!entry.enabled || !isWorldBookEntryInScope(entry, scope, target, relatedTargetIds)) {
           return;
@@ -2238,7 +2242,9 @@
         var baseScore = keywordScore + titleScore + groupScore + Math.min(contentScore, 6);
         var priority = Number(entry.priority) || 0;
         var score = baseScore + priority + (alwaysActive ? 100 : 0);
-        var shouldInclude = alwaysActive || baseScore > 0 || (!keywords.length && priority >= 8);
+        var isTinyBook = bookEnabledCount <= 5;
+        var weakMatch = !keywords.length && priority >= 5;
+        var shouldInclude = alwaysActive || baseScore > 0 || weakMatch || isTinyBook;
 
         if (shouldInclude) {
           matched.push(Object.assign({}, entry, {
@@ -2291,7 +2297,7 @@
           return;
         }
 
-        if (!alwaysActive && priority < 8) {
+        if (!alwaysActive && priority < 5) {
           return;
         }
 
@@ -2385,8 +2391,8 @@
   }
 
   function isWorldBookEntryAlwaysActive(entry, book) {
-    return Boolean(entry && (entry.alwaysActive || entry.pinned || entry.isPinned || entry.constant || entry.常驻 || entry["常驻"]))
-      || Boolean(book && (book.alwaysActive || book.pinned || book.isPinned || book.constant || book.常驻 || book["常驻"]));
+    return Boolean(entry && (entry.alwaysActive || entry.pinned || entry.isPinned || entry.constant || entry.permanent || entry.enabledPermanent || entry.常驻 || entry["常驻"]))
+      || Boolean(book && (book.alwaysActive || book.pinned || book.isPinned || book.constant || book.permanent || book.enabledPermanent || book.常驻 || book["常驻"]));
   }
 
   function normalizeWorldBookScope(scope) {
