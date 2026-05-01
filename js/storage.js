@@ -3296,6 +3296,15 @@
       return null;
     }
 
+    if (settings.allowDuplicate !== true && normalized.uniqueKey) {
+      var existing = wallet.ledger.find(function (r) {
+        return r.uniqueKey && r.uniqueKey === normalized.uniqueKey;
+      });
+      if (existing) {
+        return existing;
+      }
+    }
+
     if (!settings.skipBalance) {
       if (normalized.direction === "income") {
         wallet.balance = roundAmount(wallet.balance + normalized.amount);
@@ -3310,6 +3319,88 @@
     wallet.ledger.unshift(normalized);
     saveWallet(wallet);
     return normalized;
+  }
+
+  function walletHasLedger(recordId) {
+    var wallet = getWallet();
+    return wallet.ledger.some(function (record) {
+      return String(record.id) === String(recordId);
+    });
+  }
+
+  function findWalletLedgerByUniqueKey(uniqueKey) {
+    var key = String(uniqueKey || "");
+    if (!key) return null;
+    return getWallet().ledger.find(function (record) {
+      return String(record.uniqueKey || "") === key;
+    }) || null;
+  }
+
+  function deleteWalletLedger(recordId, options) {
+    var wallet = getWallet();
+    var index = wallet.ledger.findIndex(function (record) {
+      return String(record.id) === String(recordId);
+    });
+    if (index === -1) return false;
+
+    var oldRecord = wallet.ledger[index];
+    if (!options || !options.skipBalance) {
+      reverseLedgerEffect(wallet, oldRecord);
+    }
+    wallet.ledger.splice(index, 1);
+    saveWallet(wallet);
+    return true;
+  }
+
+  function updateWalletLedger(recordId, patch, options) {
+    var wallet = getWallet();
+    var index = wallet.ledger.findIndex(function (record) {
+      return String(record.id) === String(recordId);
+    });
+    if (index === -1) return null;
+
+    var oldRecord = wallet.ledger[index];
+    var nextRecord = normalizeLedgerRecord(Object.assign({}, oldRecord, patch || {}, {
+      id: oldRecord.id,
+      createdAt: (patch && patch.createdAt) || oldRecord.createdAt,
+      updatedAt: Date.now()
+    }), index);
+
+    if (!options || !options.skipBalance) {
+      reverseLedgerEffect(wallet, oldRecord);
+      applyLedgerEffect(wallet, nextRecord);
+    }
+
+    wallet.ledger[index] = nextRecord;
+    saveWallet(wallet);
+    return nextRecord;
+  }
+
+  function dedupeWalletLedger(options) {
+    var wallet = getWallet();
+    var seen = {};
+    var nextLedger = [];
+    var removed = [];
+
+    wallet.ledger.forEach(function (record) {
+      var key = record.uniqueKey || buildLedgerUniqueKey(record);
+      var normalized = Object.assign({}, record, { uniqueKey: key });
+
+      if (key && seen[key]) {
+        removed.push(normalized);
+        if (!options || options.adjustBalance !== false) {
+          reverseLedgerEffect(wallet, normalized);
+        }
+        return;
+      }
+
+      if (key) seen[key] = true;
+      nextLedger.push(normalized);
+    });
+
+    wallet.ledger = nextLedger;
+    saveWallet(wallet);
+    return { removedCount: removed.length, removed: removed };
   }
 
   function rechargeWallet(amount, note) {
@@ -3462,6 +3553,8 @@
         type = direction === "expense" ? "transfer_out" : "transfer_in";
       }
 
+      var rmmMsgId = info.sourceMessageId || info.messageId || source.id || "";
+      var rmmGenId = source.generationId || info.generationId || info.sourceGenerationId || "";
       record = addWalletLedger({
         type: type,
         amount: amount,
@@ -3470,7 +3563,11 @@
         sourceId: info.sourceId || "",
         characterId: info.characterId || source.characterId || "",
         groupId: info.groupId || "",
-        sourceGenerationId: source.generationId || info.generationId || "",
+        sourceMessageId: rmmMsgId,
+        messageId: rmmMsgId,
+        sourceGenerationId: rmmGenId,
+        generationId: rmmGenId,
+        action: direction === "expense" ? "send" : "receive",
         note: source.note || source.content || (source.type === "redPacket" ? "红包" : "转账"),
         createdAt: source.createdAt || Date.now()
       }, {
@@ -3501,6 +3598,17 @@
       return source;
     }
 
+    if (source.walletLedgerId && walletHasLedger(source.walletLedgerId)) {
+      source.received = true;
+      source.walletRecorded = true;
+      source.status = source.type === "redPacket" ? "received" : "accepted";
+      return source;
+    }
+
+    if (source.received || source.walletRecorded || source.status === "received" || source.status === "accepted") {
+      return source;
+    }
+
     source = normalizeMoneyMessage(source);
     if (!source) {
       return message;
@@ -3516,6 +3624,21 @@
     }
 
     type = source.type === "redPacket" ? "redpacket_in" : "transfer_in";
+    var msgId = info.sourceMessageId || info.messageId || source.id || "";
+    var genId = source.generationId || info.generationId || info.sourceGenerationId || "";
+
+    if (msgId) {
+      var existingKey = [type, "income", info.sourceType || "private", info.sourceId || "", msgId, genId, "receive"].join("|");
+      var existingRecord = findWalletLedgerByUniqueKey(existingKey);
+      if (existingRecord) {
+        source.received = true;
+        source.walletRecorded = true;
+        source.walletLedgerId = existingRecord.id;
+        source.status = source.type === "redPacket" ? "received" : "accepted";
+        return source;
+      }
+    }
+
     record = addWalletLedger({
       type: type,
       amount: amount,
@@ -3524,7 +3647,11 @@
       sourceId: info.sourceId || "",
       characterId: info.characterId || source.characterId || "",
       groupId: info.groupId || "",
-      sourceGenerationId: source.generationId || info.generationId || "",
+      sourceMessageId: msgId,
+      messageId: msgId,
+      sourceGenerationId: genId,
+      generationId: genId,
+      action: "receive",
       note: source.note || source.content || (source.type === "redPacket" ? "红包" : "转账"),
       createdAt: Date.now()
     });
@@ -3562,6 +3689,8 @@
 
     amount = normalizePositiveAmount(source.amount);
     if (amount) {
+      var rtMsgId = info.sourceMessageId || info.messageId || source.id || "";
+      var rtGenId = source.generationId || info.generationId || info.sourceGenerationId || "";
       record = addWalletLedger({
         type: source.type === "redPacket" ? "redpacket_return" : "transfer_return",
         amount: amount,
@@ -3570,7 +3699,11 @@
         sourceId: info.sourceId || "",
         characterId: info.characterId || source.characterId || "",
         groupId: info.groupId || "",
-        sourceGenerationId: source.generationId || info.generationId || "",
+        sourceMessageId: rtMsgId,
+        messageId: rtMsgId,
+        sourceGenerationId: rtGenId,
+        generationId: rtGenId,
+        action: "return",
         note: "已退回，未入账：" + (source.note || source.content || (source.type === "redPacket" ? "红包" : "转账")),
         createdAt: Date.now()
       }, {
@@ -3614,6 +3747,8 @@
     }
 
     if (amount && !source.refundLedgerId && (source.walletLedgerId || source.walletRecorded)) {
+      var sfMsgId = info.sourceMessageId || info.messageId || source.id || "";
+      var sfGenId = source.generationId || info.generationId || info.sourceGenerationId || "";
       record = addWalletLedger({
         type: source.type === "redPacket" ? "redpacket_refund" : "transfer_refund",
         amount: amount,
@@ -3622,7 +3757,11 @@
         sourceId: info.sourceId || "",
         characterId: info.characterId || source.characterId || "",
         groupId: info.groupId || "",
-        sourceGenerationId: source.generationId || info.generationId || "",
+        sourceMessageId: sfMsgId,
+        messageId: sfMsgId,
+        sourceGenerationId: sfGenId,
+        generationId: sfGenId,
+        action: "refund",
         note: "对方退回：" + (source.note || source.content || (source.type === "redPacket" ? "红包" : "转账")),
         createdAt: Date.now()
       });
@@ -4781,14 +4920,40 @@
     return type !== "transfer_return" && type !== "redpacket_return";
   }
 
+  function buildLedgerUniqueKey(record) {
+    var source = record || {};
+    return [
+      source.uniqueKey || "",
+      source.type || "",
+      source.direction || "",
+      source.sourceType || "",
+      source.sourceId || "",
+      source.sourceMessageId || "",
+      source.sourceEventId || "",
+      source.messageId || "",
+      source.eventId || "",
+      source.sourceGenerationId || "",
+      source.generationId || "",
+      source.action || ""
+    ].map(function (item) {
+      return String(item || "");
+    }).join("|");
+  }
+
   function normalizeLedgerRecord(record, index) {
     var source = record && typeof record === "object" ? record : {};
     var direction = source.direction === "expense" ? "expense" : "income";
     var type = String(source.type || "system");
+    var uniqueKey = String(source.uniqueKey || "");
+
+    if (!uniqueKey) {
+      uniqueKey = buildLedgerUniqueKey(source);
+    }
 
     return Object.assign({}, source, {
       id: String(source.id || createId("ledger") + "_" + (index || 0)),
       type: type,
+      title: String(source.title || ""),
       amount: normalizePositiveAmount(source.amount),
       direction: direction,
       sourceType: String(source.sourceType || "system"),
@@ -4796,9 +4961,40 @@
       characterId: String(source.characterId || ""),
       groupId: String(source.groupId || ""),
       familyCardId: String(source.familyCardId || ""),
+      sourceMessageId: String(source.sourceMessageId || ""),
+      sourceEventId: String(source.sourceEventId || ""),
+      sourceGenerationId: String(source.sourceGenerationId || ""),
+      messageId: String(source.messageId || ""),
+      eventId: String(source.eventId || ""),
+      generationId: String(source.generationId || ""),
+      action: String(source.action || ""),
+      uniqueKey: uniqueKey,
       note: String(source.note || ""),
-      createdAt: Number(source.createdAt) || Date.now()
+      createdAt: Number(source.createdAt) || Date.now(),
+      updatedAt: Number(source.updatedAt) || 0
     });
+  }
+
+  function applyLedgerEffect(wallet, record) {
+    var amount = normalizePositiveAmount(record.amount);
+    if (!amount) return wallet;
+    if (record.direction === "income") {
+      wallet.balance = roundAmount(wallet.balance + amount);
+    } else if (record.direction === "expense") {
+      wallet.balance = roundAmount(wallet.balance - amount);
+    }
+    return wallet;
+  }
+
+  function reverseLedgerEffect(wallet, record) {
+    var amount = normalizePositiveAmount(record.amount);
+    if (!amount) return wallet;
+    if (record.direction === "income") {
+      wallet.balance = roundAmount(wallet.balance - amount);
+    } else if (record.direction === "expense") {
+      wallet.balance = roundAmount(wallet.balance + amount);
+    }
+    return wallet;
   }
 
   function normalizeFamilyCard(card, index) {
@@ -5426,6 +5622,14 @@
     getWallet: getWallet,
     saveWallet: saveWallet,
     addWalletLedger: addWalletLedger,
+    walletHasLedger: walletHasLedger,
+    findWalletLedgerByUniqueKey: findWalletLedgerByUniqueKey,
+    deleteWalletLedger: deleteWalletLedger,
+    updateWalletLedger: updateWalletLedger,
+    dedupeWalletLedger: dedupeWalletLedger,
+    buildLedgerUniqueKey: buildLedgerUniqueKey,
+    applyLedgerEffect: applyLedgerEffect,
+    reverseLedgerEffect: reverseLedgerEffect,
     rechargeWallet: rechargeWallet,
     getFamilyCards: getFamilyCards,
     addFamilyCard: addFamilyCard,

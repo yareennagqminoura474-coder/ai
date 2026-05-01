@@ -6339,6 +6339,7 @@
       renderBillFilterButton("income", "收入"),
       renderBillFilterButton("expense", "支出"),
       '  <button type="button" class="bill-clear-button" data-bill-action="clear">清空账单</button>',
+      '  <button type="button" class="bill-dedupe-button" data-bill-action="dedupe">修复重复账单</button>',
       "</section>",
       '<section class="bill-list">',
       records.length ? records.map(renderLedgerRecord).join("") : renderSoftEmpty("账", wallet.ledger.length ? "没有符合筛选的账单" : "暂无账单", "红包、转账、充值和购物消费会出现在这里。"),
@@ -6355,6 +6356,89 @@
     Array.prototype.forEach.call(content.querySelectorAll("[data-bill-action='clear']"), function (button) {
       button.addEventListener("click", clearWalletLedger);
     });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-bill-action='dedupe']"), function (button) {
+      button.addEventListener("click", function () {
+        if (!window.AppStorage.dedupeWalletLedger) return;
+        var result = window.AppStorage.dedupeWalletLedger({ adjustBalance: true });
+        renderWalletBillScreen();
+        renderWalletScreen();
+        showToast("已修复 " + result.removedCount + " 条重复账单，余额已同步修正。");
+      });
+    });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-ledger-action='delete']"), function (button) {
+      button.addEventListener("click", function () {
+        var id = button.dataset.ledgerId;
+        if (!id || !window.AppStorage.deleteWalletLedger) return;
+        if (!window.confirm("删除这条账单后会同步修正余额，确定删除吗？")) return;
+        window.AppStorage.deleteWalletLedger(id);
+        renderWalletBillScreen();
+        renderWalletScreen();
+        showToast("账单已删除，余额已同步修正。");
+      });
+    });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-ledger-action='edit']"), function (button) {
+      button.addEventListener("click", function () {
+        var id = button.dataset.ledgerId;
+        if (!id) return;
+        openLedgerEditSheet(id);
+      });
+    });
+  }
+
+  function openLedgerEditSheet(recordId) {
+    if (!window.AppStorage.getWallet || !window.AppStorage.updateWalletLedger) return;
+    var wallet = window.AppStorage.getWallet();
+    var record = (wallet.ledger || []).find(function (r) { return String(r.id) === String(recordId); });
+    if (!record) return;
+
+    var sheet = getElement("ledgerEditSheet");
+    if (!sheet) {
+      var sheetHtml = [
+        '<div id="ledgerEditSheet" class="bottom-sheet" role="dialog" aria-modal="true">',
+        '  <div class="bottom-sheet-inner">',
+        '    <div class="sheet-handle"></div>',
+        '    <div class="sheet-header"><span class="sheet-title">编辑账单</span><button type="button" class="sheet-close-btn" id="ledgerEditSheetClose">✕</button></div>',
+        '    <div class="sheet-body">',
+        '      <label>方向<select id="ledgerEditDirection"><option value="income">收入</option><option value="expense">支出</option></select></label>',
+        '      <label>金额<input type="number" id="ledgerEditAmount" step="0.01" min="0.01"></label>',
+        '      <label>备注<input type="text" id="ledgerEditNote" maxlength="100"></label>',
+        '    </div>',
+        '    <button type="button" class="sheet-save-btn" id="ledgerEditSave">保存</button>',
+        '  </div>',
+        '</div>'
+      ].join("");
+      document.body.insertAdjacentHTML("beforeend", sheetHtml);
+      sheet = getElement("ledgerEditSheet");
+    }
+
+    getElement("ledgerEditDirection").value = record.direction === "expense" ? "expense" : "income";
+    getElement("ledgerEditAmount").value = record.amount || "";
+    getElement("ledgerEditNote").value = record.note || "";
+    sheet.dataset.ledgerId = recordId;
+    sheet.classList.add("open");
+
+    getElement("ledgerEditSheetClose").onclick = function () {
+      sheet.classList.remove("open");
+    };
+
+    getElement("ledgerEditSave").onclick = function () {
+      var direction = getElement("ledgerEditDirection").value;
+      var amount = parseFloat(getElement("ledgerEditAmount").value);
+      var note = getElement("ledgerEditNote").value;
+      if (!amount || amount < 0.01) { showToast("请输入有效金额。"); return; }
+      window.AppStorage.updateWalletLedger(sheet.dataset.ledgerId, {
+        direction: direction,
+        amount: amount,
+        note: note
+      });
+      sheet.classList.remove("open");
+      renderWalletBillScreen();
+      renderWalletScreen();
+      showToast("账单已更新，余额已同步修正。");
+    };
   }
 
   function renderBillFilterButton(value, label) {
@@ -6364,12 +6448,12 @@
   function clearWalletLedger() {
     var wallet = window.AppStorage.getWallet ? window.AppStorage.getWallet() : null;
 
-    if (!wallet || !wallet.ledger.length) {
+    if (!wallet || !wallet.ledger || !wallet.ledger.length) {
       showToast("现在没有账单可清空。");
       return;
     }
 
-    if (!window.confirm("确定清空所有账单吗？余额和亲属卡额度不会被重置。")) {
+    if (!window.confirm("确定清空所有账单吗？系统会按账单记录反向调整余额：收入会扣回，支出会退回。")) {
       return;
     }
 
@@ -6377,20 +6461,30 @@
       return;
     }
 
+    if (window.AppStorage.reverseLedgerEffect) {
+      wallet.ledger.forEach(function (record) {
+        window.AppStorage.reverseLedgerEffect(wallet, record);
+      });
+    }
     wallet.ledger = [];
     window.AppStorage.saveWallet(wallet);
     renderWalletBillScreen();
-    showToast("账单已清空。");
+    renderWalletScreen();
+    showToast("账单已清空，余额已同步修正。");
   }
 
   function renderLedgerRecord(record) {
     var income = record.direction === "income";
     var sourceName = getLedgerSourceName(record);
     return [
-      '<article class="bill-record ' + (income ? "income" : "expense") + '">',
+      '<article class="bill-record ' + (income ? "income" : "expense") + '" data-ledger-id="' + escapeHtml(record.id) + '">',
       '  <span class="bill-icon">' + escapeHtml(getLedgerTypeIcon(record.type)) + "</span>",
       '  <div class="bill-main"><strong>' + escapeHtml(getLedgerTypeName(record.type)) + "</strong><em>" + escapeHtml(sourceName) + (record.note ? " · " + escapeHtml(record.note) : "") + "</em><small>" + escapeHtml(formatDateTime(record.createdAt)) + "</small></div>",
       '  <b>' + (income ? "+" : "-") + "¥" + escapeHtml(formatMoney(record.amount)) + "</b>",
+      '  <div class="bill-actions">',
+      '    <button type="button" class="bill-edit-btn" data-ledger-action="edit" data-ledger-id="' + escapeHtml(record.id) + '">编辑</button>',
+      '    <button type="button" class="bill-delete-btn" data-ledger-action="delete" data-ledger-id="' + escapeHtml(record.id) + '">删除</button>',
+      '  </div>',
       "</article>"
     ].join("");
   }

@@ -524,12 +524,13 @@
   function appendOfflineEvents(session, events, meta) {
     var extra = meta || {};
 
-    (events || []).forEach(function (event) {
+    (events || []).forEach(function (event, index) {
       var character = event.characterId ? getCharacterById(event.characterId) : null;
       var now = Date.now();
+      var stableEventId = String(event.id || event.eventId || (extra.generationId ? extra.generationId + "_offline_" + index : now + "_" + Math.random().toString(36).slice(2, 7)));
 
-      session.history.push({
-        id: String(now + Math.random()),
+      var historyEvent = {
+        id: stableEventId,
         role: event.type === "speech" ? "character" : "system",
         type: event.type,
         characterId: event.characterId || "",
@@ -537,10 +538,17 @@
         content: event.content,
         createdAt: now,
         generationId: extra.generationId || event.generationId || "",
-        sourceGenerationId: extra.generationId || event.sourceGenerationId || ""
-      });
+        sourceGenerationId: extra.generationId || event.sourceGenerationId || "",
+        walletRecorded: event.walletRecorded || false,
+        walletLedgerId: event.walletLedgerId || ""
+      };
 
+      event.id = stableEventId;
+      event.eventId = event.eventId || stableEventId;
       recordOfflineMoneyEvent(event, session.mode, session.targetId, character, extra);
+      historyEvent.walletRecorded = event.walletRecorded || false;
+      historyEvent.walletLedgerId = event.walletLedgerId || "";
+      session.history.push(historyEvent);
 
       if (event.type === "speech" && character) {
         window.AppStorage.addCharacterMemory(character.id, {
@@ -1516,13 +1524,18 @@
       var speechCharacter = event.type === "speech"
         ? (character || participants[0])
         : null;
+      var stableEventId;
+      var message;
 
       if (!event || !event.content) {
         return;
       }
 
-      messages.push({
-        id: String(now + Math.random()),
+      stableEventId = String(event.id || event.eventId || (extra.generationId ? extra.generationId + "_inline_" + index : now + "_" + Math.random().toString(36).slice(2, 7)));
+      event.id = stableEventId;
+      event.eventId = event.eventId || stableEventId;
+      message = {
+        id: stableEventId,
         role: speechCharacter ? "character" : "system",
         type: speechCharacter ? "offlineSpeech" : "offlineAction",
         characterId: speechCharacter ? speechCharacter.id : "",
@@ -1530,10 +1543,17 @@
         content: event.content,
         createdAt: now,
         generationId: extra.generationId || event.generationId || "",
-        sourceGenerationId: extra.generationId || event.sourceGenerationId || ""
-      });
+        sourceGenerationId: extra.generationId || event.sourceGenerationId || "",
+        sourceEventId: stableEventId,
+        eventId: stableEventId,
+        walletRecorded: event.walletRecorded || false,
+        walletLedgerId: event.walletLedgerId || ""
+      };
 
       recordOfflineMoneyEvent(event, mode, chatId, speechCharacter, extra);
+      message.walletRecorded = event.walletRecorded || false;
+      message.walletLedgerId = event.walletLedgerId || "";
+      messages.push(message);
       writeInlineEventMemory(mode, chatId, participants, speechCharacter, event.content, now, extra);
     });
   }
@@ -1571,8 +1591,9 @@
         var speechCharacter = event.type === "speech"
           ? (character || participants[0])
           : null;
+        var stableEventId = String(event.id || event.eventId || (extra.generationId ? extra.generationId + "_inline_" + index : now + "_" + Math.random().toString(36).slice(2, 7)));
         var message = {
-          id: String(now + Math.random()),
+          id: stableEventId,
           role: speechCharacter ? "character" : "system",
           type: speechCharacter ? "offlineSpeech" : "offlineAction",
           characterId: speechCharacter ? speechCharacter.id : "",
@@ -1580,11 +1601,19 @@
           content: event.content,
           createdAt: now,
           generationId: extra.generationId || event.generationId || "",
-          sourceGenerationId: extra.generationId || event.sourceGenerationId || ""
+          sourceGenerationId: extra.generationId || event.sourceGenerationId || "",
+          sourceEventId: stableEventId,
+          eventId: stableEventId,
+          walletRecorded: event.walletRecorded || false,
+          walletLedgerId: event.walletLedgerId || ""
         };
 
+        event.id = stableEventId;
+        event.eventId = event.eventId || stableEventId;
         shown.push(message);
         recordOfflineMoneyEvent(event, mode, chatId, speechCharacter, extra);
+        message.walletRecorded = event.walletRecorded || false;
+        message.walletLedgerId = event.walletLedgerId || "";
         writeInlineEventMemory(mode, chatId, participants, speechCharacter, event.content, now, extra);
 
         if (mode === "group") {
@@ -1652,11 +1681,12 @@
       targetType: "offline",
       targetId: session.id,
       messages: items,
-      renderOne: function (event) {
+      renderOne: function (event, index) {
         var character = event.characterId ? getCharacterById(event.characterId) : null;
         var now = Date.now();
+        var stableEventId = String(event.id || event.eventId || (extra.generationId ? extra.generationId + "_offline_" + index : now + "_" + Math.random().toString(36).slice(2, 7)));
         var message = {
-          id: String(now + Math.random()),
+          id: stableEventId,
           role: event.type === "speech" ? "character" : "system",
           type: event.type,
           characterId: event.characterId || "",
@@ -1664,7 +1694,11 @@
           content: event.content,
           createdAt: now,
           generationId: extra.generationId || event.generationId || "",
-          sourceGenerationId: extra.generationId || event.sourceGenerationId || ""
+          sourceGenerationId: extra.generationId || event.sourceGenerationId || "",
+          sourceEventId: stableEventId,
+          eventId: stableEventId,
+          walletRecorded: event.walletRecorded || false,
+          walletLedgerId: event.walletLedgerId || ""
         };
         var nextSession = window.AppStorage.getOfflineSession(session.id);
 
@@ -1672,8 +1706,12 @@
           return;
         }
 
+        event.id = stableEventId;
+        event.eventId = event.eventId || stableEventId;
         shown.push(message);
         recordOfflineMoneyEvent(event, session.mode, session.targetId, character, extra);
+        message.walletRecorded = event.walletRecorded || false;
+        message.walletLedgerId = event.walletLedgerId || "";
         if (event.type === "speech" && character) {
           window.AppStorage.addCharacterMemory(character.id, {
             content: "线下模式中说：" + event.content,
@@ -1725,17 +1763,22 @@
   }
 
   function recordOfflineMoneyEvent(event, mode, chatId, character, meta) {
-    var money = event && event.money && typeof event.money === "object" ? event.money : event;
+    var money = event && event.money && typeof event.money === "object" ? event.money : null;
+    if (!money) return;
     var extra = meta || {};
     var normalizedAmount = window.AppStorage && window.AppStorage.normalizeMoneyAmount
-      ? window.AppStorage.normalizeMoneyAmount(money && money.amount)
+      ? window.AppStorage.normalizeMoneyAmount(money.amount)
       : "";
     var amount = normalizedAmount ? Number(normalizedAmount) : 0;
-    var direction = money && money.direction === "expense" ? "expense" : (money && money.direction === "income" ? "income" : "");
-    var kind = money && (money.moneyType || money.type);
+    var direction = money.direction === "expense" ? "expense" : (money.direction === "income" ? "income" : "");
+    var kind = money.moneyType || money.type;
     var recordType;
 
     if (!window.AppStorage.addWalletLedger || !amount || amount < 0.01 || !direction) {
+      return;
+    }
+
+    if (event.walletRecorded || event.walletLedgerId) {
       return;
     }
 
@@ -1747,7 +1790,9 @@
       recordType = kind || "system";
     }
 
-    window.AppStorage.addWalletLedger({
+    var evtId = String(event.id || event.eventId || "");
+    var genId = extra.generationId || event.generationId || money.generationId || "";
+    var record = window.AppStorage.addWalletLedger({
       type: recordType,
       amount: amount,
       direction: direction,
@@ -1755,11 +1800,19 @@
       sourceId: chatId,
       characterId: character ? character.id : (money.characterId || ""),
       groupId: mode === "group" ? chatId : "",
-      generationId: extra.generationId || money.generationId || event.generationId || "",
-      sourceGenerationId: extra.generationId || money.sourceGenerationId || event.sourceGenerationId || "",
+      sourceEventId: evtId,
+      eventId: evtId,
+      generationId: genId,
+      sourceGenerationId: extra.generationId || money.sourceGenerationId || event.sourceGenerationId || genId,
+      action: direction === "income" ? "receive" : "send",
       note: money.note || event.content || "线下模式金额事件",
       createdAt: Date.now()
     });
+
+    if (record) {
+      event.walletRecorded = true;
+      event.walletLedgerId = record.id;
+    }
   }
 
   function writeInlineEventMemory(mode, chatId, participants, speechCharacter, content, createdAt, meta) {
