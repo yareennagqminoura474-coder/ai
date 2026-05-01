@@ -459,7 +459,7 @@ button {
 .screen {
   position: absolute;
   inset: 0;
-  display: none;
+  display: none !important;
   flex-direction: column;
   min-width: 0;
   min-height: 0;
@@ -467,7 +467,7 @@ button {
 }
 
 .screen.active {
-  display: flex;
+  display: flex !important;
 }
 
 .screen-content {
@@ -4102,7 +4102,6 @@ textarea::placeholder {
 }
 
 .chat-screen {
-  display: flex;
   flex-direction: column;
   height: 100%;
   overflow: hidden;

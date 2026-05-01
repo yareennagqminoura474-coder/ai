@@ -212,8 +212,10 @@
         return;
       }
 
-      screen.classList.toggle("active", id === pageId);
-      screen.setAttribute("aria-hidden", id === pageId ? "false" : "true");
+      var active = id === pageId;
+      screen.classList.toggle("active", active);
+      screen.setAttribute("aria-hidden", active ? "false" : "true");
+      screen.style.display = active ? "flex" : "none";
     });
 
     updateDockState(pageId);
@@ -7490,7 +7492,17 @@
     resumeAppApiJobsWhenReady();
     console.debug("[Startup Debug] initApp finished", {
       activePage: activePage,
-      activeScreens: Array.prototype.map.call(document.querySelectorAll(".screen.active"), function (el) { return el.id; })
+      activeScreens: Array.prototype.map.call(document.querySelectorAll(".screen.active"), function (el) { return el.id; }),
+      screens: Array.prototype.map.call(document.querySelectorAll(".screen"), function (el) {
+        return {
+          id: el.id,
+          active: el.classList.contains("active"),
+          display: getComputedStyle(el).display,
+          visibility: getComputedStyle(el).visibility,
+          position: getComputedStyle(el).position,
+          zIndex: getComputedStyle(el).zIndex
+        };
+      })
     });
   }
 
