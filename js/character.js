@@ -14,6 +14,7 @@
   var INITIAL_PRIVATE_RENDER_LIMIT = 60;
   var privateVisibleMessageCounts = {};
   var privateHistoryLoadSuppressedUntil = {};
+  var pendingPrivateAnchorId = null;
   var privateInputDrafts = {};
   var currentChatRenderToken = "";
 
@@ -840,6 +841,7 @@
     }
 
     var groupId = window.GroupManager.getActiveGroupId && window.GroupManager.getActiveGroupId();
+    var character = getCharacterById(characterId);
     if (!groupId) {
       return;
     }
@@ -851,19 +853,30 @@
       return;
     }
 
+    var memoryBridgeText = "";
+    if (window.AppStorage.getPrivateMemoryBridgeContext && character && character.chatSettings && character.chatSettings.memoryBridge && character.chatSettings.memoryBridge.groupEnabled) {
+      var bridgeGroupIds = Array.isArray(character.chatSettings.memoryBridge.groupIds) ? character.chatSettings.memoryBridge.groupIds.map(String) : [];
+      if (bridgeGroupIds.indexOf(String(groupId)) !== -1) {
+        memoryBridgeText = window.AppStorage.getPrivateMemoryBridgeContext(characterId, {
+          groupIds: [groupId],
+          rounds: Math.max(10, Number(character.chatSettings.memoryBridge.groupRounds) || 20)
+        });
+      }
+    }
+
     var history = (window.AppStorage.getGroupChatHistory(groupId) || []).filter(function (message) {
       return message && message.content && message.type !== "loading" && message.type !== "error";
     }).slice(-4).map(function (message) {
       return (message.role === "user" ? "你：" : (message.characterName || "角色") + "：") + message.content;
     }).join("\n");
 
-    if (!history) {
+    if (!history && !memoryBridgeText) {
       return;
     }
 
     var title = "来自群聊《" + (group.name || "群聊") + "》的最近上下文";
     var existing = window.AppStorage.getChatMemories("private", characterId) || [];
-    var newContent = "最近你在群聊《" + (group.name || "群聊") + "》中的互动如下：\n" + history;
+    var newContent = memoryBridgeText || "最近你在群聊《" + (group.name || "群聊") + "》中的互动如下：\n" + history;
 
     // find existing memory for same group (prefer groupId match if present)
     var foundIndex = -1;
@@ -951,6 +964,7 @@
     closeAllMenus();
     ensureOpeningMessage(character);
     window.setActivePage("chatScreen");
+    bindPrivateNewMsgBtn();
     updateThoughtButton(characterId);
     requestAnimationFrame(function () {
       if (currentChatRenderToken !== token || activeCharacterId !== characterId) {
@@ -1065,12 +1079,15 @@
     var character = getCharacterById(characterId);
     var settings = getPrivateChatSettings(character);
     var renderOptions = options || {};
+    var scrollStateBefore = captureChatScrollState(messagesWrap);
     var visibleInfo = getPrivateVisibleMessages(characterId, messages, renderOptions);
     var visibleMessages = visibleInfo.messages;
     var messageIds = messages.map(function (message) {
       return message.id;
     });
     var selectableCount = getSelectablePrivateMessages(messages).length;
+    var anchorId = renderOptions.anchorMessageId || pendingPrivateAnchorId;
+    pendingPrivateAnchorId = null;
 
     if (!messagesWrap || !character) {
       return;
@@ -1101,33 +1118,79 @@
       restoreChatScrollState(messagesWrap, renderOptions.restoreScrollState, function () {
         return characterId === activeCharacterId;
       });
-    } else if (!isPrivateMessageSelectionMode && !renderOptions.skipScroll) {
+    } else if (anchorId && renderOptions.anchorScrollState && renderOptions.anchorScrollState.nearBottom) {
+      (function (id) {
+        requestAnimationFrame(function () {
+          if (characterId !== activeCharacterId) { return; }
+          var el = messagesWrap.querySelector('[data-message-id="' + id + '"]');
+          if (el) {
+            el.scrollIntoView({ block: "start", behavior: "auto" });
+          } else {
+            messagesWrap.scrollTop = messagesWrap.scrollHeight;
+          }
+          updatePrivateNewMsgBtn(messagesWrap);
+        });
+      })(anchorId);
+    } else if (renderOptions.autoScrollToBottom) {
       if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
         window.AppApiJobs.scheduleScrollToBottom(messagesWrap);
       } else {
         requestAnimationFrame(function () {
-          if (characterId !== activeCharacterId) {
-            return;
-          }
+          if (characterId !== activeCharacterId) { return; }
           messagesWrap.scrollTop = messagesWrap.scrollHeight;
         });
       }
+    } else if (!isPrivateMessageSelectionMode && !renderOptions.skipScroll) {
+      restoreChatScrollState(messagesWrap, scrollStateBefore, function () {
+        return characterId === activeCharacterId;
+      });
     }
 
+    updatePrivateNewMsgBtn(messagesWrap);
     updatePrivateBlockUi(characterId);
     updateThoughtButton(characterId);
+  }
+
+  function updatePrivateNewMsgBtn(wrap) {
+    var btn = getElement("privateNewMsgBtn");
+    if (!btn || !wrap) { return; }
+    var atBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight <= 80;
+    if (atBottom) {
+      btn.classList.add("hidden");
+    } else {
+      btn.classList.remove("hidden");
+    }
+  }
+
+  function bindPrivateNewMsgBtn() {
+    var btn = getElement("privateNewMsgBtn");
+    var wrap = getElement("chatMessages");
+    if (!btn || !wrap || wrap.__privateNewMsgBound) { return; }
+    wrap.__privateNewMsgBound = true;
+    btn.onclick = function () {
+      wrap.scrollTop = wrap.scrollHeight;
+      btn.classList.add("hidden");
+    };
+    wrap.addEventListener("scroll", function () {
+      if (wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight <= 80) {
+        btn.classList.add("hidden");
+      } else {
+        btn.classList.remove("hidden");
+      }
+    }, { passive: true });
+    updatePrivateNewMsgBtn(wrap);
   }
 
   function getPrivateVisibleMessages(characterId, messages, options) {
     var allMessages = Array.isArray(messages) ? messages : [];
     var forceFull = options && options.forceFull;
-    var selectionFull = isPrivateMessageSelectionMode;
     var current = privateVisibleMessageCounts[characterId] || INITIAL_PRIVATE_RENDER_LIMIT;
-    var count = forceFull || selectionFull ? allMessages.length : Math.min(allMessages.length, Math.max(INITIAL_PRIVATE_RENDER_LIMIT, current));
+    var count = forceFull
+      ? allMessages.length
+      : Math.min(allMessages.length, Math.max(INITIAL_PRIVATE_RENDER_LIMIT, current));
 
-    if (!selectionFull || forceFull) {
-      privateVisibleMessageCounts[characterId] = count;
-    }
+    privateVisibleMessageCounts[characterId] = count;
+
     return {
       messages: allMessages.slice(Math.max(0, allMessages.length - count)),
       hiddenCount: Math.max(0, allMessages.length - count)
@@ -1150,8 +1213,9 @@
     }
 
     button.addEventListener("click", function () {
+      var scrollState = captureChatScrollState(wrap);
       privateVisibleMessageCounts[characterId] = (privateVisibleMessageCounts[characterId] || INITIAL_PRIVATE_RENDER_LIMIT) + INITIAL_PRIVATE_RENDER_LIMIT;
-      renderChatMessages(characterId, { skipScroll: true });
+      renderChatMessages(characterId, { skipScroll: true, restoreScrollState: scrollState });
     });
   }
 
@@ -1772,9 +1836,11 @@
       return;
     }
 
+    var wrap = getElement("chatMessages");
+    var scrollState = captureChatScrollState(wrap);
     isPrivateMessageSelectionMode = true;
     selectedPrivateMessageIds = [];
-    renderChatMessages(activeCharacterId);
+    renderChatMessages(activeCharacterId, { skipScroll: true, restoreScrollState: scrollState });
   }
 
   function togglePrivateMessageSelection(messageId) {
@@ -1795,26 +1861,45 @@
       selectedPrivateMessageIds.splice(index, 1);
     }
 
-    renderChatMessages(activeCharacterId);
+    var isSelected = selectedPrivateMessageIds.indexOf(messageId) !== -1;
+    var wrap = getElement("chatMessages");
+    if (wrap) {
+      var msgEl = wrap.querySelector('[data-message-id="' + messageId + '"]');
+      if (msgEl) {
+        msgEl.classList.toggle("selected", isSelected);
+        var check = msgEl.querySelector(".select-check");
+        if (check) {
+          check.classList.toggle("active", isSelected);
+        }
+      }
+      var countEl = wrap.querySelector(".batch-action-count");
+      if (countEl) {
+        countEl.textContent = "已选 " + selectedPrivateMessageIds.length + " 条";
+      }
+    }
   }
 
   function handlePrivateMessageBatchAction(action, messages) {
     var selectable = getSelectablePrivateMessages(messages);
 
     if (action === "all") {
+      var wrap = getElement("chatMessages");
+      var scrollState = captureChatScrollState(wrap);
       selectedPrivateMessageIds = selectedPrivateMessageIds.length === selectable.length
         ? []
         : selectable.map(function (message) {
           return message.id;
         });
-      renderChatMessages(activeCharacterId);
+      renderChatMessages(activeCharacterId, { restoreScrollState: scrollState });
       return;
     }
 
     if (action === "cancel") {
+      var wrap = getElement("chatMessages");
+      var scrollState = captureChatScrollState(wrap);
       isPrivateMessageSelectionMode = false;
       selectedPrivateMessageIds = [];
-      renderChatMessages(activeCharacterId);
+      renderChatMessages(activeCharacterId, { restoreScrollState: scrollState });
       return;
     }
 
@@ -2541,6 +2626,7 @@
       }
     }
 
+    var generationStartScrollState = captureChatScrollState(getElement("chatMessages"));
     window.AppStorage.saveChatHistory(requestCharacterId, before.concat([loadingMessage], after));
     schedulePrivateRender(requestCharacterId);
 
@@ -2559,7 +2645,8 @@
           previousReplyText: getPreviousPrivateReplyText(messages, index),
           rejectedReplyText: rejectedReplyText,
           oldGenerationIds: oldGenerationIds,
-          oldMessages: oldMessages
+          oldMessages: oldMessages,
+          generationStartScrollState: generationStartScrollState
         }
       });
       messages = null;
@@ -2638,7 +2725,20 @@
       appended = appendPrivateReplies(baseMessages.slice(), characterId, items, extra);
       window.AppStorage.saveChatHistory(characterId, appended.messages.concat(suffix));
       if (activeCharacterId === characterId) {
+        var currentScrollState = captureChatScrollState(getElement("chatMessages"));
         schedulePrivateRender(characterId);
+        if (extra.generationStartScrollState && extra.generationStartScrollState.nearBottom) {
+          renderChatMessages(characterId, {
+            skipScroll: true,
+            anchorMessageId: appended.generated[0] && appended.generated[0].id,
+            anchorScrollState: extra.generationStartScrollState
+          });
+        } else {
+          renderChatMessages(characterId, {
+            skipScroll: true,
+            restoreScrollState: currentScrollState
+          });
+        }
       }
       schedulePrivateListRender();
       return Promise.resolve(appended.generated);
@@ -2678,7 +2778,23 @@
     }).then(function () {
       window.AppStorage.saveChatHistory(characterId, baseMessages.concat(shown, suffix));
       flushPrivateHistory(characterId);
-      schedulePrivateRender(characterId);
+      if (activeCharacterId === characterId) {
+        var currentScrollState = captureChatScrollState(getElement("chatMessages"));
+        if (extra.generationStartScrollState && extra.generationStartScrollState.nearBottom) {
+          renderChatMessages(characterId, {
+            skipScroll: true,
+            anchorMessageId: shown[0] && shown[0].id,
+            anchorScrollState: extra.generationStartScrollState
+          });
+        } else {
+          renderChatMessages(characterId, {
+            skipScroll: true,
+            restoreScrollState: currentScrollState
+          });
+        }
+      } else {
+        schedulePrivateRender(characterId);
+      }
       schedulePrivateListRender();
       return shown;
     });
@@ -3172,6 +3288,7 @@
       generationId: job.generationId,
       parentUserMessageId: parentUserMessage && parentUserMessage.id || "",
       generatedAt: Date.now(),
+      generationStartScrollState: requestSnapshot.generationStartScrollState,
       blockedMessage: Boolean(requestSnapshot.blockReaction)
     });
     persistPrivateAiExtras(characterId, aiResult, requestSnapshot.blockReaction ? "blockReaction" : "private", {
@@ -3264,6 +3381,7 @@
     generationId = window.AppApiJobs && window.AppApiJobs.createGenerationId
       ? window.AppApiJobs.createGenerationId()
       : "generation_" + Date.now();
+    var generationStartScrollState = captureChatScrollState(getElement("chatMessages"));
 
     loadingMessage = createPrivateLoadingMessage(generationId, "正在输入中");
 
@@ -3280,7 +3398,8 @@
         beforeMessages: historyForRequest,
         requestSnapshot: {
           parentUserMessageId: getLastPrivateUserMessage(historyForRequest) && getLastPrivateUserMessage(historyForRequest).id || "",
-          previousReplyText: getPreviousPrivateReplyText(historyForRequest)
+          previousReplyText: getPreviousPrivateReplyText(historyForRequest),
+          generationStartScrollState: generationStartScrollState
         }
       });
       messages = null;
@@ -3488,6 +3607,7 @@
       : "generation_" + Date.now();
     messages = window.AppStorage.getChatHistory(characterId);
     historyForRequest = messages.slice();
+    var generationStartScrollState = captureChatScrollState(getElement("chatMessages"));
     messages.push(createPrivateLoadingMessage(generationId, "正在输入中"));
     window.AppStorage.saveChatHistory(characterId, messages);
     schedulePrivateRender(characterId);
@@ -3507,7 +3627,8 @@
           blockReaction: true,
           blockReactionType: reactionType || "userBlocked",
           blockReason: reason || "",
-          previousReplyText: getPreviousPrivateReplyText(historyForRequest)
+          previousReplyText: getPreviousPrivateReplyText(historyForRequest),
+          generationStartScrollState: generationStartScrollState
         }
       });
     } catch (error) {
@@ -3642,7 +3763,7 @@
       memoryBridge: {
         groupEnabled: false,
         groupIds: [],
-        groupRounds: 10,
+        groupRounds: 20,
         includeGroupSummary: true,
         includeRawGroupMessages: true
       }
@@ -3785,7 +3906,7 @@
       '<section class="form-section">',
       '<div class="section-title-row"><h3>群聊记忆互通 💬</h3><span>桥接</span></div>',
       '<label class="switch-row"><input data-private-field="groupMemoryBridgeEnabled" type="checkbox"' + (settings.memoryBridge && settings.memoryBridge.groupEnabled ? " checked" : "") + '>开启群聊记忆互通</label>',
-      '<div class="field-group"><label>每个群读取最近轮数</label><input data-private-field="groupMemoryBridgeRounds" type="number" min="3" max="20" value="' + escapeHtml(settings.memoryBridge && Number(settings.memoryBridge.groupRounds) || 10) + '"></div>',
+      '<div class="field-group"><label>每个群读取最近轮数</label><input data-private-field="groupMemoryBridgeRounds" type="number" min="3" max="50" value="' + escapeHtml(settings.memoryBridge && Number(settings.memoryBridge.groupRounds) || 20) + '"><small class="field-help">建议 10-20 轮；太高会增加上下文长度。</small></div>',
       '<div class="field-group"><label>选择要读取的群聊</label>' + renderPrivateGroupMemoryBridgeOptions(character, settings) + '<small class="field-help">勾选后，当前角色私聊会读取所选群聊最近内容。勾选过多可能导致上下文过长。</small></div>',
       "</section>",
       '<section class="form-section">',
@@ -3966,7 +4087,7 @@
           groupIds: Array.prototype.map.call(form.querySelectorAll("[data-private-memory-bridge-group-id]:checked"), function (input) {
             return input.dataset.privateMemoryBridgeGroupId;
           }),
-          groupRounds: Math.max(3, Math.min(20, Number(getPrivateField("groupMemoryBridgeRounds")) || 10)),
+          groupRounds: Math.max(3, Math.min(50, Number(getPrivateField("groupMemoryBridgeRounds")) || 20)),
           includeGroupSummary: true,
           includeRawGroupMessages: true
         }

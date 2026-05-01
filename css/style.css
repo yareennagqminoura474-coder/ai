@@ -4103,6 +4103,29 @@ textarea::placeholder {
 
 .chat-screen {
   background: #eef2ef;
+  position: relative;
+}
+
+.new-msg-btn {
+  position: absolute;
+  bottom: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 60;
+  padding: 6px 16px;
+  border-radius: 16px;
+  background: rgba(30, 30, 30, 0.75);
+  color: #fff;
+  font-size: 13px;
+  border: none;
+  cursor: pointer;
+  white-space: nowrap;
+  box-shadow: 0 2px 8px rgba(0,0,0,0.18);
+  transition: opacity 0.2s;
+}
+
+.new-msg-btn.hidden {
+  display: none;
 }
 
 .inline-offline-bar {

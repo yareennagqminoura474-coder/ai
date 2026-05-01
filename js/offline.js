@@ -196,12 +196,14 @@
     return (session && session.participantIds || []).map(getCharacterById).filter(Boolean);
   }
 
-  function renderOfflineMessages() {
+  function renderOfflineMessages(options) {
     var wrap = getElement("offlineMessages");
     var session = getCurrentSession();
     var history = session ? (session.history || []).map(normalizeOfflineHistoryEventForRender).filter(function (event) {
       return event.content;
     }) : [];
+    var renderOptions = options || {};
+    var scrollState = captureOfflineScrollState(wrap);
 
     if (!wrap) {
       return;
@@ -213,21 +215,64 @@
       wrap.innerHTML = history.map(renderOfflineEvent).join("");
     }
 
-    if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
-      window.AppApiJobs.scheduleScrollToBottom(wrap);
-    } else {
+    if (renderOptions.restoreScrollState) {
+      restoreOfflineScrollState(wrap, renderOptions.restoreScrollState);
+    } else if (renderOptions.anchorEventId) {
       requestAnimationFrame(function () {
-        wrap.scrollTop = wrap.scrollHeight;
+        var el = wrap.querySelector('[data-event-id="' + renderOptions.anchorEventId + '"]');
+        if (el) {
+          el.scrollIntoView({ block: "start", behavior: "auto" });
+        } else {
+          wrap.scrollTop = wrap.scrollHeight;
+        }
       });
+    } else if (renderOptions.autoScrollToBottom) {
+      if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
+        window.AppApiJobs.scheduleScrollToBottom(wrap);
+      } else {
+        requestAnimationFrame(function () {
+          wrap.scrollTop = wrap.scrollHeight;
+        });
+      }
+    } else if (!renderOptions.skipScroll && scrollState && !scrollState.nearBottom) {
+      restoreOfflineScrollState(wrap, scrollState);
     }
 
     updateOfflineThoughtButton(session);
   }
 
+  function captureOfflineScrollState(wrap) {
+    if (!wrap) {
+      return null;
+    }
+
+    return {
+      scrollTop: wrap.scrollTop,
+      scrollHeight: wrap.scrollHeight,
+      nearBottom: wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight <= 80
+    };
+  }
+
+  function restoreOfflineScrollState(wrap, state) {
+    if (!wrap || !state) {
+      return;
+    }
+
+    requestAnimationFrame(function () {
+      if (state.nearBottom) {
+        wrap.scrollTop = wrap.scrollHeight;
+        return;
+      }
+
+      var maxScrollTop = Math.max(0, wrap.scrollHeight - wrap.clientHeight);
+      wrap.scrollTop = Math.min(Math.max(0, state.scrollTop), maxScrollTop);
+    });
+  }
+
   function renderOfflineEvent(event) {
     if (event.role === "user" || event.type === "user") {
       return [
-        '<div class="offline-user-row">',
+        '<div class="offline-user-row" data-event-id="' + escapeHtml(event.id) + '">',
         '  <div class="offline-user-bubble">' + escapeHtml(normalizeDisplayText(event.content)) + "</div>",
         '  <span class="offline-time">' + formatTime(event.createdAt) + "</span>",
         "</div>"
@@ -245,7 +290,7 @@
     var character = getCharacterById(event.characterId) || { name: event.characterName || "角色" };
 
     return [
-      '<div class="offline-speech-row">',
+      '<div class="offline-speech-row" data-event-id="' + escapeHtml(event.id) + '">',
       renderAvatar(character, "offline-avatar"),
       '  <div class="offline-speech-main">',
       '    <span class="offline-name">' + escapeHtml(event.characterName || character.name || "角色") + "</span>",
@@ -260,7 +305,7 @@
     var cls = event.type === "error" ? " offline-action-error" : "";
 
     return [
-      '<div class="offline-action-card' + cls + '">',
+      '<div class="offline-action-card' + cls + '" data-event-id="' + escapeHtml(event.id) + '">',
       '  <span>' + escapeHtml(normalizeDisplayText(event.content)) + "</span>",
       '  <i aria-hidden="true">✦</i>',
       "</div>"
@@ -298,7 +343,9 @@
 
     input.value = "";
     input.focus();
-    renderOfflineMessages();
+    renderOfflineMessages({
+      autoScrollToBottom: Boolean(captureOfflineScrollState(getElement("offlineMessages")) && captureOfflineScrollState(getElement("offlineMessages")).nearBottom)
+    });
   }
 
   async function advanceOffline() {
@@ -337,7 +384,9 @@
     });
     session.updatedAt = now;
     window.AppStorage.saveOfflineSession(session);
-    renderOfflineMessages();
+    renderOfflineMessages({
+      autoScrollToBottom: Boolean(captureOfflineScrollState(getElement("offlineMessages")) && captureOfflineScrollState(getElement("offlineMessages")).nearBottom)
+    });
 
     try {
       await runApiJob({
@@ -370,7 +419,9 @@
         session.updatedAt = Date.now();
         window.AppStorage.saveOfflineSession(session);
       }
-      renderOfflineMessages();
+      renderOfflineMessages({
+        autoScrollToBottom: Boolean(captureOfflineScrollState(getElement("offlineMessages")) && captureOfflineScrollState(getElement("offlineMessages")).nearBottom)
+      });
       isAdvancing = false;
       setAdvanceState(false);
     }
@@ -398,7 +449,9 @@
       session.updatedAt = Date.now();
       window.AppStorage.saveOfflineSession(session);
       if (currentSessionId === session.id) {
-        renderOfflineMessages();
+        renderOfflineMessages({
+          autoScrollToBottom: Boolean(captureOfflineScrollState(getElement("offlineMessages")) && captureOfflineScrollState(getElement("offlineMessages")).nearBottom)
+        });
       }
       return { afterMessages: session.history };
     }
@@ -433,7 +486,9 @@
     session.updatedAt = Date.now();
     window.AppStorage.saveOfflineSession(session);
     if (currentSessionId === session.id) {
-      renderOfflineMessages();
+      renderOfflineMessages({
+        autoScrollToBottom: Boolean(captureOfflineScrollState(getElement("offlineMessages")) && captureOfflineScrollState(getElement("offlineMessages")).nearBottom)
+      });
     }
 
     if (!events.length) {
@@ -457,7 +512,11 @@
 
     session = window.AppStorage.getOfflineSession(job.targetId);
     if (session && currentSessionId === session.id) {
-      renderOfflineMessages();
+      var firstEventId = generatedEvents && generatedEvents[0] && generatedEvents[0].id;
+      renderOfflineMessages({
+        skipScroll: true,
+        anchorEventId: firstEventId
+      });
     }
     return { afterMessages: session ? session.history : [] };
   }
@@ -1646,7 +1705,12 @@
           window.AppStorage.saveOfflineSession(nextSession);
         }
         if (currentSessionId === session.id) {
-          renderOfflineMessages();
+          var messagesWrap = getElement("offlineMessages");
+          var currentScrollState = captureOfflineScrollState(messagesWrap);
+          renderOfflineMessages({
+            skipScroll: true,
+            restoreScrollState: currentScrollState
+          });
         }
       }
     }).then(function () {

@@ -1010,8 +1010,9 @@
   function getPrivateMemoryBridgeContext(characterId, options) {
     var params = options && typeof options === "object" ? options : {};
     var groupIds = Array.isArray(params.groupIds) ? params.groupIds.map(String).filter(Boolean) : [];
-    var rounds = Number(params.rounds) || 10;
-    var maxLength = 2200;
+    var rounds = Math.max(10, Number(params.rounds) || 20);
+    var groupCount = groupIds.length;
+    var maxLength = groupCount <= 1 ? 6000 : 7000;
     var groups = getGroups();
     var characters = getCharacters();
     var character = characters.find(function (c) { return String(c.id) === String(characterId); });
@@ -1024,11 +1025,10 @@
     var userKeys = buildBridgeMessageKeys(character);
     var userName = userKeys[0] || "用户";
 
-    function collectRoundCandidates(round) {
+    function collectRoundCandidates(round, isRecent) {
       var candidates = [];
       var selectedScores = {};
       var selectedIndexes = {};
-      var isDirectReplyIndex = {};
 
       round.forEach(function (message, index) {
         if (!message || !message.content) {
@@ -1048,13 +1048,16 @@
             return;
           }
 
+          if (!isRecent) {
+            return;
+          }
+
           var prevMessage = round[index - 1];
           var nextMessage = round[index + 1];
           var directReply = prevMessage && prevMessage.role === "user";
           if (directReply) {
             selectedIndexes[index] = true;
             selectedScores[index] = 90;
-            isDirectReplyIndex[index] = true;
             return;
           }
 
@@ -1068,39 +1071,34 @@
         }
       });
 
-      Object.keys(selectedIndexes).forEach(function (key) {
-        var index = Number(key);
-        for (var delta = -2; delta <= 2; delta += 1) {
-          var pivot = index + delta;
-          if (pivot < 0 || pivot >= round.length) {
-            continue;
+      if (isRecent) {
+        Object.keys(selectedIndexes).forEach(function (key) {
+          var index = Number(key);
+          for (var delta = -3; delta <= 3; delta += 1) {
+            var pivot = index + delta;
+            if (pivot < 0 || pivot >= round.length) { continue; }
+            if (!round[pivot] || !round[pivot].content || round[pivot].type === "loading" || round[pivot].type === "error" || round[pivot].type === "system") { continue; }
+            if (!selectedIndexes[pivot]) {
+              selectedIndexes[pivot] = true;
+              selectedScores[pivot] = 60 - Math.abs(delta) * 5;
+            }
           }
-          if (!round[pivot] || !round[pivot].content || round[pivot].type === "loading" || round[pivot].type === "error" || round[pivot].type === "system") {
-            continue;
-          }
-          if (!selectedIndexes[pivot]) {
-            selectedIndexes[pivot] = true;
-            selectedScores[pivot] = 60 - Math.abs(delta) * 5;
-          }
-        }
-      });
+        });
 
-      candidates.forEach(function (index) {
-        if (selectedIndexes[index]) {
-          return;
-        }
-        var message = round[index];
-        var prevMessage = round[index - 1];
-        var nextMessage = round[index + 1];
-        if (prevMessage && prevMessage.role === "character" && nextMessage && nextMessage.role === "character" && String(prevMessage.characterId) !== String(message.characterId) && String(nextMessage.characterId) !== String(message.characterId)) {
-          selectedIndexes[index] = true;
-          selectedScores[index] = 65;
-        }
-      });
+        candidates.forEach(function (index) {
+          if (selectedIndexes[index]) { return; }
+          var message = round[index];
+          var prevMessage = round[index - 1];
+          var nextMessage = round[index + 1];
+          if (prevMessage && prevMessage.role === "character" && nextMessage && nextMessage.role === "character" && String(prevMessage.characterId) !== String(message.characterId) && String(nextMessage.characterId) !== String(message.characterId)) {
+            selectedIndexes[index] = true;
+            selectedScores[index] = 65;
+          }
+        });
+      }
 
       Object.keys(selectedIndexes).forEach(function (key) {
-        var index = Number(key);
-        candidates.push(index);
+        candidates.push(Number(key));
       });
 
       candidates = candidates.filter(function (index, pos) {
@@ -1110,13 +1108,11 @@
       candidates.sort(function (a, b) {
         var scoreA = selectedScores[a] || 0;
         var scoreB = selectedScores[b] || 0;
-        if (scoreA !== scoreB) {
-          return scoreB - scoreA;
-        }
+        if (scoreA !== scoreB) { return scoreB - scoreA; }
         return a - b;
       });
 
-      var keepCount = Math.min(candidates.length, 16);
+      var keepCount = Math.min(candidates.length, isRecent ? 30 : 10);
       var kept = candidates.slice(0, keepCount).sort(function (a, b) { return a - b; });
       return kept.map(function (index) { return round[index]; });
     }
@@ -1142,28 +1138,41 @@
       }
 
       var groupName = group.name || "群聊";
-      var lines = [];
-      roundsList.forEach(function (round) {
-        var selectedMessages = collectRoundCandidates(round);
+      var roundSections = [];
+      var totalRounds = roundsList.length;
+
+      roundsList.forEach(function (round, roundIndex) {
+        var roundNumber = roundIndex + 1;
+        var isRecent = roundIndex >= totalRounds - 3;
+        var selectedMessages = collectRoundCandidates(round, isRecent);
+        if (!selectedMessages.length) { return; }
+
+        var lines = [];
         selectedMessages.forEach(function (message) {
-          if (!message || !message.content) {
-            return;
-          }
+          if (!message || !message.content) { return; }
           lines.push(buildBridgeMessageLine(message, characterId, userName));
         });
+        if (lines.length) {
+          roundSections.push("第 " + roundNumber + " 轮:\n" + lines.join("\n"));
+        }
       });
 
-      if (!lines.length) {
+      if (!roundSections.length) {
         return;
       }
 
-      if (lines.length > 16) {
-        lines = lines.slice(0, 16);
+      var perGroupMax = groupCount <= 1 ? maxLength : Math.floor(maxLength / groupCount);
+      var ownRecent = history.filter(function (m) {
+        return m && m.role === "character" && String(m.characterId) === String(characterId) && m.content;
+      }).slice(-5).map(function (m) { return buildBridgeMessageLine(m, characterId, userName); });
+
+      if (ownRecent.length) {
+        roundSections.unshift("当前角色近期状态：\n" + ownRecent.join("\n"));
       }
 
-      var groupText = "群聊《" + groupName + "》最近发生：\n" + lines.join("\n");
-      if (out.join("\n").length + groupText.length > maxLength) {
-        groupText = truncateBridgeText(groupText, Math.max(0, maxLength - out.join("\n").length));
+      var groupText = "群聊《" + groupName + "》最近 " + totalRounds + " 轮对话：\n" + roundSections.join("\n");
+      if (groupText.length > perGroupMax) {
+        groupText = truncateBridgeText(groupText, perGroupMax);
       }
       if (groupText) {
         out.push(groupText);
@@ -1181,8 +1190,8 @@
   function getGroupPrivateMemoryBridgeContext(groupId, options) {
     var params = options && typeof options === "object" ? options : {};
     var characterIds = Array.isArray(params.characterIds) ? params.characterIds.map(String).filter(Boolean) : [];
-    var rounds = Number(params.rounds) || 5;
-    var maxLength = 2200;
+    var rounds = Math.min(10, Math.max(3, Number(params.rounds) || 7));
+    var maxLength = 2800;
     var group = getGroups().find(function (g) { return String(g.id) === String(groupId); });
     var characters = getCharacters();
     var out = [];
@@ -1224,8 +1233,14 @@
         return;
       }
 
+      var ownRecent = history.filter(function (m) {
+        return m && m.role === "character" && String(m.characterId) === String(characterId) && m.content;
+      }).slice(-4).map(function (m) { return buildBridgeMessageLine(m, characterId, "用户"); });
       var name = (character && character.name) ? character.name : "角色";
       var section = "角色 " + name + " 最近和用户私聊：\n" + lines.join("\n");
+      if (ownRecent.length) {
+        section += "\n当前角色近期回复：\n" + ownRecent.join("\n");
+      }
       if (out.join("\n").length + section.length > maxLength) {
         section = truncateBridgeText(section, Math.max(0, maxLength - out.join("\n").length));
       }

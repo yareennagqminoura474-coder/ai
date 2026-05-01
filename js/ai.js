@@ -1522,6 +1522,7 @@
       valueOrFallback(source.userInput),
       source.sceneText ? "当前场景：\n" + source.sceneText : "",
       source.beforeContext || "",
+      source.worldBookContext ? "本轮世界书命中内容：\n" + source.worldBookContext : "",
       source.contextLabel || "最近 10-16 条上下文：",
       source.recentHistory || "暂无",
       buildTemporalAwarenessRules(requestOptions),
@@ -1819,7 +1820,7 @@
     if (profile.id && memoryBridgeSettings.groupEnabled && Array.isArray(memoryBridgeSettings.groupIds) && memoryBridgeSettings.groupIds.length && window.AppStorage && typeof window.AppStorage.getPrivateMemoryBridgeContext === "function") {
       bridgeGroupText = window.AppStorage.getPrivateMemoryBridgeContext(profile.id, {
         groupIds: memoryBridgeSettings.groupIds,
-        rounds: memoryBridgeSettings.groupRounds || 10
+        rounds: memoryBridgeSettings.groupRounds || 20
       });
       console.debug("[AI Debug] private chat role", profile.id, "memoryBridge.groupEnabled=", memoryBridgeSettings.groupEnabled, "groupIds=", memoryBridgeSettings.groupIds, "groupBridgeText.length=", bridgeGroupText ? bridgeGroupText.length : 0, "preview=", bridgeGroupText ? bridgeGroupText.slice(0, 200) : "(empty)");
     }
@@ -1921,9 +1922,9 @@
   function buildWorldBookContext(contextText, scope, targetId, options) {
     var entries;
     var settings = Object.assign({
-      limit: 6,
-      maxEntryLength: 260,
-      maxTotalLength: 1600
+      limit: 10,
+      maxEntryLength: 500,
+      maxTotalLength: 3500
     }, options || {});
     var selectedWorldBookIds = getSelectedWorldBookIds(scope, targetId, settings);
     var totalLength = 0;
@@ -2490,7 +2491,7 @@
     if (profile.id && memoryBridgeSettings.groupEnabled && Array.isArray(memoryBridgeSettings.groupIds) && memoryBridgeSettings.groupIds.length && window.AppStorage && typeof window.AppStorage.getPrivateMemoryBridgeContext === "function") {
       bridgeGroupText = window.AppStorage.getPrivateMemoryBridgeContext(profile.id, {
         groupIds: memoryBridgeSettings.groupIds,
-        rounds: memoryBridgeSettings.groupRounds || 10
+        rounds: memoryBridgeSettings.groupRounds || 20
       });
     }
     var recentGroupContextText = bridgeGroupText || (profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"

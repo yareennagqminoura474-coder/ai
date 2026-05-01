@@ -646,6 +646,7 @@
     updateInlineOfflineUi();
     closeAllMenus();
     window.setActivePage("groupChatScreen");
+    bindGroupNewMsgBtn();
     updateThoughtButton(groupId);
     requestAnimationFrame(function () {
       if (currentGroupRenderToken !== token || activeGroupId !== groupId) {
@@ -699,6 +700,7 @@
     var settings = getGroupSettings(group);
     var messages = window.AppStorage.getGroupChatHistory(groupId);
     var renderOptions = options || {};
+    var scrollStateBefore = captureChatScrollState(wrap);
     var visibleInfo = getGroupVisibleMessages(groupId, messages, renderOptions);
     var visibleMessages = visibleInfo.messages;
     var messageIds = messages.map(function (message) {
@@ -780,7 +782,22 @@
       restoreChatScrollState(wrap, renderOptions.restoreScrollState, function () {
         return groupId === activeGroupId;
       });
-    } else if (!isGroupMessageSelectionMode && !renderOptions.skipScroll) {
+    } else if (renderOptions.anchorMessageId && !isGroupMessageSelectionMode && renderOptions.anchorScrollState && renderOptions.anchorScrollState.nearBottom) {
+      (function (id) {
+        requestAnimationFrame(function () {
+          if (groupId !== activeGroupId) {
+            return;
+          }
+          var el = wrap.querySelector('[data-message-id="' + id + '"]');
+          if (el) {
+            el.scrollIntoView({ block: "start", behavior: "auto" });
+          } else {
+            wrap.scrollTop = wrap.scrollHeight;
+          }
+          updateGroupNewMsgBtn(wrap);
+        });
+      })(renderOptions.anchorMessageId);
+    } else if (renderOptions.autoScrollToBottom) {
       if (window.AppApiJobs && window.AppApiJobs.scheduleScrollToBottom) {
         window.AppApiJobs.scheduleScrollToBottom(wrap);
       } else {
@@ -791,21 +808,56 @@
           wrap.scrollTop = wrap.scrollHeight;
         });
       }
+    } else if (!isGroupMessageSelectionMode && !renderOptions.skipScroll) {
+      restoreChatScrollState(wrap, renderOptions.restoreScrollState || renderOptions.anchorScrollState || scrollStateBefore, function () {
+        return groupId === activeGroupId;
+      });
     }
 
+    updateGroupNewMsgBtn(wrap);
     updateThoughtButton(groupId);
+  }
+
+  function updateGroupNewMsgBtn(wrap) {
+    var btn = getElement("groupNewMsgBtn");
+    if (!btn || !wrap) { return; }
+    var atBottom = wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight <= 80;
+    if (atBottom) {
+      btn.classList.add("hidden");
+    } else {
+      btn.classList.remove("hidden");
+    }
+  }
+
+  function bindGroupNewMsgBtn() {
+    var btn = getElement("groupNewMsgBtn");
+    var wrap = getElement("groupChatMessages");
+    if (!btn || !wrap || wrap.__groupNewMsgBound) { return; }
+    wrap.__groupNewMsgBound = true;
+    btn.onclick = function () {
+      wrap.scrollTop = wrap.scrollHeight;
+      btn.classList.add("hidden");
+    };
+    wrap.addEventListener("scroll", function () {
+      if (wrap.scrollHeight - wrap.scrollTop - wrap.clientHeight <= 80) {
+        btn.classList.add("hidden");
+      } else {
+        btn.classList.remove("hidden");
+      }
+    }, { passive: true });
+    updateGroupNewMsgBtn(wrap);
   }
 
   function getGroupVisibleMessages(groupId, messages, options) {
     var allMessages = Array.isArray(messages) ? messages : [];
     var forceFull = options && options.forceFull;
-    var selectionFull = isGroupMessageSelectionMode;
     var current = groupVisibleMessageCounts[groupId] || INITIAL_GROUP_RENDER_LIMIT;
-    var count = forceFull || selectionFull ? allMessages.length : Math.min(allMessages.length, Math.max(INITIAL_GROUP_RENDER_LIMIT, current));
+    var count = forceFull
+      ? allMessages.length
+      : Math.min(allMessages.length, Math.max(INITIAL_GROUP_RENDER_LIMIT, current));
 
-    if (!selectionFull || forceFull) {
-      groupVisibleMessageCounts[groupId] = count;
-    }
+    groupVisibleMessageCounts[groupId] = count;
+
     return {
       messages: allMessages.slice(Math.max(0, allMessages.length - count)),
       hiddenCount: Math.max(0, allMessages.length - count)
@@ -828,8 +880,9 @@
     }
 
     button.addEventListener("click", function () {
+      var scrollState = captureChatScrollState(wrap);
       groupVisibleMessageCounts[groupId] = (groupVisibleMessageCounts[groupId] || INITIAL_GROUP_RENDER_LIMIT) + INITIAL_GROUP_RENDER_LIMIT;
-      renderGroupChatMessages(groupId, { skipScroll: true });
+      renderGroupChatMessages(groupId, { skipScroll: true, restoreScrollState: scrollState });
     });
   }
 
@@ -1456,9 +1509,11 @@
       return;
     }
 
+    var wrap = getElement("groupChatMessages");
+    var scrollState = captureChatScrollState(wrap);
     isGroupMessageSelectionMode = true;
     selectedGroupMessageIds = [];
-    renderGroupChatMessages(activeGroupId);
+    renderGroupChatMessages(activeGroupId, { skipScroll: true, restoreScrollState: scrollState });
   }
 
   function toggleGroupMessageSelection(messageId) {
@@ -1479,26 +1534,41 @@
       selectedGroupMessageIds.splice(index, 1);
     }
 
-    renderGroupChatMessages(activeGroupId);
+    var isSelected = selectedGroupMessageIds.indexOf(messageId) !== -1;
+    var wrap = getElement("groupChatMessages");
+    if (wrap) {
+      var msgEl = wrap.querySelector('[data-message-id="' + messageId + '"]');
+      if (msgEl) {
+        msgEl.classList.toggle("selected", isSelected);
+        var check = msgEl.querySelector(".select-check");
+        if (check) { check.classList.toggle("active", isSelected); }
+      }
+      var countEl = wrap.querySelector(".batch-action-count");
+      if (countEl) { countEl.textContent = "已选 " + selectedGroupMessageIds.length + " 条"; }
+    }
   }
 
   function handleGroupMessageBatchAction(action, messages) {
     var selectable = getSelectableGroupMessages(messages);
 
     if (action === "all") {
+      var wrap = getElement("groupChatMessages");
+      var scrollState = captureChatScrollState(wrap);
       selectedGroupMessageIds = selectedGroupMessageIds.length === selectable.length
         ? []
         : selectable.map(function (message) {
           return message.id;
         });
-      renderGroupChatMessages(activeGroupId);
+      renderGroupChatMessages(activeGroupId, { restoreScrollState: scrollState });
       return;
     }
 
     if (action === "cancel") {
+      var wrap = getElement("groupChatMessages");
+      var scrollState = captureChatScrollState(wrap);
       isGroupMessageSelectionMode = false;
       selectedGroupMessageIds = [];
-      renderGroupChatMessages(activeGroupId);
+      renderGroupChatMessages(activeGroupId, { restoreScrollState: scrollState });
       return;
     }
 
@@ -2130,6 +2200,7 @@
       }
     }
 
+    var generationStartScrollState = captureChatScrollState(getElement("groupChatMessages"));
     window.AppStorage.saveGroupChatHistory(group.id, before.concat([createGroupLoadingMessage(generationId, characters[0])], after));
     scheduleGroupRender(group.id);
 
@@ -2148,7 +2219,8 @@
           previousReplyText: getPreviousGroupReplyText(messages, index),
           rejectedReplyText: rejectedReplyText,
           oldGenerationIds: oldGenerationIds,
-          oldMessages: oldMessages
+          oldMessages: oldMessages,
+          generationStartScrollState: generationStartScrollState
         }
       });
       messages = null;
@@ -2235,7 +2307,20 @@
       appended = appendGroupReplies(baseMessages.slice(), group, characters, items, extra);
       window.AppStorage.saveGroupChatHistory(group.id, appended.messages.concat(suffix));
       if (activeGroupId === group.id) {
+        var currentScrollState = captureChatScrollState(getElement("groupChatMessages"));
         scheduleGroupRender(group.id);
+        if (extra.generationStartScrollState && extra.generationStartScrollState.nearBottom) {
+          renderGroupChatMessages(group.id, {
+            skipScroll: true,
+            anchorMessageId: appended.generated[0] && appended.generated[0].id,
+            anchorScrollState: extra.generationStartScrollState
+          });
+        } else {
+          renderGroupChatMessages(group.id, {
+            skipScroll: true,
+            restoreScrollState: currentScrollState
+          });
+        }
       }
       scheduleGroupListRender();
       return Promise.resolve(appended.generated);
@@ -2280,7 +2365,23 @@
     }).then(function () {
       window.AppStorage.saveGroupChatHistory(group.id, baseMessages.concat(shown, suffix));
       flushGroupHistory(group.id);
-      scheduleGroupRender(group.id);
+      if (activeGroupId === group.id) {
+        var currentScrollState = captureChatScrollState(getElement("groupChatMessages"));
+        if (extra.generationStartScrollState && extra.generationStartScrollState.nearBottom) {
+          renderGroupChatMessages(group.id, {
+            skipScroll: true,
+            anchorMessageId: shown[0] && shown[0].id,
+            anchorScrollState: extra.generationStartScrollState
+          });
+        } else {
+          renderGroupChatMessages(group.id, {
+            skipScroll: true,
+            restoreScrollState: currentScrollState
+          });
+        }
+      } else {
+        scheduleGroupRender(group.id);
+      }
       scheduleGroupListRender();
       return shown;
     });
@@ -2669,6 +2770,7 @@
     generationId = window.AppApiJobs && window.AppApiJobs.createGenerationId
       ? window.AppApiJobs.createGenerationId()
       : "generation_" + Date.now();
+    var generationStartScrollState = captureChatScrollState(getElement("groupChatMessages"));
 
     messages.push(createGroupLoadingMessage(generationId, characters[0]));
     window.AppStorage.saveGroupChatHistory(group.id, messages);
@@ -2683,7 +2785,8 @@
         beforeMessages: historyForRequest,
         requestSnapshot: {
           parentUserMessageId: getLastGroupUserMessage(historyForRequest) && getLastGroupUserMessage(historyForRequest).id || "",
-          previousReplyText: getPreviousGroupReplyText(historyForRequest)
+          previousReplyText: getPreviousGroupReplyText(historyForRequest),
+          generationStartScrollState: generationStartScrollState
         }
       });
       messages = null;
@@ -2934,7 +3037,8 @@
     generatedMessages = await streamGroupReplies(baseMessages, group, characters, replies, suffixMessages, {
       generationId: job.generationId,
       parentUserMessageId: parentUserMessage && parentUserMessage.id || "",
-      generatedAt: Date.now()
+      generatedAt: Date.now(),
+      generationStartScrollState: requestSnapshot.generationStartScrollState
     });
     persistGroupAiExtras(group, aiResult, {
       generationId: job.generationId,
