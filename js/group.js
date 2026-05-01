@@ -2793,6 +2793,14 @@
       })
       : requestSnapshot;
 
+    if (!window.AIService || typeof window.AIService.sendGroupChatRequest !== "function") {
+      messages = removeGroupLoadingByGeneration(window.AppStorage.getGroupChatHistory(groupId), job.generationId);
+      window.AppStorage.saveGroupChatHistory(groupId, messages);
+      scheduleGroupRender(groupId);
+      scheduleGroupListRender();
+      throw new Error("AI 服务未加载，请刷新或清除缓存后重试。");
+    }
+
     aiResult = normalizeGroupAiResult(await window.AIService.sendGroupChatRequest(
       group,
       characters,
@@ -2942,8 +2950,8 @@
       background: "",
       pinned: false,
       memorySharingEnabled: true,
-      minReplyCount: 10,
-      maxReplyCount: 50,
+      minReplyCount: 4,
+      maxReplyCount: 12,
       minParticipantCount: 2,
       allowConsecutiveMessages: true,
       allowSpecialMessages: true,
@@ -3053,8 +3061,8 @@
       '<section class="form-section">',
       '<div class="section-title-row"><h3>群聊回复设置</h3><span>生成</span></div>',
       '<div class="settings-inline-grid">',
-      '<label><span>最少回复条数</span><input data-group-settings-field="minReplyCount" type="number" min="1" max="50" value="' + escapeHtml(settings.minReplyCount || 10) + '"></label>',
-      '<label><span>最多安全条数</span><input data-group-settings-field="maxReplyCount" type="number" min="10" max="50" value="' + escapeHtml(settings.maxReplyCount || 50) + '"></label>',
+      '<label><span>最少回复条数</span><input data-group-settings-field="minReplyCount" type="number" min="1" max="50" value="' + escapeHtml(settings.minReplyCount || 4) + '"></label>',
+      '<label><span>最多安全条数</span><input data-group-settings-field="maxReplyCount" type="number" min="4" max="50" value="' + escapeHtml(settings.maxReplyCount || 12) + '"></label>',
       "</div>",
       '<div class="field-group"><label>最少参与角色数</label><input data-group-settings-field="minParticipantCount" type="number" min="1" max="10" value="' + escapeHtml(settings.minParticipantCount || 2) + '"></div>',
       '<label class="switch-row"><input data-group-settings-field="allowConsecutiveMessages" type="checkbox"' + (settings.allowConsecutiveMessages !== false ? " checked" : "") + '>允许同一角色连续发言</label>',
@@ -3169,8 +3177,8 @@
         background: getGroupSettingField("background"),
         pinned: getGroupSettingChecked("pinned"),
         memorySharingEnabled: getGroupSettingChecked("memorySharingEnabled"),
-        minReplyCount: Math.max(1, Math.min(50, Number(getGroupSettingField("minReplyCount")) || 10)),
-        maxReplyCount: Math.max(10, Math.min(50, Number(getGroupSettingField("maxReplyCount")) || 50)),
+        minReplyCount: Math.max(1, Math.min(50, Number(getGroupSettingField("minReplyCount")) || 4)),
+        maxReplyCount: Math.max(4, Math.min(50, Number(getGroupSettingField("maxReplyCount")) || 12)),
         minParticipantCount: Math.max(1, Number(getGroupSettingField("minParticipantCount")) || 2),
         allowConsecutiveMessages: getGroupSettingChecked("allowConsecutiveMessages"),
         allowSpecialMessages: getGroupSettingChecked("allowSpecialMessages"),

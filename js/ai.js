@@ -2202,21 +2202,34 @@
     return Boolean(options && options.bodyStateEnabled);
   }
 
+  var BODY_STATE_TRIGGER_KEYWORDS = ["久坐", "跑", "摔", "撞", "跪", "蹲", "压", "扭", "疼", "痛", "麻", "酸", "累", "发热", "破皮", "受伤", "不舒服", "走不动", "站不稳", "打", "罚", "惩罚", "体罚", "打屁股", "跑圈", "俯卧撑", "深蹲"];
+  var BODY_STATE_SPAM_PATTERNS = ["腰背僵硬", "肩颈酸胀", "神经绷紧", "肌肉紧绷", "胃部空泛", "精力大幅下降"];
+
   function buildBodyStatePrompt(options) {
     if (!shouldUseBodyState(options)) {
       return "";
     }
 
     return [
-      "I. 用户身体状态连续记录",
+      "I. 用户身体状态连续记录（严格规则）",
+      "bodyState 是「例外记录」，只记录真实剧情触发的身体变化，不是每轮都要制造不适。",
       "bodyState 描述的是 user body state / 用户身体状态，不是角色自己的身体状态栏。",
-      "角色只能根据当前剧情、互动、上下文感知、判断、更新用户身体状态；不能把这些字段当成角色自己的状态。",
       "当前用户身体状态 JSON：",
       JSON.stringify(options.bodyState || {}),
-      "本轮必须在同一次 JSON 里返回 bodyState。若没有变化，也返回承接当前状态后的完整状态。",
-      "bodyState.parts 只使用这些部位名：手心、臀部、大腿、臀腿连接处、腰背、肩颈、膝盖、臀缝；不要再输出“膝腿”或“其他受影响区域”。",
-      "bodyState 要和剧情一致，记录用户身体感受、舒适度、参考建议和各部位状态；可以写体温、破皮/发热风险，但不要做医学诊断，不要渲染低俗露骨细节。",
-      "recoverySuggestion 只作为参考提醒，不要写成强制停止剧情或强行中断互动的命令。",
+      "",
+      "★ 本轮必须严格遵守以下 10 条规则 ★",
+      "规则1：本轮对话若无明确身体触发事件（跑步/跌倒/撞击/久坐起身/受伤/体罚/明确身体感受描述），必须原样保持或让各指标趋向恢复，绝对不得凭空添加酸痛或不适。",
+      "规则2：「腰背僵硬」「肩颈酸胀」「神经绷紧」「肌肉紧绷」等词，仅在剧情有明确久坐、外力施加、受伤触发时才可出现；普通对话、轻度互动、日常交谈不触发任何酸痛。",
+      "规则3：sorenessLevel / painLevel / rednessLevel——若本轮无新触发，这三个值只能维持原值或减少，绝对不能自行增加。",
+      "规则4：本轮无任何身体触发时，overallCondition 必须是「正常」，currentNote 必须是「当前无明显不适」。",
+      "规则5：recoverySuggestion——若身体无异常，必须输出「暂无特别需要。」；有异常时才写具体建议，且不得写成强制停止剧情的命令。",
+      "规则6：parts 各部位——若无明确触发，该部位 status 必须是「正常」，soreness/pain/redness 必须是 0，notes 留空。",
+      "规则7：restNeeded——只有 painLevel >= 40 或 sorenessLevel >= 60 时才可以为 true，其他情况必须为 false。",
+      "规则8：energy——无明确体力消耗（运动/长时间体罚/生病）时，energy 不得低于 70；日常对话应维持 80 左右。",
+      "规则9：若本轮确实触发了身体变化，请在 currentNote 里写明是哪个具体动作/事件引起，不要泛化成「整体酸痛」。",
+      "规则10：bodyState.parts 只使用以下部位名：手心、臀部、大腿、臀腿连接处、腰背、肩颈、膝盖、臀缝；不要输出「膝腿」或「其他受影响区域」。",
+      "",
+      "本轮必须在同一次 JSON 里返回 bodyState（完整状态，不可省略字段）。",
       "若角色是陪伴管教型，可让用户身体状态成为后续关心、监督、休息安排和边界提醒的依据。"
     ].join("\n");
   }
@@ -2880,8 +2893,8 @@
     groupSettingsText = group && group.settings
       ? [
         "群公告：" + (group.settings.announcement || "暂无"),
-        "本群每次最少回复条数：" + (group.settings.minReplyCount || 10),
-        "本群每次最多安全条数：" + (group.settings.maxReplyCount || 50),
+        "本群每次最少回复条数：" + (group.settings.minReplyCount || 4) + "（普通聊天默认 4-8 条，只有用户明确要求热闹/刷屏时才超过 10 条）",
+        "本群每次最多安全条数：" + (group.settings.maxReplyCount || 12),
         "本群最少参与角色数：" + (group.settings.minParticipantCount || 2),
         "是否允许特殊消息类型：" + (group.settings.allowSpecialMessages === false ? "否，只使用 text" : "是")
       ].join("\n")
@@ -4320,7 +4333,7 @@
       feverRisk: String(source.feverRisk || "低"),
       skinBreakage: String(source.skinBreakage || "无"),
       restNeeded: normalizeBooleanValue(source.restNeeded),
-      recoverySuggestion: String(source.recoverySuggestion || "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。"),
+      recoverySuggestion: String(source.recoverySuggestion || "暂无特别需要。"),
       parts: normalizedParts,
       updatedAt: Date.now()
     };
@@ -4381,6 +4394,95 @@
       number = fallback;
     }
     return Math.max(0, Math.min(100, Math.round(number)));
+  }
+
+  function normalizeBodyStateWithContext(bodyState, previousState, recentHistory) {
+    if (!bodyState || typeof bodyState !== "object") {
+      return bodyState;
+    }
+
+    var isAlreadyNormal = (bodyState.sorenessLevel || 0) === 0 && (bodyState.painLevel || 0) === 0 && (bodyState.rednessLevel || 0) === 0;
+    if (isAlreadyNormal) {
+      return bodyState;
+    }
+
+    var recentText = (Array.isArray(recentHistory) ? recentHistory : [])
+      .filter(function (m) { return m && (m.role === "user" || m.role === "assistant"); })
+      .slice(-10)
+      .map(function (m) { return String(m.content || ""); })
+      .join("");
+
+    var hasTrigger = BODY_STATE_TRIGGER_KEYWORDS.some(function (kw) { return recentText.indexOf(kw) !== -1; });
+    if (hasTrigger) {
+      return bodyState;
+    }
+
+    var prev = previousState && typeof previousState === "object" ? previousState : {};
+    var prevSoreness = Number(prev.sorenessLevel) || 0;
+    var prevPain = Number(prev.painLevel) || 0;
+    var prevRedness = Number(prev.rednessLevel) || 0;
+
+    var newSoreness = bodyState.sorenessLevel || 0;
+    var newPain = bodyState.painLevel || 0;
+    var newRedness = bodyState.rednessLevel || 0;
+
+    var sorenessIncreased = newSoreness > prevSoreness;
+    var painIncreased = newPain > prevPain;
+    var rednessIncreased = newRedness > prevRedness;
+
+    if (!sorenessIncreased && !painIncreased && !rednessIncreased) {
+      return bodyState;
+    }
+
+    var corrected = Object.assign({}, bodyState);
+
+    if (sorenessIncreased) {
+      corrected.sorenessLevel = prevSoreness;
+    }
+    if (painIncreased) {
+      corrected.painLevel = prevPain;
+    }
+    if (rednessIncreased) {
+      corrected.rednessLevel = prevRedness;
+    }
+
+    var hasSpamNote = BODY_STATE_SPAM_PATTERNS.some(function (p) {
+      return (corrected.currentNote || "").indexOf(p) !== -1;
+    });
+
+    if (hasSpamNote) {
+      corrected.currentNote = prev.currentNote && prev.currentNote !== "当前无明显异常" ? prev.currentNote : "当前无明显不适";
+      corrected.overallCondition = prev.overallCondition || "正常";
+    }
+
+    if (!corrected.sorenessLevel && !corrected.painLevel && !corrected.rednessLevel) {
+      corrected.restNeeded = false;
+      if (!corrected.recoverySuggestion || corrected.recoverySuggestion === "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。") {
+        corrected.recoverySuggestion = "暂无特别需要。";
+      }
+    }
+
+    var correctedParts = Object.assign({}, corrected.parts || {});
+    Object.keys(correctedParts).forEach(function (partName) {
+      var part = correctedParts[partName] || {};
+      var prevPart = (prev.parts || {})[partName] || {};
+      var prevPartSoreness = Number(prevPart.soreness) || 0;
+      var prevPartPain = Number(prevPart.pain) || 0;
+      var prevPartRedness = Number(prevPart.redness) || 0;
+
+      if ((part.soreness || 0) > prevPartSoreness || (part.pain || 0) > prevPartPain || (part.redness || 0) > prevPartRedness) {
+        correctedParts[partName] = Object.assign({}, part, {
+          soreness: Math.min(part.soreness || 0, prevPartSoreness),
+          pain: Math.min(part.pain || 0, prevPartPain),
+          redness: Math.min(part.redness || 0, prevPartRedness),
+          status: prevPartSoreness === 0 && prevPartPain === 0 && prevPartRedness === 0 ? "正常" : (part.status || "正常"),
+          notes: prevPartSoreness === 0 && prevPartPain === 0 && prevPartRedness === 0 ? "" : (part.notes || "")
+        });
+      }
+    });
+    corrected.parts = correctedParts;
+
+    return corrected;
   }
 
   function normalizeBooleanValue(value) {
@@ -8135,6 +8237,7 @@
     debugOfflineNormalizeCase: debugOfflineNormalizeCase,
     runReplyTextureSmokeTest: runReplyTextureSmokeTest,
     createReplyTextureStats: createReplyTextureStats,
-    summarizeReplyTextureStats: summarizeReplyTextureStats
+    summarizeReplyTextureStats: summarizeReplyTextureStats,
+    normalizeBodyStateWithContext: normalizeBodyStateWithContext
   };
 })(window);

@@ -3,6 +3,7 @@
 
   var STORAGE_KEY = "myAiApp.apiJobs";
   var STALE_RUNNING_MS = 10 * 60 * 1000;
+  var JOB_TIMEOUT_MS = 75 * 1000;
   var MAX_STORED_JOBS = 20;
   var MAX_ERROR_JOBS = 5;
   var MAX_DONE_JOBS = 5;
@@ -432,7 +433,14 @@
     runningJobs[job.id] = true;
 
     try {
-      result = await handler(job);
+      var timeoutHandle;
+      var timeoutPromise = new Promise(function (_, reject) {
+        timeoutHandle = setTimeout(function () {
+          reject(new Error("生成超时，请重试。"));
+        }, JOB_TIMEOUT_MS);
+      });
+      result = await Promise.race([handler(job), timeoutPromise]);
+      clearTimeout(timeoutHandle);
       updateJob(job.id, {
         status: "done",
         afterMessages: [],

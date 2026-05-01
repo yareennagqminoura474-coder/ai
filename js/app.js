@@ -7001,7 +7001,19 @@
       if (context.generationId && window.AppStorage.saveBodyStateSnapshot) {
         window.AppStorage.saveBodyStateSnapshot(context.generationId, context.targetType, context.targetId, context.bodyState || {});
       }
-      window.AppStorage.saveBodyState(context.targetType, context.targetId, Object.assign({}, result.bodyState, {
+
+      var normalizedBodyState = result.bodyState;
+      if (window.AIService && window.AIService.normalizeBodyStateWithContext) {
+        var recentMsgs = [];
+        if (context.targetType === "group" && window.AppStorage.getGroupChatHistory) {
+          recentMsgs = window.AppStorage.getGroupChatHistory(context.targetId).slice(-12);
+        } else if (window.AppStorage.getChatHistory) {
+          recentMsgs = window.AppStorage.getChatHistory(context.targetId).slice(-12);
+        }
+        normalizedBodyState = window.AIService.normalizeBodyStateWithContext(result.bodyState, context.bodyState || {}, recentMsgs);
+      }
+
+      window.AppStorage.saveBodyState(context.targetType, context.targetId, Object.assign({}, normalizedBodyState, {
         generationId: context.generationId || "",
         targetType: context.targetType,
         targetId: context.targetId
@@ -7173,32 +7185,51 @@
 
   function renderBodyStatePanelContent(state) {
     var parts = state.parts || {};
+    var isNormal = (state.sorenessLevel || 0) === 0 && (state.painLevel || 0) === 0 && (state.rednessLevel || 0) === 0 && !state.restNeeded;
+
+    var abnormalParts = Object.keys(parts).filter(function (partName) {
+      var part = parts[partName] || {};
+      return (part.status && part.status !== "正常") || (part.soreness || 0) > 0 || (part.pain || 0) > 0 || (part.redness || 0) > 0;
+    });
+
+    var metricsHtml = isNormal
+      ? [renderBodyMetric("精力", state.energy + "/100"), renderBodyMetric("体温", state.bodyTemperature || "正常")].join("")
+      : [
+          renderBodyMetric("精力", state.energy + "/100"),
+          renderBodyMetric("酸痛", state.sorenessLevel + "/100"),
+          renderBodyMetric("疼痛", state.painLevel + "/100"),
+          renderBodyMetric("泛红", state.rednessLevel + "/100"),
+          renderBodyMetric("体温", state.bodyTemperature || "正常"),
+          renderBodyMetric("需休息", state.restNeeded ? "是" : "否")
+        ].join("");
+
+    var partsHtml = abnormalParts.length === 0
+      ? '<p class="body-state-normal-hint">当前无明显不适</p>'
+      : abnormalParts.map(function (partName) {
+          var part = parts[partName] || {};
+          return [
+            '<article class="body-part-card body-part-abnormal">',
+            '  <div><strong>' + escapeHtml(partName) + '</strong><span>' + escapeHtml(part.status || "正常") + "</span></div>",
+            part.notes ? '<div class="body-part-notes">' + escapeHtml(part.notes) + "</div>" : "",
+            "</article>"
+          ].join("");
+        }).join("");
+
+    var suggestion = state.recoverySuggestion || "暂无特别需要。";
 
     return [
       '<section class="body-state-summary">',
       '  <strong>' + escapeHtml(state.overallCondition || "正常") + "</strong>",
-      '  <p>' + escapeHtml(state.currentNote || "当前无明显异常") + "</p>",
+      '  <p>' + escapeHtml(state.currentNote || "当前无明显不适") + "</p>",
       '  <div class="body-state-grid">',
-      renderBodyMetric("精力", state.energy + "/100"),
-      renderBodyMetric("酸痛", state.sorenessLevel + "/100"),
-      renderBodyMetric("疼痛", state.painLevel + "/100"),
-      renderBodyMetric("泛红", state.rednessLevel + "/100"),
-      renderBodyMetric("体温", state.bodyTemperature || "正常"),
-      renderBodyMetric("需休息", state.restNeeded ? "是" : "否"),
+      metricsHtml,
       "  </div>",
       '  <small>最近更新：' + escapeHtml(formatDateTime(state.updatedAt)) + "</small>",
       "</section>",
       '<section class="body-part-list">',
-      Object.keys(parts).map(function (partName) {
-        var part = parts[partName] || {};
-        return [
-          '<article class="body-part-card">',
-          '  <div><strong>' + escapeHtml(partName) + '</strong><span>' + escapeHtml(part.status || "正常") + "</span></div>",
-          "</article>"
-        ].join("");
-      }).join(""),
+      partsHtml,
       "</section>",
-      '<section class="body-recovery-card"><strong>参考建议</strong><p>' + escapeHtml(state.recoverySuggestion || "当前无明显异常，可按剧情节奏和身体反馈调整。") + "</p></section>"
+      '<section class="body-recovery-card"><strong>参考建议</strong><p>' + escapeHtml(suggestion) + "</p></section>"
     ].join("");
   }
 

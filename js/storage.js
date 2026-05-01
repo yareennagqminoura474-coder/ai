@@ -24,6 +24,7 @@
     moments: "myAiApp.moments",
     inlineOffline: "myAiApp.inlineOffline",
     wallet: "myAiApp.wallet",
+    bodyStateMigrationV1: "myAiApp.bodyStateMigrationV1",
     moneyMessageMigrationVersion: "myAiApp.moneyMessageMigrationVersion",
     shop: "myAiApp.shop",
     recentHidden: "myAiApp.recentHidden",
@@ -904,11 +905,16 @@
   function getBodyStateStore() {
     var states = parseJson(localStorage.getItem(STORAGE_KEYS.bodyStates), {});
     var migration;
+    var v1;
 
     states = states && typeof states === "object" && !Array.isArray(states) ? states : {};
+    v1 = runBodyStateMigrationV1(states);
+    if (v1.changed) {
+      states = v1.states;
+    }
     migration = migrateBodyStateStoreParts(states);
 
-    if (migration.changed) {
+    if (v1.changed || migration.changed) {
       saveBodyStateStore(migration.states);
     }
 
@@ -1116,6 +1122,54 @@
     saveBodyStateStore({});
   }
 
+  var BODY_STATE_SPAM_NOTES = ["腰背僵硬", "肩颈酸胀", "神经绷紧", "肌肉紧绷", "胃部空泛", "精力大幅下降"];
+  var BODY_STATE_OLD_DEFAULT_SUGGESTION = "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。";
+
+  function runBodyStateMigrationV1(states) {
+    if (localStorage.getItem(STORAGE_KEYS.bodyStateMigrationV1)) {
+      return { states: states, changed: false };
+    }
+
+    var changed = false;
+    var normalized = {};
+
+    Object.keys(states || {}).forEach(function (key) {
+      var s = states[key];
+      if (!s || typeof s !== "object") {
+        normalized[key] = s;
+        return;
+      }
+
+      var hasSpam = BODY_STATE_SPAM_NOTES.some(function (p) {
+        return (s.currentNote || "").indexOf(p) !== -1;
+      });
+      var isHighPain = (s.painLevel || 0) >= 40 || (s.rednessLevel || 0) >= 40;
+
+      if (hasSpam && !isHighPain) {
+        normalized[key] = Object.assign({}, s, {
+          sorenessLevel: 0,
+          currentNote: "当前无明显不适",
+          overallCondition: "正常",
+          restNeeded: false,
+          recoverySuggestion: "暂无特别需要。"
+        });
+        changed = true;
+        return;
+      }
+
+      if (s.recoverySuggestion === BODY_STATE_OLD_DEFAULT_SUGGESTION) {
+        normalized[key] = Object.assign({}, s, { recoverySuggestion: "暂无特别需要。" });
+        changed = true;
+        return;
+      }
+
+      normalized[key] = s;
+    });
+
+    localStorage.setItem(STORAGE_KEYS.bodyStateMigrationV1, "1");
+    return { states: normalized, changed: changed };
+  }
+
   function migrateBodyStateStoreParts(states) {
     var changed = false;
     var normalized = {};
@@ -1211,7 +1265,7 @@
       feverRisk: String(source.feverRisk || "低"),
       skinBreakage: String(source.skinBreakage || "无"),
       restNeeded: normalizeBoolean(source.restNeeded),
-      recoverySuggestion: String(source.recoverySuggestion || "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。"),
+      recoverySuggestion: String(source.recoverySuggestion && source.recoverySuggestion !== "可适度放慢节奏、补水休息，按剧情节奏和身体反馈调整。" ? source.recoverySuggestion : "暂无特别需要。"),
       parts: normalizedParts,
       generationId: String(source.generationId || ""),
       targetType: String(source.targetType || ""),
