@@ -77,8 +77,8 @@
           var initial = escapeHtml((char.name || "?").slice(0, 1));
           var hasAvatar = char.avatar;
           var avatarHtml = hasAvatar
-            ? '<img class="member-avatar-img round-avatar-small" src="' + escapeHtml(char.avatar) + '" alt="">'
-            : '<span class="member-avatar">' + initial + '</span>';
+            ? '<img class="member-avatar-img watch-member-avatar" src="' + escapeHtml(char.avatar) + '" alt="">'
+            : '<span class="member-avatar watch-member-avatar">' + initial + '</span>';
           return [
             '<label class="member-select-item">',
             '  <input type="checkbox" name="watchChar" value="' + escapeHtml(char.id) + '">',
