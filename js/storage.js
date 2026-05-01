@@ -46,9 +46,11 @@
   var debouncedWatchTimers = {};
   var BODY_STATE_PART_ALIASES = {
     "膝腿": "膝盖",
-    "其他受影响区域": "臀缝"
+    "臀腿连接处": "臀腿",
+    "臀缝": "屁眼",
+    "其他受影响区域": "屁眼"
   };
-  var DEFAULT_BODY_STATE_PARTS = ["手心", "臀部", "大腿", "臀腿连接处", "腰背", "肩颈", "膝盖", "臀缝"];
+  var DEFAULT_BODY_STATE_PARTS = ["手心", "臀部", "臀腿", "大腿", "大腿内侧", "腰背", "肩颈", "膝盖", "屁眼"];
 
   function parseJson(value, fallback) {
     if (!value) {

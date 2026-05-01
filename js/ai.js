@@ -14,9 +14,11 @@
   var OFFLINE_ACTION_MAX_COUNT = 8;
   var BODY_STATE_PART_ALIASES = {
     "膝腿": "膝盖",
-    "其他受影响区域": "臀缝"
+    "臀腿连接处": "臀腿",
+    "臀缝": "屁眼",
+    "其他受影响区域": "屁眼"
   };
-  var DEFAULT_BODY_STATE_PARTS = ["手心", "臀部", "大腿", "臀腿连接处", "腰背", "肩颈", "膝盖", "臀缝"];
+  var DEFAULT_BODY_STATE_PARTS = ["手心", "臀部", "臀腿", "大腿", "大腿内侧", "腰背", "肩颈", "膝盖", "屁眼"];
 
   function valueOrFallback(value) {
     return value ? String(value) : "未填写";
@@ -2227,7 +2229,7 @@
       "规则7：restNeeded——只有 painLevel >= 40 或 sorenessLevel >= 60 时才可以为 true，其他情况必须为 false。",
       "规则8：energy——无明确体力消耗（运动/长时间体罚/生病）时，energy 不得低于 70；日常对话应维持 80 左右。",
       "规则9：若本轮确实触发了身体变化，请在 currentNote 里写明是哪个具体动作/事件引起，不要泛化成「整体酸痛」。",
-      "规则10：bodyState.parts 只使用以下部位名：手心、臀部、大腿、臀腿连接处、腰背、肩颈、膝盖、臀缝；不要输出「膝腿」或「其他受影响区域」。",
+      "规则10：bodyState.parts 只使用以下部位名：手心、臀部、臀腿、大腿、大腿内侧、腰背、肩颈、膝盖、屁眼；不要输出「膝腿」「臀腿连接处」「臀缝」「其他受影响区域」。",
       "",
       "本轮必须在同一次 JSON 里返回 bodyState（完整状态，不可省略字段）。",
       "若角色是陪伴管教型，可让用户身体状态成为后续关心、监督、休息安排和边界提醒的依据。"
@@ -2281,7 +2283,7 @@
   }
 
   function buildBodyStateSchemaText() {
-    return "\"bodyState\":{\"overallCondition\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"currentNote\":\"当前用户身体状态说明\",\"energy\":80,\"moodInfluence\":\"对用户情绪的影响\",\"sorenessLevel\":0,\"painLevel\":0,\"rednessLevel\":0,\"bruiseRisk\":\"低/中/高\",\"sittingComfort\":\"正常\",\"walkingComfort\":\"正常\",\"handUseComfort\":\"正常\",\"touchSensitivity\":\"正常\",\"bodyTemperature\":\"正常/偏热/发热风险\",\"feverRisk\":\"低/中/高\",\"skinBreakage\":\"无/轻微/需要处理\",\"restNeeded\":false,\"recoverySuggestion\":\"参考建议\",\"parts\":{\"手心\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀部\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"大腿\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀腿连接处\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"腰背\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"肩颈\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"膝盖\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀缝\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"}}}";
+    return "\"bodyState\":{\"overallCondition\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"currentNote\":\"当前用户身体状态说明\",\"energy\":80,\"moodInfluence\":\"对用户情绪的影响\",\"sorenessLevel\":0,\"painLevel\":0,\"rednessLevel\":0,\"bruiseRisk\":\"低/中/高\",\"sittingComfort\":\"正常\",\"walkingComfort\":\"正常\",\"handUseComfort\":\"正常\",\"touchSensitivity\":\"正常\",\"bodyTemperature\":\"正常/偏热/发热风险\",\"feverRisk\":\"低/中/高\",\"skinBreakage\":\"无/轻微/需要处理\",\"restNeeded\":false,\"recoverySuggestion\":\"参考建议\",\"parts\":{\"手心\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀部\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"臀腿\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"大腿\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"大腿内侧\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"腰背\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"肩颈\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"膝盖\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"},\"屁眼\":{\"status\":\"正常/轻微不适/泛红/疼痛/明显受压/需要注意\",\"soreness\":0,\"pain\":0,\"redness\":0,\"notes\":\"\"}}}";
   }
 
   function appendOptionalSchema(schemaText, options) {

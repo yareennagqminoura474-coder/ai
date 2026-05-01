@@ -59,6 +59,7 @@
     open: false,
     origin: ""
   };
+  var DEFAULT_BODY_STATE_PARTS = ["手心", "臀部", "臀腿", "大腿", "大腿内侧", "腰背", "肩颈", "膝盖", "屁眼"];
   var noteSearchKeyword = "";
   var expandedWorldBookIds = {};
   var expandedWorldEntryIds = {};
@@ -7165,6 +7166,18 @@
     var settings = window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
     var enabled = settings.bodyStateEnabled !== false;
     var state = window.AppStorage.getBodyState ? window.AppStorage.getBodyState(targetType, targetId) : {};
+    var showAllParts = false;
+
+    function renderBodyStatePanel(sheet) {
+      var content = sheet.querySelector(".body-state-panel");
+      if (!content) {
+        return;
+      }
+
+      content.innerHTML = enabled
+        ? renderBodyStatePanelContent(state, showAllParts) + '<div class="settings-action-row compact-action-row"><button class="outline-button" type="button" data-body-action="export">导出文本</button><button class="outline-button danger" type="button" data-body-action="reset">重置状态</button></div>'
+        : '<div class="soft-empty">身体状态系统已关闭，可在设置里开启。</div>';
+    }
 
     showWeChatSheet([
       '<div class="wechat-sheet-header">',
@@ -7173,7 +7186,7 @@
       '  <button type="button" data-close-sheet>关闭</button>',
       "</div>",
       '<div class="wechat-sheet-form body-state-panel">',
-      enabled ? renderBodyStatePanelContent(state) : '<div class="soft-empty">身体状态系统已关闭，可在设置里开启。</div>',
+      enabled ? renderBodyStatePanelContent(state, showAllParts) : '<div class="soft-empty">身体状态系统已关闭，可在设置里开启。</div>',
       enabled ? '<div class="settings-action-row compact-action-row"><button class="outline-button" type="button" data-body-action="export">导出文本</button><button class="outline-button danger" type="button" data-body-action="reset">重置状态</button></div>' : "",
       "</div>"
     ].join(""), function (sheet) {
@@ -7186,9 +7199,16 @@
           return;
         }
 
+        if (button.dataset.bodyAction === "toggleParts") {
+          showAllParts = !showAllParts;
+          renderBodyStatePanel(sheet);
+          return;
+        }
+
         if (button.dataset.bodyAction === "reset" && window.confirm("确定重置当前身体状态吗？")) {
           window.AppStorage.clearBodyState(targetType, targetId);
           openBodyStatePanel(targetType, targetId, title);
+          return;
         }
 
         if (button.dataset.bodyAction === "export") {
@@ -7207,11 +7227,16 @@
     });
   }
 
-  function renderBodyStatePanelContent(state) {
+  function renderBodyStatePanelContent(state, showAll) {
     var parts = state.parts || {};
     var isNormal = (state.sorenessLevel || 0) === 0 && (state.painLevel || 0) === 0 && (state.rednessLevel || 0) === 0 && !state.restNeeded;
+    var orderedParts = DEFAULT_BODY_STATE_PARTS.concat(Object.keys(parts).filter(function (partName) {
+      return DEFAULT_BODY_STATE_PARTS.indexOf(partName) === -1;
+    })).filter(function (value, index, self) {
+      return self.indexOf(value) === index;
+    });
 
-    var abnormalParts = Object.keys(parts).filter(function (partName) {
+    var abnormalParts = orderedParts.filter(function (partName) {
       var part = parts[partName] || {};
       return (part.status && part.status !== "正常") || (part.soreness || 0) > 0 || (part.pain || 0) > 0 || (part.redness || 0) > 0;
     });
@@ -7227,19 +7252,34 @@
           renderBodyMetric("需休息", state.restNeeded ? "是" : "否")
         ].join("");
 
-    var partsHtml = abnormalParts.length === 0
-      ? '<p class="body-state-normal-hint">当前无明显不适</p>'
-      : abnormalParts.map(function (partName) {
-          var part = parts[partName] || {};
-          return [
-            '<article class="body-part-card body-part-abnormal">',
-            '  <div><strong>' + escapeHtml(partName) + '</strong><span>' + escapeHtml(part.status || "正常") + "</span></div>",
-            part.notes ? '<div class="body-part-notes">' + escapeHtml(part.notes) + "</div>" : "",
-            "</article>"
-          ].join("");
-        }).join("");
+    var partsHtml = "";
+    if (showAll) {
+      partsHtml = orderedParts.map(function (partName) {
+        var part = parts[partName] || {};
+        var isAbnormal = (part.status && part.status !== "正常") || (part.soreness || 0) > 0 || (part.pain || 0) > 0 || (part.redness || 0) > 0;
+        return [
+          '<article class="body-part-card ' + (isAbnormal ? "body-part-abnormal" : "body-part-normal") + '">',
+          '  <div><strong>' + escapeHtml(partName) + '</strong><span>' + escapeHtml(part.status || "正常") + "</span></div>",
+          part.notes ? '<div class="body-part-notes">' + escapeHtml(part.notes) + "</div>" : "",
+          "</article>"
+        ].join("");
+      }).join("");
+    } else if (abnormalParts.length === 0) {
+      partsHtml = '<p class="body-state-normal-hint">当前无明显不适</p>';
+    } else {
+      partsHtml = abnormalParts.map(function (partName) {
+        var part = parts[partName] || {};
+        return [
+          '<article class="body-part-card body-part-abnormal">',
+          '  <div><strong>' + escapeHtml(partName) + '</strong><span>' + escapeHtml(part.status || "正常") + "</span></div>",
+          part.notes ? '<div class="body-part-notes">' + escapeHtml(part.notes) + "</div>" : "",
+          "</article>"
+        ].join("");
+      }).join("");
+    }
 
     var suggestion = state.recoverySuggestion || "暂无特别需要。";
+    var toggleLabel = showAll ? "收起正常部位" : "查看全部部位";
 
     return [
       '<section class="body-state-summary">',
@@ -7253,6 +7293,7 @@
       '<section class="body-part-list">',
       partsHtml,
       "</section>",
+      '<div class="settings-action-row compact-action-row body-state-toggle-row"><button class="outline-button" type="button" data-body-action="toggleParts">' + escapeHtml(toggleLabel) + '</button></div>',
       '<section class="body-recovery-card"><strong>参考建议</strong><p>' + escapeHtml(suggestion) + "</p></section>"
     ].join("");
   }
@@ -7263,6 +7304,12 @@
 
   function formatBodyStateText(state) {
     var parts = state.parts || {};
+    var orderedParts = DEFAULT_BODY_STATE_PARTS.concat(Object.keys(parts).filter(function (partName) {
+      return DEFAULT_BODY_STATE_PARTS.indexOf(partName) === -1;
+    })).filter(function (value, index, self) {
+      return self.indexOf(value) === index;
+    });
+
     return [
       "用户身体状态：" + (state.overallCondition || "正常"),
       "说明：" + (state.currentNote || "当前无明显异常"),
@@ -7271,7 +7318,7 @@
       "体温：" + (state.bodyTemperature || "正常") + "，发热风险：" + (state.feverRisk || "低"),
       "恢复建议：" + (state.recoverySuggestion || "无"),
       "部位：",
-      Object.keys(parts).map(function (partName) {
+      orderedParts.map(function (partName) {
         var part = parts[partName] || {};
         return "- " + partName + "：" + (part.status || "正常") + "，酸痛 " + (part.soreness || 0) + "，疼痛 " + (part.pain || 0) + "，泛红 " + (part.redness || 0) + (part.notes ? "，" + part.notes : "");
       }).join("\n")
