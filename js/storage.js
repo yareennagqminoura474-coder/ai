@@ -34,7 +34,8 @@
     chatPrefix: "myAiApp.chat.",
     groupChatPrefix: "myAiApp.groupChat.",
     offlinePrefix: "myAiApp.offline.",
-    watchPrefix: "myAiApp.watch."
+    watchPrefix: "myAiApp.watch.",
+    outings: "myAiApp.outings"
   };
   var debouncedPrivateChatSaves = {};
   var debouncedPrivateChatTimers = {};
@@ -5600,6 +5601,376 @@
     return { thoughtsCleared: thoughtChanged, memoriesCleared: memChanged, chatMemoriesCleared: chatMemChanged };
   }
 
+  /* ===== 出去玩数据 ===== */
+
+  var DEFAULT_OUTING_PLACES = [
+    {
+      id: "mall",
+      name: "商场",
+      category: "shopping",
+      description: "楼层很多，吃饭、逛街、买东西都方便。电梯、人流、灯光、试衣、付款、拎袋子。",
+      openingHours: "10:00-22:00",
+      priceLevel: 3,
+      activities: ["逛街", "买衣服", "喝奶茶", "吃饭", "看电影", "买礼物"],
+      shops: ["clothes", "milk_tea", "restaurant", "cinema", "gift_shop"]
+    },
+    {
+      id: "park",
+      name: "公园",
+      category: "walk",
+      description: "适合散步、坐着聊天、拍照，傍晚风会比较舒服。风、长椅、树影、路灯、散步、买水。",
+      openingHours: "06:00-22:00",
+      priceLevel: 1,
+      activities: ["散步", "坐长椅", "拍照", "买水", "喂鸽子"],
+      shops: ["drink_stall", "snack_stall"]
+    },
+    {
+      id: "cinema",
+      name: "电影院",
+      category: "entertainment",
+      description: "灯光暗，人多，适合看电影，也容易有暧昧或沉默的互动。检票、爆米花、灯光暗、电影开场、散场。",
+      openingHours: "10:00-24:00",
+      priceLevel: 3,
+      activities: ["选电影", "买票", "买爆米花", "看电影", "散场聊天"],
+      shops: ["cinema_ticket", "cinema_snack"]
+    },
+    {
+      id: "bookstore",
+      name: "书店",
+      category: "quiet",
+      description: "环境安静，适合翻书、低声聊天、买书。低声、书架、翻页、咖啡、安静。",
+      openingHours: "09:00-21:30",
+      priceLevel: 2,
+      activities: ["看书", "挑书", "买书", "坐着聊天", "喝咖啡"],
+      shops: ["book", "coffee"]
+    },
+    {
+      id: "restaurant_street",
+      name: "美食街",
+      category: "food",
+      description: "人声嘈杂，香味很重，适合吃东西和边走边聊。排队、味道、人多、找座位、油烟。",
+      openingHours: "11:00-23:30",
+      priceLevel: 2,
+      activities: ["吃小吃", "排队", "买饮料", "找座位", "打包"],
+      shops: ["snack_stall", "drink_stall"]
+    },
+    {
+      id: "amusement_park",
+      name: "游乐园",
+      category: "entertainment",
+      description: "项目很多，排队久，情绪起伏大，适合约会和制造事件。排队、门票、项目、尖叫、纪念品、烟花。",
+      openingHours: "09:30-21:00",
+      priceLevel: 4,
+      activities: ["买门票", "坐摩天轮", "坐过山车", "玩射击摊", "买纪念品", "看烟花"],
+      shops: ["ticket", "souvenir", "snack_stall", "drink_stall"]
+    },
+    {
+      id: "aquarium",
+      name: "海洋馆",
+      category: "date",
+      description: "灯光偏暗，水影很漂亮，适合慢慢逛和拍照。水影、玻璃、拍照、低声、纪念品。",
+      openingHours: "09:00-18:00",
+      priceLevel: 3,
+      activities: ["买门票", "看水母", "看海豚", "拍照", "买纪念品"],
+      shops: ["ticket", "souvenir", "drink_stall"]
+    },
+    {
+      id: "convenience_store",
+      name: "便利店",
+      category: "daily",
+      description: "很日常，可以买水、便当、零食，也适合深夜短暂停留。货架、冰柜、收银、窗边座位、深夜感。",
+      openingHours: "00:00-24:00",
+      priceLevel: 1,
+      activities: ["买水", "买零食", "买便当", "坐窗边", "结账"],
+      shops: ["convenience_goods"]
+    }
+  ];
+
+  var DEFAULT_OUTING_SHOPS = {
+    drink_stall: {
+      name: "饮料摊",
+      items: [
+        { id: "water", name: "矿泉水", price: 3.00 },
+        { id: "soda", name: "汽水", price: 6.00 },
+        { id: "lemon_tea", name: "柠檬茶", price: 12.00 }
+      ]
+    },
+    milk_tea: {
+      name: "奶茶店",
+      items: [
+        { id: "milk_tea_basic", name: "珍珠奶茶", price: 18.00 },
+        { id: "fruit_tea", name: "水果茶", price: 22.00 },
+        { id: "cheese_tea", name: "芝士茶", price: 25.00 }
+      ]
+    },
+    snack_stall: {
+      name: "小吃摊",
+      items: [
+        { id: "sausage", name: "烤肠", price: 8.00 },
+        { id: "fries", name: "薯条", price: 15.00 },
+        { id: "takoyaki", name: "章鱼小丸子", price: 18.00 }
+      ]
+    },
+    restaurant: {
+      name: "餐厅",
+      items: [
+        { id: "set_meal", name: "双人套餐", price: 128.00 },
+        { id: "noodle", name: "热汤面", price: 32.00 },
+        { id: "steak", name: "牛排套餐", price: 168.00 }
+      ]
+    },
+    cinema_ticket: {
+      name: "电影院售票处",
+      items: [
+        { id: "movie_ticket", name: "电影票", price: 48.00 },
+        { id: "couple_seat", name: "情侣座电影票", price: 118.00 }
+      ]
+    },
+    cinema_snack: {
+      name: "影院小食",
+      items: [
+        { id: "popcorn", name: "爆米花", price: 28.00 },
+        { id: "cola", name: "可乐", price: 12.00 },
+        { id: "combo", name: "爆米花可乐套餐", price: 38.00 }
+      ]
+    },
+    gift_shop: {
+      name: "礼品店",
+      items: [
+        { id: "keychain", name: "钥匙扣", price: 19.90 },
+        { id: "plush", name: "小玩偶", price: 59.00 },
+        { id: "flower", name: "一束花", price: 99.00 }
+      ]
+    },
+    book: {
+      name: "书店",
+      items: [
+        { id: "novel", name: "小说", price: 45.00 },
+        { id: "notebook", name: "笔记本", price: 28.00 },
+        { id: "pen", name: "钢笔", price: 88.00 }
+      ]
+    },
+    coffee: {
+      name: "咖啡区",
+      items: [
+        { id: "americano", name: "美式咖啡", price: 22.00 },
+        { id: "latte", name: "拿铁", price: 28.00 },
+        { id: "cake", name: "小蛋糕", price: 32.00 }
+      ]
+    },
+    ticket: {
+      name: "售票处",
+      items: [
+        { id: "adult_ticket", name: "门票", price: 120.00 },
+        { id: "fast_pass", name: "快速通行券", price: 180.00 }
+      ]
+    },
+    souvenir: {
+      name: "纪念品店",
+      items: [
+        { id: "badge", name: "徽章", price: 15.00 },
+        { id: "photo_frame", name: "相框", price: 49.00 },
+        { id: "limited_plush", name: "限定玩偶", price: 129.00 }
+      ]
+    },
+    convenience_goods: {
+      name: "便利店货架",
+      items: [
+        { id: "bento", name: "便当", price: 24.00 },
+        { id: "chips", name: "薯片", price: 9.90 },
+        { id: "umbrella", name: "雨伞", price: 39.00 },
+        { id: "bandage", name: "创可贴", price: 6.00 }
+      ]
+    },
+    clothes: {
+      name: "服装店",
+      items: [
+        { id: "tshirt", name: "T恤", price: 89.00 },
+        { id: "dress", name: "连衣裙", price: 168.00 },
+        { id: "accessory", name: "小饰品", price: 35.00 }
+      ]
+    },
+    cinema: {
+      name: "电影院",
+      items: [
+        { id: "movie_ticket", name: "电影票", price: 48.00 },
+        { id: "couple_seat", name: "情侣座电影票", price: 118.00 }
+      ]
+    }
+  };
+
+  function getOutingPlaces() {
+    return DEFAULT_OUTING_PLACES;
+  }
+
+  function getOutingShops() {
+    return DEFAULT_OUTING_SHOPS;
+  }
+
+  function getOutingStore() {
+    return parseJson(localStorage.getItem(STORAGE_KEYS.outings), { current: null, history: [] });
+  }
+
+  function saveOutingStore(store) {
+    localStorage.setItem(STORAGE_KEYS.outings, JSON.stringify(store || { current: null, history: [] }));
+  }
+
+  function getCurrentOuting() {
+    return getOutingStore().current || null;
+  }
+
+  function setCurrentOuting(outing) {
+    var store = getOutingStore();
+    store.current = outing || null;
+    saveOutingStore(store);
+  }
+
+  function clearCurrentOuting() {
+    var store = getOutingStore();
+    store.current = null;
+    saveOutingStore(store);
+  }
+
+  function startOuting(mode, companion, placeId) {
+    var places = DEFAULT_OUTING_PLACES;
+    var place = places.find(function (p) { return p.id === placeId; }) || null;
+    var outing = {
+      id: "outing_" + Date.now(),
+      mode: mode,
+      companion: companion || {},
+      placeId: placeId,
+      placeName: place ? place.name : placeId,
+      placeDescription: place ? place.description : "",
+      placeActivities: place ? place.activities : [],
+      placeShops: place ? place.shops : [],
+      startedAt: Date.now(),
+      updatedAt: Date.now(),
+      status: "active",
+      spentTotal: 0,
+      events: [],
+      purchases: [],
+      memorySynced: false
+    };
+    setCurrentOuting(outing);
+    return outing;
+  }
+
+  function addOutingEvent(event) {
+    var outing = getCurrentOuting();
+    if (!outing) return null;
+    var item = Object.assign({}, event, {
+      id: event.id || ("outing_event_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6)),
+      createdAt: event.createdAt || Date.now()
+    });
+    outing.events = outing.events || [];
+    outing.events.push(item);
+    outing.updatedAt = Date.now();
+    setCurrentOuting(outing);
+    return item;
+  }
+
+  function addOutingPurchase(purchase) {
+    var outing = getCurrentOuting();
+    if (!outing) return null;
+    var item = Object.assign({}, purchase, {
+      id: purchase.id || ("outing_purchase_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6)),
+      createdAt: purchase.createdAt || Date.now()
+    });
+    outing.purchases = outing.purchases || [];
+    outing.purchases.push(item);
+    outing.spentTotal = roundAmount((outing.spentTotal || 0) + (Number(item.price) || 0));
+    outing.updatedAt = Date.now();
+    setCurrentOuting(outing);
+    return item;
+  }
+
+  function getOutingHistory() {
+    var store = getOutingStore();
+    return Array.isArray(store.history) ? store.history : [];
+  }
+
+  function endOuting() {
+    var outing = getCurrentOuting();
+    if (!outing) return null;
+    outing.status = "ended";
+    outing.endedAt = Date.now();
+    outing.updatedAt = Date.now();
+
+    var store = getOutingStore();
+    store.current = null;
+    store.history = store.history || [];
+    store.history.unshift(outing);
+    if (store.history.length > 50) {
+      store.history = store.history.slice(0, 50);
+    }
+    saveOutingStore(store);
+    return outing;
+  }
+
+  function buildOutingMemorySummary(outing) {
+    var aiMemoryText = Array.isArray(outing.aiMemories) && outing.aiMemories.length
+      ? "出行中形成的记忆：" + outing.aiMemories.slice(-6).map(function (m) {
+          return m.content || "";
+        }).filter(Boolean).join("；")
+      : "";
+    return [
+      "和用户一起去了" + outing.placeName + "。",
+      "同行对象：" + (outing.companion && outing.companion.name || ""),
+      "总花费：¥" + Number(outing.spentTotal || 0).toFixed(2),
+      "发生的事：" + (outing.events || []).slice(-8).map(function (e) { return e.content || ""; }).join("；"),
+      (outing.purchases && outing.purchases.length)
+        ? "购买：" + outing.purchases.map(function (p) { return p.itemName + " ¥" + Number(p.price || 0).toFixed(2); }).join("；")
+        : "",
+      aiMemoryText
+    ].filter(Boolean).join("\n");
+  }
+
+  function syncOutingMemoryToCharacter(outing) {
+    if (!outing || outing.mode !== "character" || !outing.companion || !outing.companion.characterId) {
+      return;
+    }
+    var characterId = outing.companion.characterId;
+    var summary = buildOutingMemorySummary(outing);
+
+    addChatMemory("private", characterId, {
+      id: "memory_outing_" + outing.id,
+      type: "outing",
+      title: "一起去了" + outing.placeName,
+      content: summary,
+      source: "outing",
+      targetType: "private",
+      targetId: characterId,
+      characterId: characterId,
+      createdAt: Date.now()
+    });
+
+    addCharacterMemory(characterId, {
+      id: "character_memory_outing_" + outing.id,
+      type: "outing",
+      title: "和用户出去玩",
+      content: summary,
+      source: "outing",
+      createdAt: Date.now()
+    });
+
+    var groups = getGroups() || [];
+    groups.forEach(function (group) {
+      if (group && group.memberIds && group.memberIds.indexOf(characterId) !== -1) {
+        addChatMemory("group", group.id, {
+          id: "group_memory_outing_" + outing.id + "_" + group.id,
+          type: "outing",
+          title: (outing.companion.name || "") + "和用户去了" + outing.placeName,
+          content: summary,
+          source: "outing",
+          targetType: "group",
+          targetId: group.id,
+          characterId: characterId,
+          createdAt: Date.now()
+        });
+      }
+    });
+  }
+
   window.AppStorage = {
     getCharacters: getCharacters,
     saveCharacters: saveCharacters,
@@ -5789,6 +6160,17 @@
     returnMoneyMessage: returnMoneyMessage,
     settleOutgoingMoneyMessage: settleOutgoingMoneyMessage,
     applyMoneyDecision: applyMoneyDecision,
+    getOutingPlaces: getOutingPlaces,
+    getOutingShops: getOutingShops,
+    getCurrentOuting: getCurrentOuting,
+    setCurrentOuting: setCurrentOuting,
+    clearCurrentOuting: clearCurrentOuting,
+    startOuting: startOuting,
+    endOuting: endOuting,
+    addOutingEvent: addOutingEvent,
+    addOutingPurchase: addOutingPurchase,
+    getOutingHistory: getOutingHistory,
+    syncOutingMemoryToCharacter: syncOutingMemoryToCharacter,
     exportAllData: exportAllData,
     importAllData: importAllData,
     clearAllData: clearAllData

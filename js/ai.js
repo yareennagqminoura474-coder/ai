@@ -2867,9 +2867,14 @@
 
   function formatChatMemoryList(memories) {
     return (Array.isArray(memories) ? memories : []).slice(0, 30).map(function (memory, index) {
+      var typeLabel = memory.type === "auto"
+        ? "自动总结"
+        : memory.type === "outing"
+          ? "近期共同经历"
+          : "手动添加";
       return [
         (index + 1) + ". " + (memory.title || "记忆"),
-        "类型：" + (memory.type === "auto" ? "自动总结" : "手动添加"),
+        "类型：" + typeLabel,
         "正文：" + memory.content
       ].join("；");
     }).join("\n");
@@ -8482,6 +8487,108 @@
     };
   }
 
+  /* ===== 出去玩 AI ===== */
+
+  function buildOutingContextPrompt(outing) {
+    if (!outing || outing.status !== "active") return "";
+    return [
+      "",
+      "O. 当前出行情境 outingContext",
+      "这是独立的出去玩模块，不是微信私聊，也不是群聊。",
+      "用户和同行对象正在现实地点活动。",
+      "同行对象类型：" + (outing.companion && outing.companion.type || ""),
+      "同行对象名称：" + (outing.companion && outing.companion.name || ""),
+      "同行对象人设：" + (outing.companion && outing.companion.persona || "普通临时 NPC"),
+      "地点：" + (outing.placeName || ""),
+      "地点描述：" + (outing.placeDescription || ""),
+      "已花费：¥" + Number(outing.spentTotal || 0).toFixed(2),
+      "最近出行事件：",
+      (outing.events || []).slice(-8).map(function (event, index) {
+        return (index + 1) + ". " + (event.content || "");
+      }).join("\n") || "暂无",
+      "最近购买：",
+      (outing.purchases || []).slice(-5).map(function (item, index) {
+        return (index + 1) + ". " + item.itemName + " / ¥" + Number(item.price || 0).toFixed(2);
+      }).join("\n") || "暂无",
+      "输出要求：",
+      "1. 像现实生活一样写现场反应，有环境、人流、声音、距离、付款、排队、手里拿着的东西。",
+      "2. 不要说系统、账单、记录、模块。",
+      "3. 如果买了东西，同行对象要按人设反应：接过、嫌弃、提醒、抢着付、吐槽、沉默、照顾都可以。",
+      "4. NPC 可以自然互动，但不要写成联系人私聊。",
+      "5. 如果同行对象是角色，必须按角色人设反应。",
+      "6. 不要写旅游攻略，要写正在现场发生的互动。",
+      "7. 返回 JSON，格式：",
+      '{"events":[{"type":"action","content":"..."},{"type":"speech","speakerName":"...","content":"..."}],"memories":[{"characterId":"...","content":"..."}]}'
+    ].join("\n");
+  }
+
+  function sendOutingRequest(context) {
+    var outing = context && context.outing;
+    var trigger = context && context.trigger || "";
+    if (!outing) return Promise.resolve(null);
+
+    var settings = window.AppStorage && window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
+    var profile = window.AppStorage && window.AppStorage.getActiveApiProfile ? window.AppStorage.getActiveApiProfile() : null;
+    if (!profile || !profile.apiUrl || !profile.apiKey) {
+      return Promise.resolve(null);
+    }
+
+    var systemPrompt = [
+      "你是一个专门负责「出去玩」模块的叙事引擎。",
+      "你的任务是根据同行对象人设和地点，生成真实的现场互动场景。",
+      buildOutingContextPrompt(outing)
+    ].join("\n");
+
+    var userMessage = trigger
+      ? "当前触发事件：" + trigger + "。请生成同行对象的现场反应和环境描写。"
+      : "请根据当前出行情境，生成一段自然的现场互动。";
+
+    var messages = [
+      { role: "system", content: systemPrompt },
+      { role: "user", content: userMessage }
+    ];
+
+    var url = buildChatCompletionsUrl(profile.apiUrl);
+    var requestBody = {
+      model: profile.modelName || "gpt-4o-mini",
+      messages: messages,
+      temperature: Number(profile.temperature) || 0.85,
+      max_tokens: 600,
+      stream: false
+    };
+
+    return fetch(url, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: "Bearer " + profile.apiKey
+      },
+      body: JSON.stringify(requestBody)
+    }).then(function (response) {
+      if (!response.ok) return null;
+      return response.json();
+    }).then(function (data) {
+      if (!data) return null;
+      var raw = extractAiText(data);
+      if (!raw) return null;
+      var jsonMatch = raw.match(/\{[\s\S]*\}/);
+      if (!jsonMatch) {
+        return { events: [{ type: "action", content: raw }], memories: [] };
+      }
+      try {
+        var parsed = JSON.parse(jsonMatch[0]);
+        return {
+          events: Array.isArray(parsed.events) ? parsed.events : [],
+          memories: Array.isArray(parsed.memories) ? parsed.memories : []
+        };
+      } catch (e) {
+        return { events: [{ type: "action", content: raw }], memories: [] };
+      }
+    }).catch(function () {
+      return null;
+    });
+  }
+
   window.AIService = {
     MISSING_SETTINGS_MESSAGE: MISSING_SETTINGS_MESSAGE,
     buildSystemPrompt: buildSystemPrompt,
@@ -8509,6 +8616,8 @@
     runReplyTextureSmokeTest: runReplyTextureSmokeTest,
     createReplyTextureStats: createReplyTextureStats,
     summarizeReplyTextureStats: summarizeReplyTextureStats,
-    normalizeBodyStateWithContext: normalizeBodyStateWithContext
+    normalizeBodyStateWithContext: normalizeBodyStateWithContext,
+    sendOutingRequest: sendOutingRequest,
+    buildOutingContextPrompt: buildOutingContextPrompt
   };
 })(window);
