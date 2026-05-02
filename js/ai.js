@@ -959,6 +959,7 @@
     var recentCharacterLinesText = String(source.recentCharacterLinesText || "").trim();
     var relationshipPhaseHint = String(source.relationshipPhaseHint || "").trim();
     var lastReplyAngle = detectLastReplyAngle(previousReplyText);
+    var isOfflineMode = mode === "offline";
 
     return [
       "",
@@ -966,14 +967,22 @@
       "内部校准，不要输出：",
       "校准角色：" + valueOrFallback(profile.name) + (profile.id ? " / " + profile.id : ""),
       "本轮用户输入：" + (latestUserInput ? limitText(latestUserInput, 160) : "暂无"),
-      "上一轮角色余波：" + (previousReplyText ? limitText(previousReplyText, 180) : "暂无"),
+      previousReplyText
+        ? (isOfflineMode
+            ? "上一轮角色余波（只用于避免断片和复读；除非用户明确提到刚才/继续，否则不要主动拿出来质问用户）：" + limitText(previousReplyText, 180)
+            : "上一轮角色余波：" + limitText(previousReplyText, 180))
+        : "上一轮角色余波：暂无",
       "最近心声惯性：" + (recentHeartVoiceText ? limitText(recentHeartVoiceText, 220) : "暂无"),
       recentCharacterLinesText ? "本次会话角色已说过的近句（禁止复刻句式、开头和结尾）：\n" + recentCharacterLinesText : "",
       recentCharacterLinesText ? "角色在本次会话里已经建立的相处惯性（必须延续，不能本轮重置）：\n" + limitText(recentCharacterLinesText, 400) : "",
       relationshipPhaseHint ? "当前关系深度/阶段提示（不要突然跳段或归零）：\n" + relationshipPhaseHint : "",
       "语气标签：" + (voiceProfile.tags.length ? voiceProfile.tags.join(" / ") : "无明确标签，按原文人设"),
       "原文人设证据：" + (personaEvidence.length ? personaEvidence.join(" / ") : "暂无明确短句"),
-      lastReplyAngle ? "上一轮主要切入角度：" + lastReplyAngle + "；如果上一轮角度已经用得很满，本轮优先换一个不同角度；但不要为了换角度违背角色人设和最近心声。冷淡可继续冷处理，强势可继续压节奏，黏人可继续追问，嘴硬可继续绕着说，但句式要变、不能复读。" : "",
+      lastReplyAngle
+        ? (isOfflineMode
+            ? "上一轮主要切入角度：" + lastReplyAngle + "；本轮只用于避开复读。用户没有明确提到刚才/继续时，不要继续围绕这个角度追问。"
+            : "上一轮主要切入角度：" + lastReplyAngle + "；如果上一轮角度已经用得很满，本轮优先换一个不同角度；但不要为了换角度违背角色人设和最近心声。冷淡可继续冷处理，强势可继续压节奏，黏人可继续追问，嘴硬可继续绕着说，但句式要变、不能复读。")
+        : "",
       "请先按这个角色的人设，想出面对“本轮用户输入”的 3 种可能反应：",
       "1. 本能反应：脱口而出的第一句，会不会冷、急、酸、嘴硬、黏、压人？",
       "2. 关系反应：这个角色想拉近、拉远、压住、试探、转移还是清算？",
@@ -4207,6 +4216,25 @@
       }
     }
 
+    var previousCallbackCount = countOfflinePreviousCallbackTemplates(normalizedEvents);
+    var userInputTextInline = String(context.userInput || "").trim();
+    var allowPreviousCallbackInline = hasOfflineRecallIntent(userInputTextInline);
+
+    if (previousCallbackCount > 0 && !allowPreviousCallbackInline) {
+      var repairedCallbackEvents = await repairOfflineEvents(
+        Object.assign({}, context, { offlineRepairReason: "offline-overuses-previous-callback" }),
+        normalizedEvents,
+        "offline-overuses-previous-callback"
+      );
+      if (repairedCallbackEvents && repairedCallbackEvents.length) {
+        normalizedEvents = repairedCallbackEvents;
+      } else {
+        normalizedEvents = normalizedEvents.filter(function (event) {
+          return !hasOfflinePreviousCallbackTemplate(event && event.content);
+        });
+      }
+    }
+
     return {
       events: normalizedEvents,
       thoughts: thoughts,
@@ -4214,6 +4242,50 @@
       memorySummary: normalizeMemorySummaryResult(parsed && parsed.memorySummary),
       bodyState: normalizeBodyStateResult(parsed && parsed.bodyState)
     };
+  }
+
+  function hasOfflineRecallIntent(text) {
+    return /刚才|刚刚|之前|前面|上一轮|上次|继续|接着|那句话|那个动作|刚才那股|气势|上一题|最后一道题|刚才说到/.test(String(text || ""));
+  }
+
+  function hasMeaningfulOfflineUserInput(text) {
+    var value = String(text || "").trim();
+    if (!value) return false;
+    if (/^(继续|推进|下一步|然后呢|接着)$/i.test(value)) return false;
+    return value.length > 0;
+  }
+
+  function buildOfflineCurrentInputPriorityRules(userInput) {
+    var input = String(userInput || "").trim();
+    var hasRecall = hasOfflineRecallIntent(input);
+    var hasNewInput = hasMeaningfulOfflineUserInput(input);
+
+    return [
+      "",
+      "【线下当前输入优先 currentOfflineInputPriority】",
+      "线下模式要保持场景连续，但不能每轮默认翻旧账。",
+      "本轮用户输入：" + (input || "无明确输入"),
+      hasNewInput
+        ? "用户本轮给了新的输入。角色必须优先回应这句话本身，不要自动回到上一轮的气势、上一道题、刚才的样子。"
+        : "用户本轮没有明确新内容，可以自然延续当前场景，但也不要复读上一轮台词。",
+      hasRecall
+        ? "用户明确提到了刚才/继续/上一题/气势等，可以承接前文，但仍然要换说法，不要复读同一种追问。"
+        : "用户没有明确提到刚才、继续、上一题或气势时，禁止主动使用'刚才那股气势去哪了'这类追旧账句式。",
+      "角色可以记得上一轮，但只能把它当作背景状态，不要每轮都拿出来质问用户。",
+      "如果要承接前文，优先承接动作、距离、物品、场景状态；少用'刚才你怎样怎样'这种台词。",
+      "如果用户本轮输入是一个新动作、新问题、新情绪，第一反应必须落到新输入上。",
+      "禁止默认句式：'刚才……去哪了'、'刚才那股气势……'、'刚才那样不是很……吗'、'这会儿倒是……'。"
+    ].join("\n");
+  }
+
+  function hasOfflinePreviousCallbackTemplate(text) {
+    return /刚才.{0,18}(气势|样子|劲儿|架势|模样).{0,12}(哪|去|没了|不见)|刚才.{0,16}怎么.{0,10}不|这会儿倒是|刚才.{0,12}不是.{0,12}吗|刚才.{0,12}挺/.test(String(text || ""));
+  }
+
+  function countOfflinePreviousCallbackTemplates(events) {
+    return (Array.isArray(events) ? events : []).reduce(function (count, event) {
+      return count + (hasOfflinePreviousCallbackTemplate(event && event.content) ? 1 : 0);
+    }, 0);
   }
 
   function buildOfflineSceneContinuityRules(recentSceneHint) {
@@ -4225,7 +4297,8 @@
       "前文在室内，下一轮不能突然室外；前文在桌边/床边/门口/走廊/房间，下一轮必须继续同一空间。",
       "禁止无衔接地写“天亮了”“阳光照进来”“来到教室”“回到家”“坐在咖啡馆”。",
       "如果需要换场景，必须先用 1-2 条 action 写清收拾东西、起身离开、走过走廊、推开门、车程/路程或时间流逝。",
-      "用户没有输入新动作时，只推进当前场景里的动作、距离、沉默、话题和情绪，不要重开一幕。"
+      "用户没有输入新动作时，可以推进当前场景里的动作、距离、沉默、话题和情绪，不要重开一幕。",
+      "场景连续指时间、地点、站位、动作状态连续，不等于台词每轮都翻旧账。"
     ].filter(Boolean).join("\n");
   }
 
@@ -4422,6 +4495,7 @@
             "speech 内容：只写说出口的话，台词要符合角色人设，不要全部温柔解释。",
             "不要使用固定模板台词，如“过来”“看着我”“别让我猜”“别逞强”“先回我”；台词要源自当前角色与情境。",
             "action 描写要连贯且不要重复同一动作细节，避免使用简单套话式动作。",
+            buildOfflineCurrentInputPriorityRules(context.userInput),
             buildOfflineSceneContinuityRules(recentSceneHint),
             "如果线下剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
             "memories 是长期记忆，不要为了凑数额外生成。",
@@ -4520,8 +4594,11 @@
           "7. repair 只补动作和节奏，不得为了补 action 改时间、地点、光线、天气、站位或正在做的事；必须保留原场景。",
           "8. 前文是晚上不能修成白天/清晨/阳光；前文在室内、桌边、床边、门口或走廊，不能修成室外、教室、咖啡馆或其他新地点。",
           "9. 如果原 events 已经换场景但没有过渡，只能补 1-2 条过渡 action（收拾东西、起身离开、走过走廊、推开门、车程/路程/时间流逝），不能直接硬切。",
-          "10. 只输出修复后的完整 events 数组，JSON 格式：{\"events\":[...]}"
-        ].join("\n")
+          "10. 只输出修复后的完整 events 数组，JSON 格式：{\"events\":[...]}",
+          reason === "offline-overuses-previous-callback"
+            ? "\n本次修复原因：线下回复过度追问上一轮/刚才状态。\n用户本轮没有明确要求回到刚才，所以不要再写'刚才那股气势去哪了''刚才怎样怎样''这会儿倒是……'。\n保留当前场景、人物站位和动作连续性，但台词必须优先回应用户本轮输入。\n把追旧账句式改成：当前动作反应、沉默、短句、转移视线、继续当前任务、或符合人设的新台词。\n不要改变世界书、人设、场景位置。"
+            : ""
+        ].filter(Boolean).join("\n")
       },
       {
         role: "user",
@@ -4605,6 +4682,25 @@
       var repairedEvents = await repairOfflineEvents(context, normalizedEvents, quality.reason);
       if (repairedEvents && repairedEvents.length) {
         normalizedEvents = repairedEvents;
+      }
+    }
+
+    var previousCallbackCountOff = countOfflinePreviousCallbackTemplates(normalizedEvents);
+    var userInputTextOff = String(context.userInput || "").trim();
+    var allowPreviousCallbackOff = hasOfflineRecallIntent(userInputTextOff);
+
+    if (previousCallbackCountOff > 0 && !allowPreviousCallbackOff) {
+      var repairedCallbackEventsOff = await repairOfflineEvents(
+        Object.assign({}, context, { offlineRepairReason: "offline-overuses-previous-callback" }),
+        normalizedEvents,
+        "offline-overuses-previous-callback"
+      );
+      if (repairedCallbackEventsOff && repairedCallbackEventsOff.length) {
+        normalizedEvents = repairedCallbackEventsOff;
+      } else {
+        normalizedEvents = normalizedEvents.filter(function (event) {
+          return !hasOfflinePreviousCallbackTemplate(event && event.content);
+        });
       }
     }
 
@@ -4807,6 +4903,7 @@
             "speech 内容：只写说出口的话，台词要符合角色人设，不要全部温柔解释。",
             "不要使用固定模板台词，如“过来”“看着我”“别让我猜”“别逞强”“先回我”；台词要源自当前角色与情境。",
             "action 描写要连贯且不要重复同一动作细节，避免使用简单套话式动作。",
+            buildOfflineCurrentInputPriorityRules(context.userInput),
             buildOfflineSceneContinuityRules(recentSceneHint),
             buildOfflineCausalLogicRules(),
             "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。"
