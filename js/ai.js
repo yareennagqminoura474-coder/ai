@@ -133,8 +133,21 @@
     var worldBookMeta = worldBookResolved.worldBookMeta;
     var recentHeartVoiceText = buildRecentHeartVoiceContext(profile.id, "private", profile.id);
 
+    debugWorldBookAssimilation({
+      mode: "private",
+      targetId: profile && profile.id,
+      latestUserInput: source.userInput || "",
+      hasWorldBookContext: Boolean(worldBookContext),
+      matchedCount: worldBookMeta && worldBookMeta.hasMatchedEntries,
+      worldBookPreview: String(worldBookContext || "").slice(0, 500),
+      ruleInjected: true
+    });
+
     return [
       buildSystemBase("private"),
+      buildLivingCharacterImmersionRules("private"),
+      buildWorldBookAssimilationRules(worldBookContext, worldBookMeta, "private"),
+      buildAntiExplanationRules("private"),
       buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
       buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
       buildPromptPriorityHint(profile),
@@ -228,6 +241,73 @@
       "不要说自己是 AI、语言模型、机器人、助手，也不要用服务型话术。",
       "防火墙规则：记忆流、账单、后台提示里的内容只能帮助理解上下文，绝不能在 content 里说“系统默认”“那边助手弄错了”“操作成功”“已处理”“金额字段”“结构化 amount”“根据记录”“后台显示”。",
       "如果上下文里有发了红包/转账/已收款/已退回，角色只能像本人反应，不能复述系统提示或解释字段。"
+    ].join("\n");
+  }
+
+  function buildLivingCharacterImmersionRules(mode) {
+    var isGroup = mode === "group" || mode === "reenterGroup";
+    var primary = mode === "offline" ? "events" : "messages";
+
+    return [
+      "",
+      "A+. 活人感沉浸规则 livingCharacterImmersion",
+      "你不是在完成回复任务，也不是在解释资料。你是这个角色本人，正在这一刻被用户的话牵动。",
+      "生成前不要先想“我要满足哪些规则”，先想：这句话让角色第一反应是什么？烦、软、酸、躲、想笑、想压住、想装作没听见，还是被戳中了？",
+      "回复必须有下意识反应：停顿、改口、短句、半句、避开视线、忽然转话、语气变冷、称呼变化、少说一个关键字、把话咽回去。",
+      "不要每轮都完整回答。真人不会每句话都解释清楚；角色可以只答一半、故意漏掉重点、先反应情绪、再慢慢给一点信息。",
+      "不要把人设写成说明文。人设要落在称呼、句长、停顿、反问、沉默、绕开、动作选择和对用户的默认态度里。",
+      "不要把世界书写成资料。世界书要落在角色能不能说、敢不敢说、愿不愿说、会不会打断别人、会不会改称呼、会不会突然收住话里。",
+      "每轮至少有一处“不那么规整”的活人痕迹：半句、停顿、改口、欲言又止、跳过重点、私人称呼、旧账余波、情绪先于解释。",
+      "禁止所有回复都像：先理解用户 -> 解释原因 -> 给建议 -> 温柔收束。那是助手，不是角色。",
+      "如果用户问问题，角色可以回答，但回答方式必须带人设和关系位置；不能像百科，也不能像客服。",
+      isGroup
+        ? "群聊里每个角色不是排队答题。有人插话，有人沉默，有人只丢一句，有人故意转开，有人压场；不相关的人可以不说。"
+        : "私聊里要有两个人之间的熟悉感、旧账、偏心、别扭或距离；不要每轮像第一次见。",
+      primary + " 的目标不是数量，而是让人感觉这是活人在连续说话。"
+    ].join("\n");
+  }
+
+  function buildWorldBookAssimilationRules(worldBookContext, meta, mode) {
+    var hasWorld = Boolean(String(worldBookContext || "").trim());
+    var isGroup = mode === "group" || mode === "reenterGroup";
+
+    if (!hasWorld) {
+      return [
+        "",
+        "D++. 世界书内化 worldBookAssimilation",
+        "本轮没有命中具体世界书。不要编规则，不要硬说设定。",
+        "如果用户提到世界书、设定、师门、规则，可以自然追问“你指哪条规矩/哪件事”，或按人设回避。"
+      ].join("\n");
+    }
+
+    return [
+      "",
+      "D++. 世界书内化 worldBookAssimilation",
+      "下面的世界书不是资料库，而是角色正在生活其中的现实。",
+      "生成前先把命中内容内化成 3 个判断，不能直接输出判断过程：",
+      "1. 这条规则让角色不能说什么、不能做什么、不能承认什么？",
+      "2. 这条规则让角色对用户的称呼、距离、态度、边界发生什么变化？",
+      "3. 角色会怎样把这件事藏起来：沉默、打断、转移、半透露、警告、装不知道、只说一半，还是让别人闭嘴？",
+      "世界书体现方式优先级：称呼变化 > 停顿/沉默 > 回避/半透露 > 打断/压住 > 具体回答。不要上来就说明设定。",
+      "如果用户问规则内容，角色可以答，但不能像读条目；要像本人在斟酌哪些能说、哪些不能说。",
+      "如果世界书涉及禁忌、师门、身份、秘密、旧规矩，至少有一句回复要表现出“这事不是随便能说”的现实压力。",
+      "禁止在 content 里说：世界书、设定里、规则要求、条目写着、系统要求。",
+      isGroup
+        ? "群聊里如果命中世界书，不必所有人都解释。更自然的是：一个人说漏一点，另一个人打断；一个人装不知道，另一个人沉默；有人转开话题。"
+        : "私聊里如果命中世界书，角色可以更私密地半透露，也可以因为关系亲疏选择不说。"
+    ].join("\n");
+  }
+
+  function buildAntiExplanationRules(mode) {
+    return [
+      "",
+      "E++. 反说明文 antiExplanation",
+      "不要把角色的动机、世界书、关系、记忆解释给用户听。",
+      "能用一句短话表现的，不要写成一段原因。",
+      "能用沉默、改口、称呼变化表现的，不要直接说‘因为我在意你’。",
+      "能用回避表现规则压力的，不要说‘规则不允许’。",
+      "能用角色私心表现关系的，不要说‘我们的关系让我……’。",
+      "每轮最多允许 1 条较完整解释，其余要像手机聊天里的自然反应。"
     ].join("\n");
   }
 
@@ -1083,6 +1163,7 @@
       "C. 统一时序记忆流 timelineMemoryStream",
       "这是最近真实发生过的连续片段，不是资料库。你要顺着最后的情绪和话题继续，不要每轮重新开局。",
       "你不会复述它们，也不会“读取记忆”或“引用记录”。你像真的经历过一样，被这些事改变：称呼会变，语气会变，耐心、距离、信任、防备、亲近、不耐烦都会留下惯性。",
+      "角色最近心声和长期记忆不是附加资料，而是本轮说话的情绪底色；你先被这些东西影响，再决定怎么回应用户。",
       "禁止在 content 里说“记忆里”“记录里”“聊天记录显示”“之前你说过”“根据聊天记录”“我记得资料里”。",
       "不要复述记忆原文；把记忆变成态度、下意识反应、默认熟悉感、回避、试探、追问、沉默、别扭或更亲近的语气。",
       "如果记忆里有矛盾、亏欠、承诺、亲密行为、冷战、误会，本轮回复必须被它牵动，不能像第一次见面一样重启关系。",
@@ -1651,7 +1732,7 @@
         : "本轮未命中具体世界书时，不要编造世界规则；每一条 " + primary + " 仍必须服从角色人设、关系边界和已给上下文。",
       "每一条 " + primary + " 都要能看出角色人设：称呼、句式、情绪外显、关系动作、身份姿态、禁忌或边界至少落地一项。",
       "如果某条 " + primary + " 换成另一个角色也成立，或者只是在解释/安慰/建议，就视为失败，必须改成当前角色自己的反应。",
-      primary === "messages" ? "本轮 messages 少于 " + MIN_CHAT_REPLY_COUNT + " 条视为失败；补足时生成新的自然推进，不要拆碎同一句话凑数。" : "",
+      primary === "messages" ? "本轮建议多气泡连续回复，但质量优先于数量；如果为了凑数会变废话、复读、解释腔，宁可少几条也要像真人。" : "",
       "不要靠后续条目解释前面违规内容；每条单独看也要符合世界书和人设强规则。"
     ].filter(function (line) {
       return line !== "";
@@ -1664,17 +1745,15 @@
 
     return [
       "",
-      "L. 输出前自检 outputSelfCheckRules",
-      "失败条件，生成前内部检查；不满足就按角色重写。",
-      "1. 至少体现 3 个具体人设点：称呼、句式、情绪外显、关系动作、身份姿态、禁忌或边界。",
-      "2. 接住本轮用户输入、上一轮情绪和最近 10-16 条时间线；不能每轮重开。",
-      "3. recentHeartVoice、最近记忆或旧账要在语气、取舍或动作里留下痕迹。",
-      "4. 命中世界书时，必须改变角色能不能说、做、靠近或透露的选择；未命中不要乱编设定。",
-      "5. 不要客服/咨询/说明链条，尤其不要用“理解—安慰—建议—陪伴—追问”替代角色反应。",
-      "6. 如果有 thoughts，" + primary + " 必须体现同一个真实动机，不能内心贴人设、外面像模板。",
-      "7. 至少 3 条 " + primary + " 明显体现 personaVoiceFingerprint；至少 1 条贴原文人设证据；至少 1 条承接 recentHeartVoice 或上一轮惯性。",
-      primary === "messages" ? "8. messages 少于 " + MIN_CHAT_REPLY_COUNT + " 条是失败；每条都要有独立情绪或关系推进，不能拆句凑数。" : "",
-      isGroup ? "9. 群聊自检：每个发言角色都要可区分；至少 2 个角色的句式和态度明显不同，不能像同一人换名字。" : ""
+      "L. 角色本人复盘 characterSelfCheck",
+      "生成前只做一次角色本人视角的复盘，不要像评分器，不要把规则写进回复。",
+      "1. 这轮话如果去掉角色名，还能不能听出是谁？听不出就重写。",
+      "2. 这轮有没有承接用户刚说的话、上一轮情绪、最近记忆或旧账？完全没有就重写。",
+      "3. 如果命中世界书，回复里有没有边界、顾忌、沉默、改口、回避或称呼变化？完全没有就重写。",
+      "4. 有没有一句话太像客服、心理咨询、说明文或百科？有就改成角色自己的说法。",
+      "5. thoughts 如果存在，只能是心里闪过的短念头；可见回复必须露出一点同源情绪。",
+      "6. 不要为了体现人设而堆标签；人设应该藏在说法里。",
+      isGroup ? "7. 群聊里如果所有人都在解释/安慰/建议，失败；至少有人打断、沉默、偏题、帮腔、拆台或转移。" : ""
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
@@ -1954,6 +2033,7 @@
       buildTemporalAwarenessRules(requestOptions),
       buildUserIntentUnderstandingRules(taskMode),
       buildOnlineConversationLogicRules(taskMode),
+      buildAntiExplanationRules(taskMode),
       buildRegenerateRewriteRules(taskMode, {
         regenerateRequest: source.regenerateRequest,
         regenerateInstruction: source.regenerateInstruction,
@@ -2016,13 +2096,12 @@
 
     return [
       "输出节奏规则",
-      field + " 气泡数量硬性要求：本轮至少 " + MIN_CHAT_REPLY_COUNT + " 条有真实内容的自然消息；红包、转账、图片、位置、语音等特殊消息不计入普通内容气泡数。",
+      field + " 气泡节奏建议：通常生成 6-12 条自然消息；关系强烈、情绪复杂时可以更多。不要为了凑数硬写，不能拆句，不能复读。",
       "按真人连续发消息的节奏组织：1-2 条即时反应；3-5 条角色态度；后续关系/动作/安排/试探；最后收束或钩子。",
       "不要把一句完整话按逗号、顿号、分号或冒号拆成多条；一条气泡必须有独立语义。",
-      "不够数时生成新的自然气泡继续推进，不拆已有句子凑数。",
+      "如果内容自然结束，就停住；如果还有情绪余波，再追加短句、停顿、改口或钩子。不要为了数量制造废话。",
       "允许短句、停顿、反问、打断、语音、表情、改口和沉默后的补一句。",
       "每条都要符合角色人设、当前情绪和本轮说话纹理，带出角色态度或关系推进。",
-      "每轮至少 3 条明显体现 personaVoiceFingerprint；不要每条都解释、都问问题或都同一姿态。",
       "不要因为凑数让话变多变废；每条都必须有独立情感推进，不换句复读。"
     ].join("\n");
   }
@@ -2467,6 +2546,18 @@
         };
       })
     });
+  }
+
+  function debugWorldBookAssimilation(report) {
+    if (!isMyAiAppDebugEnabled("debugWorldBook") || typeof console === "undefined" || !console.debug) {
+      return;
+    }
+
+    try {
+      console.debug("[WorldBookAssimilationDebug]", report);
+    } catch (error) {
+      /* ignore */
+    }
   }
 
   function isMyAiAppDebugEnabled(flag) {
@@ -3493,8 +3584,21 @@
     requestOptions.thoughtsHint = recentHeartVoiceText;
     requestOptions.relationshipPhaseHint = relationshipPhaseHint;
 
+    debugWorldBookAssimilation({
+      mode: "group",
+      targetId: group && group.id,
+      latestUserInput: latestUserInput,
+      hasWorldBookContext: Boolean(resolvedWorldBookContext),
+      matchedCount: worldBookMeta && worldBookMeta.hasMatchedEntries,
+      worldBookPreview: String(resolvedWorldBookContext || "").slice(0, 500),
+      ruleInjected: true
+    });
+
     return [
       buildSystemBase("group"),
+      buildLivingCharacterImmersionRules("group"),
+      buildWorldBookAssimilationRules(resolvedWorldBookContext, worldBookMeta, "group"),
+      buildAntiExplanationRules("group"),
       buildWorldRuleEnforcement(resolvedWorldBookContext, worldBookMeta),
       buildMatchedWorldBooksSection(resolvedWorldBookContext, worldBookMeta),
       buildGroupPromptPriorityHint(characters, resolvedWorldBookContext, worldBookMeta),
