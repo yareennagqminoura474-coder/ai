@@ -4,9 +4,9 @@
   var MISSING_SETTINGS_MESSAGE = "请先到设置页填写 API 地址、API Key 和模型名称。";
   var MIN_CHAT_REPLY_COUNT = 10;
   var MAX_CHAT_REPLY_COUNT = 50;
-  var MAIN_HISTORY_WINDOW = 16;
-  var WORLD_HISTORY_WINDOW = 10;
-  var CHARACTER_LINE_HISTORY_WINDOW = 20;
+  var MAIN_HISTORY_WINDOW = 36;
+  var WORLD_HISTORY_WINDOW = 20;
+  var CHARACTER_LINE_HISTORY_WINDOW = 40;
   var CHARACTER_LINE_EXTRACT_LIMIT = 12;
   var HEART_VOICE_FETCH_LIMIT = 20;
   var HEART_VOICE_CONTEXT_LIMIT = 5;
@@ -940,9 +940,11 @@
       "可控制角色：" + (ids || "本轮传入的群成员"),
       "禁止控制用户：不要替用户发言、行动、收钱、退钱、道歉、沉默表态或解释动机；只能让群成员对用户已经发出的内容反应。",
       "不要平均轮流。允许插话、打断、沉默、帮腔、拆台、压场、转移话题；强势角色可以压场，冷淡角色可以少说，黏人角色可以追着问，嘴硬角色可以绕着说。",
-      "每轮至少 2 个发言角色的句式和态度要明显不同；如果去掉名字后分不清是谁说的，必须重写。",
-      "冷淡角色可以只短短插一句，不必为了凑数变话痨；强势角色可以压场；黏人角色可以追问或靠近；嘴硬角色可以绕着说；敌对角色可以讽刺或试探。",
-      "如果所有角色都在“理解—安慰—建议”，失败；如果所有角色像同一个人换名字，失败。"
+      "每轮至少 2 个发言角色的句式和态度要明显不同；如果去掉名字后分不清是谁说的，必须重写.",
+      "冷淡角色可以只短短插一句，不必为了凑数变话痨；强势角色可以压场；黏人角色可以追问或靠近；嘴硬角色可以绕着说；敌对角色可以讽刺或试探.",
+      "与本轮用户输入或命中世界书内容明显无关的角色，可以沉默不发言，不要为了凑 10 条让所有角色都变话痨.",
+      "有世界书关联的角色优先发言，没有关联的角色可以只旁观一句或保持沉默.",
+      "如果所有角色都在”理解—安慰—建议”,失败;如果所有角色像同一个人换名字,失败."
     ].join("\n");
   }
 
@@ -1107,6 +1109,27 @@
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
+  }
+
+  function buildLongRangeMemoryContextSection(options) {
+    var source = options || {};
+    var text = String(source.memoryContextText || source.memoryContextPackText || "").trim();
+
+    if (!text) {
+      return "";
+    }
+
+    return [
+      "",
+      "C++. 长程连续记忆 longRangeMemoryContext",
+      text,
+      "长程记忆执行规则：",
+      "1. 这些内容不是资料库，而是角色经历过的事。",
+      "2. 角色不能说'我查到/记录显示/记忆包里'，只能自然表现为记得。",
+      "3. 用户问前文相关问题时，先从这里找答案，不要装不知道。",
+      "4. 如果长程记忆和最近 3 条聊天冲突，以最近 3 条为准，但不能直接抹掉旧事实。",
+      "5. 如果这里有未解决事项，本轮至少一条回复要体现余波。"
+    ].join("\n");
   }
 
   function buildPrivateMemoryBridgeSection(text) {
@@ -1498,7 +1521,22 @@
       source.latestUserInput ? "本轮用户输入：" + source.latestUserInput : "本轮用户输入：暂无。",
       source.worldBookContext ? "本轮世界书状态：" + source.worldBookContext : "本轮未命中世界书或未绑定世界书。",
       source.characterPersonaText ? "角色人设：" + source.characterPersonaText : "角色人设：暂无。",
-      source.participantPersonaText ? "群成员人设：" + source.participantPersonaText : ""
+      source.participantPersonaText ? "群成员人设：" + source.participantPersonaText : "",
+      source.mode === "group" ? [
+        "这是群聊 repair。",
+        "必须保留群聊 JSON messages 格式。",
+        "每条 message 必须有正确 characterId / characterName / type / content。",
+        "修复目标：",
+        "1. 让不同角色明显像不同的人。",
+        "2. 如果命中世界书，至少 2 条 messages 体现世界书影响。",
+        "3. 不要所有角色都解释、安慰、建议。",
+        "4. 不要把世界书当资料复述，不要说'世界书/设定里'。",
+        "5. 世界书限制透露时，用回避、打断、沉默、警告、半透露或转移表现。",
+        "6. 保留已有合理消息，只改掉不贴人设、客服味、看不出世界书影响的部分。",
+        reason === "worldbook-impact-not-visible" ? "本次主要修复原因：命中世界书但消息里看不出任何影响，必须让至少 2 条消息体现世界书边界或规则的现实感。" : "",
+        reason === "group-persona-not-distinct" ? "本次主要修复原因：各角色语气和句式太相似，必须让每个角色的声音、态度、立场明显不同。" : "",
+        reason === "too-generic-assistant-tone" ? "本次主要修复原因：多条消息有客服/助手语气，必须换成角色自己的说话方式，不能'我理解/慢慢来/没关系/我会陪着你'。" : ""
+      ].filter(Boolean).join("\n") : ""
     ].filter(function (line) { return line !== "" && line != null; });
 
     var userLines = [
@@ -1904,6 +1942,7 @@
       source.sceneText ? "当前场景：\n" + source.sceneText : "",
       source.beforeContext || "",
       worldBookSection,
+      buildLongRangeMemoryContextSection(source.requestOptions || source),
       source.contextLabel || "最近 10-16 条上下文：",
       source.recentHistory || "暂无",
       buildTemporalAwarenessRules(requestOptions),
@@ -1934,6 +1973,7 @@
       buildReplyRhythmRules(primaryField),
       buildMoneyBehaviorRules(source.moneyScope || modeLabel),
       buildMemorySummaryPrompt(requestOptions),
+      "如果本轮出现新的长期事实、承诺、冲突、称呼变化、关系变化、身体状态、红包/转账、世界书影响或用户偏好，请在 memories 中返回一条简短记忆；不要等到自动总结才记。memories 不要只写聊天摘要，也要写以后需要记住的事实。",
       buildBodyStatePrompt(requestOptions),
       source.afterRules || "",
       buildJsonOnlyRule(schemaText),
@@ -3080,6 +3120,16 @@
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(promptMessages.slice(-CHARACTER_LINE_HISTORY_WINDOW), profile.id, CHARACTER_LINE_EXTRACT_LIMIT));
     var timeGapInfo = detectRecentTimeGapText(promptMessages);
     var latestUserInput = getLatestUserInputForPrompt(chatHistory);
+    if (window.AppExtras && window.AppExtras.buildMemoryContextPack && profile.id) {
+      var _memPack = window.AppExtras.buildMemoryContextPack("private", profile.id, {
+        latestUserInput: latestUserInput,
+        regenerateRequest: requestOptions.regenerateRequest
+      });
+      requestOptions.memoryContextPack = _memPack;
+      requestOptions.memoryContextText = window.AppExtras.formatMemoryContextPack
+        ? window.AppExtras.formatMemoryContextPack(_memPack)
+        : "";
+    }
     var contextText = buildWorldBookDecisionContext({
       modeLabel: requestOptions.regenerateRequest ? "线上私聊重回" : (requestOptions.blockReaction ? "线上私聊 blockReaction" : "线上私聊"),
       userInput: latestUserInput,
@@ -3176,6 +3226,7 @@
           buildCharacterDecisionCore(systemMode, worldBookContext),
           buildOnlineConversationLogicRules(systemMode),
           recentHeartVoiceText,
+          buildLongRangeMemoryContextSection(requestOptions),
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
             longTermMemoryText: formatMemoryList(memories) || "暂无",
@@ -3239,6 +3290,130 @@
         })
       }
     ];
+  }
+
+  function buildGroupWorldPersonaLock(characters, worldBookContext, worldBookMeta) {
+    var hasWorld = Boolean(String(worldBookContext || "").trim());
+    var matchedCount = worldBookMeta && Number(worldBookMeta.matchedCount) || 0;
+    var members = (Array.isArray(characters) ? characters : []).map(function (character) {
+      return [
+        "角色：" + valueOrFallback(character && character.name) + " / " + valueOrFallback(character && character.id),
+        "人设原文：" + valueOrFallback(buildMergedCharacterPersona(character)),
+        "语气证据：" + (extractPersonaEvidence(character).join(" / ") || "按完整人设判断"),
+        "语气标签：" + (detectPersonaVoiceProfile(character || {}, worldBookContext || "").tags.join(" / ") || "无明确标签")
+      ].join("\n");
+    }).join("\n\n");
+
+    return [
+      "",
+      "D++. 群聊世界书与人设锁 groupWorldPersonaLock",
+      "这是群聊生成的硬约束，不是建议。",
+      "群聊里的每个角色都必须先用自己的身份、人设、关系位置和最近情绪理解世界书；不能共用一个通用人格。",
+      hasWorld
+        ? "本轮世界书已命中 " + matchedCount + " 条。命中规则必须影响至少 2 条可见 messages，影响方式可以是称呼、边界、回避、沉默、拒绝、靠近、转移、顾左右而言他、帮腔、拆台、压场或不敢说。"
+        : "本轮没有命中世界书条目；不要编世界书内容，但如果当前聊天绑定了世界书且未命中，可以自然追问用户指哪条规则/哪件事。",
+      "世界书不是资料，不要复述来源；角色只会像真的活在这些规则里一样反应。",
+      "如果世界书限制某件事不能说，群成员不能直接把秘密讲出来；应按各自人设选择回避、含糊、打断、警告、装不知道、转移或沉默。",
+      "如果世界书影响身份差、师门规矩、禁忌、关系边界、场景事实，至少一个群成员要明显被它牵动，另一个群成员可以帮腔、质疑、拆台或沉默。",
+      "如果去掉 characterName 后分不出是谁说的，失败。",
+      "如果命中世界书但 messages 完全看不出影响，失败。",
+      "",
+      "群成员人设锁：",
+      members || "暂无成员"
+    ].join("\n");
+  }
+
+  function buildGroupPromptPriorityHint(characters, worldBookContext, worldBookMeta) {
+    var hasWorld = Boolean(String(worldBookContext || "").trim());
+    var characterHints = (Array.isArray(characters) ? characters : []).map(function (character) {
+      var evidence = extractPersonaEvidence(character);
+      var tags = detectPersonaVoiceProfile(character || {}, worldBookContext || "").tags;
+      return valueOrFallback(character && character.name) + "：" +
+        (evidence.length ? "声音证据「" + evidence.slice(0, 2).join("」「") + "」" : "按完整人设") +
+        (tags.length ? "；语气标签【" + tags.slice(0, 3).join("、") + "】" : "");
+    }).join("\n");
+
+    return [
+      "",
+      "群聊本轮最重要的输入优先级：",
+      "1. 已命中的世界书强规则、禁忌、身份边界、场景事实。",
+      "2. 每个发言角色自己的核心人设、身份、关系位置和说话方式。",
+      "3. 本轮用户输入。",
+      "4. 最近群聊时间线、私聊互通、连续记忆包。",
+      "5. 最近心声和长期记忆。",
+      hasWorld
+        ? "本轮已命中世界书：至少 2 条可见 messages 必须体现世界书影响，但不能说'世界书/设定要求'。"
+        : "本轮未命中世界书：不要编世界书规则，只按人设、关系、记忆和用户输入推进。",
+      "群聊失败条件：所有角色像同一个人、只换名字；或所有人都温柔解释；或命中世界书却没人受到影响。",
+      "逐角色提醒：",
+      characterHints || "暂无"
+    ].join("\n");
+  }
+
+  function checkGroupPersonaWorldBookQuality(messages, characters, worldBookContext, worldBookMeta, latestUserInput) {
+    var list = Array.isArray(messages) ? messages : [];
+    var hasWorld = Boolean(String(worldBookContext || "").trim()) || Boolean(worldBookMeta && worldBookMeta.hasMatchedEntries);
+    var characterMap = {};
+    var speakerCounts = {};
+    var personaHits = {};
+    var worldImpactCount = 0;
+    var genericCount = 0;
+
+    (Array.isArray(characters) ? characters : []).forEach(function (character) {
+      if (character && character.id) {
+        characterMap[String(character.id)] = character;
+        personaHits[String(character.id)] = 0;
+        speakerCounts[String(character.id)] = 0;
+      }
+    });
+
+    list.forEach(function (message) {
+      var speakerId = String(message && (message.characterId || message.senderId || "") || "");
+      var text = String(message && message.content || "");
+      var character = characterMap[speakerId];
+      var evidence = extractPersonaEvidence(character || {}).join("|");
+      var voiceTags = detectPersonaVoiceProfile(character || {}, worldBookContext || "").tags.join("|");
+
+      if (speakerId) {
+        speakerCounts[speakerId] = (speakerCounts[speakerId] || 0) + 1;
+      }
+
+      if (character && (
+        (evidence && new RegExp(evidence.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).test(text))
+        || /冷|淡|强|压|嘴硬|别扭|黏|逗|讽|试探|克制|沉默|短句|不许|站住|过来|算了|随你|我不信|啧/.test(text)
+      )) {
+        personaHits[speakerId] = (personaHits[speakerId] || 0) + 1;
+      }
+
+      if (/我理解|如果你愿意|可以告诉我|慢慢来|没关系|你还好吗|我会陪着你|我们可以一起/.test(text)) {
+        genericCount += 1;
+      }
+
+      if (/不能说|不该问|规矩|师门|门里|旧规|禁忌|别提|闭嘴|换个说法|你听谁|这事不是这么问|我没法直说|别在群里说|先别说这个|有人会听见|到此为止|别碰这条线|你指哪条/.test(text)) {
+        worldImpactCount += 1;
+      }
+    });
+
+    var activeSpeakers = Object.keys(speakerCounts).filter(function (id) {
+      return speakerCounts[id] > 0;
+    });
+    var personaSpeakerCount = Object.keys(personaHits).filter(function (id) {
+      return personaHits[id] > 0;
+    }).length;
+
+    if (genericCount >= 3) {
+      return { ok: false, reason: "too-generic-assistant-tone", worldImpactCount: worldImpactCount, personaSpeakerCount: personaSpeakerCount };
+    }
+
+    if (activeSpeakers.length >= 2 && personaSpeakerCount < Math.min(2, activeSpeakers.length)) {
+      return { ok: false, reason: "group-persona-not-distinct", worldImpactCount: worldImpactCount, personaSpeakerCount: personaSpeakerCount };
+    }
+
+    if (hasWorld && worldImpactCount < 2) {
+      return { ok: false, reason: "worldbook-impact-not-visible", worldImpactCount: worldImpactCount, personaSpeakerCount: personaSpeakerCount };
+    }
+
+    return { ok: true, reason: "ok", worldImpactCount: worldImpactCount, personaSpeakerCount: personaSpeakerCount };
   }
 
   function buildGroupSystemPrompt(group, characters, sharedMemories, options) {
@@ -3315,8 +3490,9 @@
       buildSystemBase("group"),
       buildWorldRuleEnforcement(resolvedWorldBookContext, worldBookMeta),
       buildMatchedWorldBooksSection(resolvedWorldBookContext, worldBookMeta),
-      buildPromptPriorityHint(),
+      buildGroupPromptPriorityHint(characters, resolvedWorldBookContext, worldBookMeta),
       buildWorldPersonaMessageLock(resolvedWorldBookContext, groupMode),
+      buildGroupWorldPersonaLock(characters, resolvedWorldBookContext, worldBookMeta),
       buildParticipantDossier(characters, sharedMemories),
       buildGroupPersonaExecutionAnchors(characters, userContext, groupMode),
       buildGroupPersonaVoiceFingerprints(characters, userContext, groupMode, resolvedWorldBookContext),
@@ -3341,6 +3517,7 @@
         oldReplyText: requestOptions.oldReplyText
       }),
       recentHeartVoiceText,
+      buildLongRangeMemoryContextSection(requestOptions),
       buildMemoryStream({
         chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
         longTermMemoryText: (characters || []).map(function (character) {
@@ -3468,6 +3645,70 @@
       if (!result.replies.length) {
         result.replies = [{ type: "text", content: "这次没回出来，换个方式重试一下。" }];
       }
+    }
+
+    var groupPersonaWorldQuality = checkGroupPersonaWorldBookQuality(
+      result.replies,
+      characters,
+      requestOptions.worldBookContext,
+      requestOptions.worldBookMeta,
+      requestOptions.latestUserInput
+    );
+    var groupPersonaRepaired = false;
+
+    if (!groupPersonaWorldQuality.ok) {
+      var groupPersonaRepairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
+        mode: "group",
+        latestUserInput: requestOptions.latestUserInput,
+        worldBookContext: requestOptions.worldBookContext,
+        worldBookMeta: requestOptions.worldBookMeta,
+        matchedWorldBookEntries: requestOptions.matchedWorldBookEntries,
+        participantPersonaText: (characters || []).map(function (character) {
+          return [
+            "群成员：" + valueOrFallback(character && character.name),
+            "人设：" + buildMergedCharacterPersona(character),
+            "语气标签：" + detectPersonaVoiceProfile(character || {}, requestOptions.worldBookContext || "").tags.join("/")
+          ].join("\n");
+        }).join("\n\n")
+      }), result.replies, groupPersonaWorldQuality.reason);
+
+      if (Array.isArray(groupPersonaRepairMessages) && groupPersonaRepairMessages.length) {
+        result.replies = normalizeReplyList("", groupPersonaRepairMessages, normalizationSettings);
+        groupPersonaRepaired = true;
+        groupPersonaWorldQuality = checkGroupPersonaWorldBookQuality(
+          result.replies,
+          characters,
+          requestOptions.worldBookContext,
+          requestOptions.worldBookMeta,
+          requestOptions.latestUserInput
+        );
+      }
+
+      if (!groupPersonaWorldQuality.ok) {
+        var gpCleaned = filterOnlineTemplateReplies(result.replies);
+        if (gpCleaned.length) {
+          result.replies = gpCleaned;
+        }
+      }
+    }
+
+    if (localStorage.getItem("myAiApp.debugGroupPersona") === "1") {
+      console.debug("[GroupPersonaDebug]", {
+        groupId: group && group.id,
+        latestUserInput: requestOptions.latestUserInput,
+        speakers: Object.keys(result.replies.reduce(function (acc, r) {
+          if (r && r.characterId) { acc[r.characterId] = true; }
+          return acc;
+        }, {})),
+        personaSpeakerCount: groupPersonaWorldQuality.personaSpeakerCount,
+        worldImpactCount: groupPersonaWorldQuality.worldImpactCount,
+        qualityReason: groupPersonaWorldQuality.reason,
+        repaired: groupPersonaRepaired,
+        worldBookMatched: requestOptions.worldBookMeta && requestOptions.worldBookMeta.hasMatchedEntries,
+        matchedWorldBookEntries: (requestOptions.matchedWorldBookEntries || []).map(function (e) {
+          return e && (e.title || e.keyword || e.id || "");
+        })
+      });
     }
 
     debugOnlineLogicReport({
@@ -3669,6 +3910,16 @@
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(characters, promptMessages);
     var timeGapInfo = detectRecentTimeGapText(promptMessages);
     latestUserInput = getLatestUserInputForPrompt(groupHistory);
+    if (window.AppExtras && window.AppExtras.buildMemoryContextPack && group && group.id) {
+      var _grpMemPack = window.AppExtras.buildMemoryContextPack("group", group.id, {
+        latestUserInput: latestUserInput,
+        regenerateRequest: requestOptions.regenerateRequest
+      });
+      requestOptions.memoryContextPack = _grpMemPack;
+      requestOptions.memoryContextText = window.AppExtras.formatMemoryContextPack
+        ? window.AppExtras.formatMemoryContextPack(_grpMemPack)
+        : "";
+    }
     chatMemoryText = formatChatMemoryList(getChatMemoriesForPrompt("group", group && group.id, requestOptions.chatMemories));
     var groupBridgeSettings = group && group.settings && group.settings.memoryBridge || {};
     var privateBridgeText = "";
@@ -3736,6 +3987,19 @@
     requestOptions.timeGapText = timeGapInfo;
     requestOptions.timeGapInfo = timeGapInfo;
     requestOptions.privateBridgeText = privateBridgeText;
+
+    if (localStorage.getItem("myAiApp.debugWorldBook") === "1") {
+      console.debug("[WorldBook Debug][group prompt final]", {
+        groupId: group && group.id,
+        selectedWorldBookIds: selectedWorldBookIds,
+        matchedCount: worldBookMeta && worldBookMeta.matchedCount,
+        hasMatchedEntries: worldBookMeta && worldBookMeta.hasMatchedEntries,
+        reason: worldBookMeta && worldBookMeta.reason,
+        worldBookContextPreview: String(worldBookContext || "").slice(0, 800),
+        memberIds: (characters || []).map(function (c) { return c && c.id; })
+      });
+    }
+
     groupSettingsText = group && group.settings
       ? [
         "群公告：" + (group.settings.announcement || "暂无"),
@@ -3763,6 +4027,8 @@
           userInput: latestUserInput,
           worldBookContext: worldBookContext,
           selectedWorldBookIds: selectedWorldBookIds,
+          worldBookMeta: worldBookMeta,
+          matchedWorldBookEntries: matchedWorldBookEntries,
           beforeContext: [
             "群聊设置：",
             groupSettingsText || "暂无",
@@ -3784,9 +4050,18 @@
             "消息必须按真实聊天顺序排列，后一条要接住上一条。有多人自然参与即可，不要为了凑人数强行发言。",
             "不要固定轮流，不要让同一个角色包揽全部消息。允许同一个角色连续说 1 到 3 条，但随后要有其他角色接话。",
             "可以只有部分角色发言，不一定所有角色都要说话；每个角色都必须保持自己的人设，不要混淆角色身份。",
+            "冷淡角色可以只短短发一句甚至沉默不发言；强势角色可以压场；话多角色可以多说；嘴硬角色绕着说；与本轮用户输入和世界书无关的角色可以不发言，不要为了凑 10 条让所有角色都变话痨。",
             "如果最近用户在群里发了红包或转账，群成员要按各自人设决定收下或退回；可在 JSON 顶层返回 moneyDecisions 数组，也可返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
             "如果后续旧规则提到可以少回或返回空数组，请忽略；本轮必须保留至少 10 条有真实内容的自然消息，不要靠拆碎同一句话凑数。",
-            "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount()
+            "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount(),
+            "【群聊人设与世界书硬检查】",
+            "1. 每个发言角色都必须先看自己的角色人设、语气指纹和最近心声，再决定说不说、怎么说。",
+            "2. 不允许所有群成员用同一种语气、同一种句式、同一种态度。",
+            "3. 如果本轮世界书已命中条目，至少 2 条 messages 要体现世界书影响；可以是称呼、回避、沉默、打断、拒绝、帮腔、拆台、压场、转移。",
+            "4. 如果世界书限制透露身份/秘密/规则，不允许直接说破；要让角色按人设自然回避或半透露。",
+            "5. 如果某个角色人设冷淡，可以少说但不能变客服；强势角色可以压场但不能替用户发言；嘴硬角色不能直接说明文；温柔角色也不能变成通用助手。",
+            "6. 输出前自检：去掉 characterName 后，还能分辨每句话是谁说的吗？如果不能，重写。",
+            "7. 输出前自检：命中世界书时，回复里是否能看出至少一种现实边界或规则影响？如果不能，重写。"
           ].join("\n")
         })
       }
@@ -3893,6 +4168,16 @@
       : "";
     var selectedWorldBookIds = getSelectedWorldBookIds(mode, context.targetId || "", context);
     var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
+    if (window.AppExtras && window.AppExtras.buildMemoryContextPack && context.targetId) {
+      var _inlineMemPack = window.AppExtras.buildMemoryContextPack(mode, context.targetId, {
+        latestUserInput: context.userInput || "",
+        regenerateRequest: context.regenerateRequest
+      });
+      context.memoryContextPack = _inlineMemPack;
+      context.memoryContextText = window.AppExtras.formatMemoryContextPack
+        ? window.AppExtras.formatMemoryContextPack(_inlineMemPack)
+        : "";
+    }
     var contextText = buildWorldBookDecisionContext({
       modeLabel: mode === "group" ? "群聊线下推进" : "私聊线下推进",
       userInput: context.userInput || "",
@@ -3994,6 +4279,7 @@
           buildOfflineSceneContinuityRules(recentSceneHint),
           buildOfflineCausalLogicRules(),
           recentHeartVoiceText,
+          buildLongRangeMemoryContextSection(context),
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
             longTermMemoryText: participants.map(function (character) {
@@ -4270,6 +4556,16 @@
     var recentCharacterLinesText = buildRecentCharacterLinesText(extractRecentCharacterLines(offlineEvents.slice(-CHARACTER_LINE_HISTORY_WINDOW), "", CHARACTER_LINE_EXTRACT_LIMIT));
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(participants, offlineEvents);
     var timeGapInfo = detectRecentTimeGapText(offlineEvents);
+    if (window.AppExtras && window.AppExtras.buildMemoryContextPack && context.targetId) {
+      var _offMemPack = window.AppExtras.buildMemoryContextPack("offline", context.targetId, {
+        latestUserInput: context.userInput || "",
+        regenerateRequest: context.regenerateRequest
+      });
+      context.memoryContextPack = _offMemPack;
+      context.memoryContextText = window.AppExtras.formatMemoryContextPack
+        ? window.AppExtras.formatMemoryContextPack(_offMemPack)
+        : "";
+    }
     var selectedWorldBookIds = getSelectedWorldBookIds(context.mode === "group" ? "group" : "private", context.targetId || "", context);
     var worldBookDecisionText = buildWorldBookDecisionContext({
       modeLabel: context.mode === "group" ? "群聊线下推进" : "私聊线下推进",
@@ -4370,6 +4666,7 @@
           buildCharacterDecisionCore("offline", worldBookContext),
           buildOfflineSceneContinuityRules(recentSceneHint),
           recentHeartVoiceText,
+          buildLongRangeMemoryContextSection(context),
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
             longTermMemoryText: participants.map(function (character) {

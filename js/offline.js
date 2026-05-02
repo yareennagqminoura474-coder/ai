@@ -487,6 +487,7 @@
       bodyState: generationContext.bodyState,
       memorySummaryDue: generationContext.memorySummaryDue,
       memorySummaryRounds: generationContext.memorySummaryRounds,
+      memorySummarySourceText: generationContext.memorySummarySourceText,
       previousReplyText: generationContext.previousReplyText,
       rejectedReplyText: generationContext.rejectedReplyText
     });

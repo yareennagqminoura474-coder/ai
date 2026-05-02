@@ -7198,7 +7198,8 @@
       }
     } else if (targetType === "offline" && window.AppStorage.getOfflineSession) {
       session = window.AppStorage.getOfflineSession(targetId);
-      history = session && Array.isArray(session.messages) ? session.messages : [];
+      history = session && Array.isArray(session.history) ? session.history
+        : (session && Array.isArray(session.messages) ? session.messages : []);
     }
 
     history = history.filter(function (message) {
@@ -7228,6 +7229,306 @@
     }).join("\n");
   }
 
+  // ── 连续记忆包 ──────────────────────────────────────────────────────────────
+
+  function getHistoryForMemoryContext(targetType, targetId) {
+    if (targetType === "group" && window.AppStorage.getGroupChatHistory) {
+      return window.AppStorage.getGroupChatHistory(targetId) || [];
+    }
+    if (targetType === "offline" && window.AppStorage.getOfflineSession) {
+      var session = window.AppStorage.getOfflineSession(targetId);
+      return session && Array.isArray(session.history) ? session.history : [];
+    }
+    if (window.AppStorage.getChatHistory) {
+      return window.AppStorage.getChatHistory(targetId) || [];
+    }
+    return [];
+  }
+
+  function filterMemoryContextMessages(history) {
+    return (Array.isArray(history) ? history : []).filter(function (message) {
+      return message
+        && message.content
+        && message.type !== "loading"
+        && message.type !== "error"
+        && message.type !== "system"
+        && message.role !== "system"
+        && message.type !== "pat";
+    });
+  }
+
+  function getMediumRangeMessagesByUserTurns(history, maxUserTurns) {
+    var result = [];
+    var userTurns = 0;
+    var index;
+
+    for (index = history.length - 1; index >= 0; index -= 1) {
+      result.unshift(history[index]);
+      if (history[index].role === "user" || history[index].type === "user" || history[index].type === "offlineUserAction") {
+        userTurns += 1;
+        if (userTurns >= maxUserTurns) {
+          break;
+        }
+      }
+    }
+
+    return result;
+  }
+
+  function extractRecallKeywords(text) {
+    var compact = String(text || "").replace(/\s+/g, "");
+    var matches = compact.match(/[一-龥A-Za-z0-9_]{2,12}/g) || [];
+    var stop = {
+      "什么": true, "为什么": true, "怎么": true, "这个": true, "那个": true,
+      "就是": true, "然后": true, "所以": true, "但是": true, "不是": true,
+      "知道": true, "记得": true
+    };
+    return matches.filter(function (word) {
+      return word && !stop[word];
+    }).slice(0, 20);
+  }
+
+  function hasRecallIntent(text) {
+    return /刚才|之前|前面|上次|还记得|记不记得|你不是说|我不是说|那个|这件事|刚刚|后来|继续|接着|别忘了|我们说到哪/.test(String(text || ""));
+  }
+
+  function retrieveRelevantOldMessages(history, latestUserInput, options) {
+    var source = options || {};
+    var excludeRecentCount = Number(source.excludeRecentCount) || 36;
+    var limit = Number(source.limit) || 12;
+    var keywords = extractRecallKeywords(latestUserInput);
+    var recallIntent = hasRecallIntent(latestUserInput);
+    var oldMessages = history.slice(0, Math.max(0, history.length - excludeRecentCount));
+    var scored = [];
+
+    oldMessages.forEach(function (message, index) {
+      var text = String(message.content || "");
+      var score = 0;
+
+      keywords.forEach(function (keyword) {
+        if (keyword && text.indexOf(keyword) !== -1) {
+          score += 3;
+        }
+      });
+
+      if (/承诺|答应|约好|记得|喜欢|讨厌|生气|吵架|红包|转账|世界书|设定|师门|身体|疼|难受|见面|线下|拉黑|拒收/.test(text)) {
+        score += 1.5;
+      }
+
+      if (recallIntent) {
+        score += 0.5;
+      }
+
+      if (score > 0) {
+        scored.push({ message: message, index: index, score: score });
+      }
+    });
+
+    scored.sort(function (a, b) {
+      return b.score - a.score || b.index - a.index;
+    });
+
+    return scored.slice(0, recallIntent ? Math.max(limit, 18) : limit).map(function (item) {
+      return item.message;
+    }).sort(function (a, b) {
+      return (a.createdAt || 0) - (b.createdAt || 0);
+    });
+  }
+
+  function retrieveRelevantChatMemories(memories, latestUserInput, options) {
+    var source = options || {};
+    var limit = Number(source.limit) || 12;
+    var keywords = extractRecallKeywords(latestUserInput);
+    var recallIntent = hasRecallIntent(latestUserInput);
+    var scored = [];
+
+    (Array.isArray(memories) ? memories : []).forEach(function (memory, index) {
+      var text = [
+        memory.title || "",
+        memory.content || "",
+        memory.visibleSummary || "",
+        memory.mood || ""
+      ].join("\n");
+      var score = 0;
+
+      keywords.forEach(function (keyword) {
+        if (keyword && text.indexOf(keyword) !== -1) {
+          score += 4;
+        }
+      });
+
+      if (memory.type === "manual" || memory.pinned || memory.important) {
+        score += 5;
+      }
+
+      if (/承诺|答应|约定|关系|冲突|误会|喜欢|讨厌|边界|身体|红包|转账|世界书|师门|设定|拉黑|拒收/.test(text)) {
+        score += 2;
+      }
+
+      score += Math.max(0, 2 - index * 0.02);
+
+      if (score > 0 || recallIntent) {
+        scored.push({ memory: memory, score: score, index: index });
+      }
+    });
+
+    scored.sort(function (a, b) {
+      return b.score - a.score || b.index - a.index;
+    });
+
+    return scored.slice(0, recallIntent ? Math.max(limit, 18) : limit).map(function (item) {
+      return item.memory;
+    });
+  }
+
+  function isSimilarMemoryContent(a, b) {
+    var x = String(a || "").replace(/\s+/g, "");
+    var y = String(b || "").replace(/\s+/g, "");
+    if (!x || !y) {
+      return false;
+    }
+    if (x === y) {
+      return true;
+    }
+    return x.indexOf(y) !== -1 || y.indexOf(x) !== -1;
+  }
+
+  function buildContinuityState(targetType, targetId, history, memories, options) {
+    var recentText = history.slice(-80).map(function (message) {
+      return String(message.content || "");
+    }).join("\n");
+    var memoryText = (Array.isArray(memories) ? memories : []).map(function (memory) {
+      return [memory.title, memory.content].filter(Boolean).join("：");
+    }).join("\n");
+    var combined = [memoryText, recentText].join("\n");
+    var parts = [];
+
+    if (/吵架|生气|冷战|不理|拉黑|拒收/.test(combined)) {
+      parts.push("关系余波：最近存在冲突/冷战/拒收/拉黑痕迹，本轮不能像第一次聊天一样重置关系。");
+    }
+    if (/答应|约好|承诺|说好|下次|明天|等你|回来/.test(combined)) {
+      parts.push("未完成承诺：存在约定或承诺，角色需要默认记得，除非用户主动撤销。");
+    }
+    if (/红包|转账|收款|退回|退款|钱|账/.test(combined)) {
+      parts.push("金钱余波：最近有红包/转账/账目相关事件，角色态度要承接，不要当没发生。");
+    }
+    if (/疼|难受|不舒服|身体|状态|手心|大腿|腰背|肩颈/.test(combined)) {
+      parts.push("身体状态余波：用户身体状态或不适需要连续，不要下一轮突然忘掉。");
+    }
+    if (/世界书|设定|师门|门规|规则|禁忌/.test(combined)) {
+      parts.push("设定/世界书余波：前文提过设定、师门或规则相关内容，用户再提时优先承接，不要装作第一次听见。");
+    }
+    if (/喜欢|想你|在意|吃醋|占有|亲近|抱|陪/.test(combined)) {
+      parts.push("亲密关系余波：关系中有在意、靠近或占有痕迹，本轮不能退回普通陌生聊天。");
+    }
+
+    return parts.length
+      ? parts.join("\n")
+      : "暂无明显未解决事项；仍需承接最近上下文，不要重置关系。";
+  }
+
+  function formatMemoryContextMessages(messages) {
+    return (Array.isArray(messages) ? messages : []).map(function (message, index) {
+      return (index + 1) + ". " + summarizeMessageForMemorySource(message);
+    }).join("\n");
+  }
+
+  function formatMemoryContextMemories(memories) {
+    return (Array.isArray(memories) ? memories : []).map(function (memory, index) {
+      return [
+        (index + 1) + ". " + (memory.title || "记忆"),
+        memory.content || "",
+        memory.type ? "类型：" + memory.type : "",
+        memory.source ? "来源：" + memory.source : ""
+      ].filter(Boolean).join("；");
+    }).join("\n");
+  }
+
+  function compressMediumRangeMessages(messages, maxLength) {
+    var text = formatMemoryContextMessages(messages);
+    var limit = Number(maxLength) || 1600;
+
+    if (text.length <= limit) {
+      return text;
+    }
+
+    return text.slice(0, Math.floor(limit * 0.45))
+      + "\n...\n"
+      + text.slice(-Math.floor(limit * 0.55));
+  }
+
+  function buildMemoryContextPack(targetType, targetId, options) {
+    var source = options || {};
+    var latestUserInput = String(source.latestUserInput || "").trim();
+    var history = getHistoryForMemoryContext(targetType, targetId);
+    var visibleHistory = filterMemoryContextMessages(history);
+    var recentFullMessages = visibleHistory.slice(-36);
+    var mediumMessages = getMediumRangeMessagesByUserTurns(visibleHistory, 80);
+    var relevantOldMessages = retrieveRelevantOldMessages(visibleHistory, latestUserInput, {
+      excludeRecentCount: 36,
+      limit: 12
+    });
+    var chatMemories = window.AppStorage.getChatMemories
+      ? window.AppStorage.getChatMemories(targetType, targetId) || []
+      : [];
+    var relevantMemories = retrieveRelevantChatMemories(chatMemories, latestUserInput, {
+      limit: 12
+    });
+    var continuityState = buildContinuityState(targetType, targetId, visibleHistory, chatMemories, source);
+
+    return {
+      targetType: targetType,
+      targetId: targetId,
+      latestUserInput: latestUserInput,
+      recentFullText: formatMemoryContextMessages(recentFullMessages),
+      mediumSummaryText: compressMediumRangeMessages(mediumMessages, 1600),
+      relevantOldText: formatMemoryContextMessages(relevantOldMessages),
+      relevantMemoryText: formatMemoryContextMemories(relevantMemories),
+      continuityStateText: continuityState,
+      counts: {
+        fullHistory: visibleHistory.length,
+        recentFull: recentFullMessages.length,
+        medium: mediumMessages.length,
+        relevantOld: relevantOldMessages.length,
+        relevantMemories: relevantMemories.length,
+        hasRecallIntent: hasRecallIntent(latestUserInput)
+      }
+    };
+  }
+
+  function formatMemoryContextPack(pack) {
+    var source = pack || {};
+
+    return [
+      "【连续记忆包 memoryContextPack】",
+      "本段不是可见回复，不要复述来源；它代表角色真实经历过的连续上下文。",
+      "目标：防止忘记前文、未解决事项、承诺、关系余波和相关旧内容。",
+      "",
+      "1. 最近完整时间线：",
+      source.recentFullText || "暂无",
+      "",
+      "2. 中期压缩时间线：",
+      source.mediumSummaryText || "暂无",
+      "",
+      "3. 和本轮输入相关的旧消息召回：",
+      source.relevantOldText || "暂无",
+      "",
+      "4. 相关长期/自动/手动记忆：",
+      source.relevantMemoryText || "暂无",
+      "",
+      "5. 连续状态锚点：",
+      source.continuityStateText || "暂无",
+      "",
+      "使用要求：",
+      "- 用户说'刚才/之前/上次/那个/还记得'时，优先查第 3 和第 4 部分。",
+      "- 如果连续状态锚点里有冲突、承诺、身体状态、金钱、世界书余波，本轮必须承接。",
+      "- 不要在可见回复里说'记忆包显示''记录里''根据上下文'。",
+      "- 把这些内容变成角色的默认记得、态度、称呼、沉默、追问、回避或继续。"
+    ].join("\n");
+  }
+
+  // ────────────────────────────────────────────────────────────────────────────
+
   function buildChatGenerationContext(targetType, targetId, extras) {
     var extraOptions = extras || {};
     var settings = window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
@@ -7238,6 +7539,31 @@
     var bodyEnabled = settings.bodyStateEnabled !== false;
     var memorySummaryDue = autoEnabled && !extraOptions.regenerateRequest && nextRound >= interval;
     var memorySummarySourceText = memorySummaryDue ? buildMemorySummarySourceText(targetType, targetId, interval) : "";
+    var latestUserInput = String(extraOptions.latestUserInput || extraOptions.userInput || "").trim();
+    var memoryContextPack = buildMemoryContextPack(targetType, targetId, {
+      latestUserInput: latestUserInput,
+      regenerateRequest: extraOptions.regenerateRequest
+    });
+    var memoryContextText = formatMemoryContextPack(memoryContextPack);
+
+    if (localStorage.getItem("myAiApp.debugMemoryContext") === "1") {
+      var _counts = memoryContextPack.counts || {};
+      console.debug("[MemoryContext]", {
+        targetType: targetType,
+        targetId: targetId,
+        latestUserInput: latestUserInput.slice(0, 60),
+        fullHistoryCount: _counts.fullHistory,
+        recentFullCount: _counts.recentFull,
+        mediumCount: _counts.medium,
+        relevantOldCount: _counts.relevantOld,
+        relevantMemoriesCount: _counts.relevantMemories,
+        hasRecallIntent: _counts.hasRecallIntent,
+        continuityStatePreview: (memoryContextPack.continuityStateText || "").slice(0, 80),
+        memoryContextTextLength: memoryContextText.length,
+        memorySummaryDue: memorySummaryDue,
+        memorySummarySourceTextLength: memorySummarySourceText.length
+      });
+    }
 
     return Object.assign({
       targetType: targetType,
@@ -7250,7 +7576,9 @@
       memorySummaryDue: memorySummaryDue,
       memorySummaryRounds: interval,
       memorySummarySourceText: memorySummarySourceText,
-      currentRound: nextRound
+      currentRound: nextRound,
+      memoryContextPack: memoryContextPack,
+      memoryContextText: memoryContextText
     }, extraOptions);
   }
 
@@ -7304,6 +7632,35 @@
           });
         }
       }
+    }
+
+    if (result && Array.isArray(result.memories) && result.memories.length && window.AppStorage.addChatMemory && window.AppStorage.getChatMemories) {
+      var existingChatMems = window.AppStorage.getChatMemories(context.targetType, context.targetId) || [];
+      var now = Date.now();
+      result.memories.forEach(function (memory) {
+        if (!memory || !memory.content) {
+          return;
+        }
+        var recentMems = existingChatMems.slice(0, 30);
+        var isDuplicate = recentMems.some(function (existing) {
+          return isSimilarMemoryContent(existing.content, memory.content);
+        });
+        if (!isDuplicate) {
+          var saved = window.AppStorage.addChatMemory(context.targetType, context.targetId, {
+            title: memory.title || String(memory.content).slice(0, 20),
+            content: memory.content,
+            sourceTime: now,
+            type: "auto",
+            source: context.targetType === "group" ? "group" : (context.targetType === "offline" ? "offline" : "private"),
+            generationId: context.generationId || "",
+            sourceGenerationId: context.generationId || "",
+            createdAt: now
+          });
+          if (saved) {
+            existingChatMems.unshift({ content: memory.content });
+          }
+        }
+      });
     }
 
     if (context.bodyStateEnabled && result && result.bodyState && window.AppStorage.saveBodyState) {
@@ -7764,6 +8121,8 @@
     updateThoughtHeartButtons: updateThoughtHeartButtons,
     buildChatGenerationContext: buildChatGenerationContext,
     finalizeChatGenerationContext: finalizeChatGenerationContext,
+    buildMemoryContextPack: buildMemoryContextPack,
+    formatMemoryContextPack: formatMemoryContextPack,
     openChatMemoryPanel: openChatMemoryPanel,
     openChatWorldBookSelector: openChatWorldBookSelector,
     openBodyStatePanel: openBodyStatePanel,
