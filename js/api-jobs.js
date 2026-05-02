@@ -3,7 +3,6 @@
 
   var STORAGE_KEY = "myAiApp.apiJobs";
   var STALE_RUNNING_MS = 10 * 60 * 1000;
-  var JOB_TIMEOUT_MS = 75 * 1000;
   var MAX_STORED_JOBS = 20;
   var MAX_ERROR_JOBS = 5;
   var MAX_DONE_JOBS = 5;
@@ -138,7 +137,7 @@
     return (Array.isArray(jobs) ? jobs.slice() : []).map(function (job) {
       var normalized = normalizeJob(job);
 
-      if (normalized.status === "running" && now - normalized.updatedAt > STALE_RUNNING_MS) {
+      if (normalized.status === "running" && !runningJobs[normalized.id] && now - normalized.updatedAt > STALE_RUNNING_MS) {
         normalized.status = "interrupted";
         normalized.updatedAt = now;
       }
@@ -433,14 +432,7 @@
     runningJobs[job.id] = true;
 
     try {
-      var timeoutHandle;
-      var timeoutPromise = new Promise(function (_, reject) {
-        timeoutHandle = setTimeout(function () {
-          reject(new Error("生成超时，请重试。"));
-        }, JOB_TIMEOUT_MS);
-      });
-      result = await Promise.race([handler(job), timeoutPromise]);
-      clearTimeout(timeoutHandle);
+      result = await handler(job);
       updateJob(job.id, {
         status: "done",
         afterMessages: [],
@@ -488,7 +480,7 @@
     jobs = jobs.map(function (job) {
       var next = normalizeJob(job);
 
-      if (next.status === "running" && (!runningJobs[next.id] || now - next.updatedAt > STALE_RUNNING_MS)) {
+      if (next.status === "running" && !runningJobs[next.id] && now - next.updatedAt > STALE_RUNNING_MS) {
         next.status = "interrupted";
         next.updatedAt = now;
         changed = true;

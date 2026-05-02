@@ -369,9 +369,9 @@
       return;
     }
 
-    if (isApiJobRunning("offline", session.id, ["offline"])) {
+    if (isApiJobRunning("offline", session.id, ["offline", "chat", "regenerate"])) {
       if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("正在回复中", true);
+        window.AppExtras.showToast("正在生成中，请稍等。", true);
       }
       return;
     }
@@ -1112,7 +1112,7 @@
 
     if (isApiJobRunning(mode, targetId, ["inlineOffline", "regenerate"])) {
       if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("正在回复中", true);
+        window.AppExtras.showToast("正在生成中，请稍等。", true);
       }
       return true;
     }
@@ -1206,7 +1206,7 @@
 
     if (isApiJobRunning("private", character.id, ["inlineOffline"])) {
       if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("正在回复中", true);
+        window.AppExtras.showToast("正在生成中，请稍等。", true);
       }
       return;
     }
@@ -1265,7 +1265,7 @@
 
     if (isApiJobRunning("group", group.id, ["inlineOffline"])) {
       if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("正在回复中", true);
+        window.AppExtras.showToast("正在生成中，请稍等。", true);
       }
       return;
     }

@@ -2593,7 +2593,7 @@
       return;
     }
 
-    if (isPrivateJobRunning(requestCharacterId, ["regenerate"])) {
+    if (isPrivateJobRunning(requestCharacterId, ["regenerate", "chat", "blockReaction"])) {
       showPrivateBusyNotice(requestCharacterId);
       return;
     }
@@ -3125,7 +3125,7 @@
 
   function showPrivateBusyNotice(characterId) {
     if (characterId && activeCharacterId === characterId && window.AppExtras && window.AppExtras.showToast) {
-      window.AppExtras.showToast("正在回复中", true);
+      window.AppExtras.showToast("正在生成中，请稍等。", true);
     }
   }
 
@@ -3389,7 +3389,7 @@
       return;
     }
 
-    if (isPrivateJobRunning(requestCharacterId, ["chat"])) {
+    if (isPrivateJobRunning(requestCharacterId, ["chat", "regenerate", "blockReaction"])) {
       showPrivateBusyNotice(requestCharacterId);
       return;
     }

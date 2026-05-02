@@ -2173,7 +2173,7 @@
       return;
     }
 
-    if (isGroupJobRunning(group.id, ["regenerate"])) {
+    if (isGroupJobRunning(group.id, ["chat", "regenerate"])) {
       showGroupBusyNotice(group.id);
       return;
     }
@@ -2784,7 +2784,7 @@
       return;
     }
 
-    if (isGroupJobRunning(group.id, ["chat"])) {
+    if (isGroupJobRunning(group.id, ["chat", "regenerate"])) {
       showGroupBusyNotice(group.id);
       return;
     }
@@ -2897,7 +2897,7 @@
 
   function showGroupBusyNotice(groupId) {
     if (groupId && activeGroupId === groupId && window.AppExtras && window.AppExtras.showToast) {
-      window.AppExtras.showToast("正在回复中", true);
+      window.AppExtras.showToast("正在生成中，请稍等。", true);
     }
   }
 
