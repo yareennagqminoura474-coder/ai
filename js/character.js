@@ -3535,7 +3535,7 @@
       return;
     }
 
-    window.AppStorage.deleteChatHistory(character.id);
+    window.AppStorage.clearChatAll("private", character.id);
     ensureOpeningMessage(character);
     renderChatMessages(character.id);
     renderCharacterList();
@@ -3922,8 +3922,6 @@
       '<div class="section-title-row"><h3>记忆设置</h3><span>长期记忆</span></div>',
       '<label class="switch-row"><input data-private-field="memoryEnabled" type="checkbox"' + (settings.memoryEnabled !== false ? " checked" : "") + '>开启长期记忆</label>',
       '<button class="outline-button" type="button" data-private-action="view-memory">查看本私聊记忆</button>',
-      '<button class="outline-button danger" type="button" data-private-action="clear-chat-memory">清空本私聊记忆</button>',
-      '<button class="outline-button danger" type="button" data-private-action="clear-memory">清空该角色记忆</button>',
       "</section>"
     ].join("");
 
@@ -3975,25 +3973,6 @@
 
     if (button.dataset.privateAction === "clear-history") {
       clearActiveChatHistory();
-      renderPrivateChatSettings(getCharacterById(activeCharacterId));
-      return;
-    }
-
-    if (button.dataset.privateAction === "clear-memory" && window.confirm("确定清空该角色记忆吗？")) {
-      window.AppStorage.resetPrivateCharacterState(activeCharacterId);
-      window.alert("已清空记忆并恢复默认身体状态");
-      renderPrivateChatSettings(getCharacterById(activeCharacterId));
-      return;
-    }
-
-    if (button.dataset.privateAction === "clear-chat-memory" && window.confirm("确定清空本私聊记忆吗？")) {
-      window.AppStorage.resetPrivateChatState(activeCharacterId);
-      addPrivateSystemMessage(activeCharacterId, "本次私聊状态已重置，已清除本次聊天记忆。");
-      window.alert("已清空本私聊记忆并重置本次会话状态");
-      renderChatMessages(activeCharacterId);
-      if (typeof updateThoughtButton === "function") {
-        updateThoughtButton(activeCharacterId);
-      }
       renderPrivateChatSettings(getCharacterById(activeCharacterId));
       return;
     }

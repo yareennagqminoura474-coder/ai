@@ -315,6 +315,62 @@
     saveGroups(groups);
   }
 
+  function clearChatAll(targetType, targetId) {
+    var type = targetType === "group" ? "group" : "private";
+    var id = String(targetId || "");
+
+    if (!id) {
+      return false;
+    }
+
+    if (type === "group") {
+      if (debouncedGroupChatTimers[id]) {
+        clearTimeout(debouncedGroupChatTimers[id]);
+        delete debouncedGroupChatTimers[id];
+      }
+      delete debouncedGroupChatSaves[id];
+
+      deleteGroupChatHistory(id);
+      clearGroupMemory(id);
+      resetGroupMemoryState(id);
+      clearChatMemories("group", id);
+      clearGroupThoughts(id);
+      clearBodyState("group", id);
+      clearBodyStateSnapshots("group", id);
+      resetChatRoundCounter("group", id);
+      deleteOfflineSession("group-" + id);
+      deleteOfflineSessionsForTarget("group", id);
+
+      if (window.AppApiJobs && typeof window.AppApiJobs.clearJobsForTarget === "function") {
+        window.AppApiJobs.clearJobsForTarget("group", id);
+      }
+
+      return true;
+    }
+
+    if (debouncedPrivateChatTimers[id]) {
+      clearTimeout(debouncedPrivateChatTimers[id]);
+      delete debouncedPrivateChatTimers[id];
+    }
+    delete debouncedPrivateChatSaves[id];
+
+    deleteChatHistory(id);
+    clearCharacterMemory(id);
+    resetPrivateChatState(id);
+    clearChatMemories("private", id);
+    clearChatThoughts("private", id);
+    clearBodyState("private", id);
+    clearBodyStateSnapshots("private", id);
+    resetChatRoundCounter("private", id);
+    deleteOfflineSessionsForTarget("private", id);
+
+    if (window.AppApiJobs && typeof window.AppApiJobs.clearJobsForTarget === "function") {
+      window.AppApiJobs.clearJobsForTarget("private", id);
+    }
+
+    return true;
+  }
+
   function getSettings() {
     var rawSettings = parseJson(localStorage.getItem(STORAGE_KEYS.settings), {});
     var settings = normalizeSettings(rawSettings);
@@ -1260,6 +1316,43 @@
     var memory = getMemoryStore();
     delete memory[characterId];
     saveMemoryStore(memory);
+  }
+
+  function clearGroupMemory(groupId) {
+    if (!groupId) {
+      return false;
+    }
+
+    var memory = getMemoryStore();
+    var normalizedGroupId = String(groupId);
+    var changed = false;
+
+    Object.keys(memory).forEach(function (characterId) {
+      var memories = Array.isArray(memory[characterId]) ? memory[characterId] : [];
+      var filtered = memories.filter(function (item) {
+        var source = item && typeof item === "object" ? String(item.source || "") : "";
+        var targetId = String((item && (item.targetId || item.groupId)) || "");
+        if (source === "group" && targetId === normalizedGroupId) {
+          changed = true;
+          return false;
+        }
+        return true;
+      });
+
+      if (filtered.length !== memories.length) {
+        if (filtered.length) {
+          memory[characterId] = filtered;
+        } else {
+          delete memory[characterId];
+        }
+      }
+    });
+
+    if (changed) {
+      saveMemoryStore(memory);
+    }
+
+    return true;
   }
 
   function getChatScopedKey(targetType, targetId) {
@@ -5576,6 +5669,7 @@
     resetPrivateCharacterState: resetPrivateCharacterState,
     resetPrivateChatState: resetPrivateChatState,
     clearGroupThoughts: clearGroupThoughts,
+    clearChatAll: clearChatAll,
     resetGroupMemoryState: resetGroupMemoryState,
     resetAllCharacterMemoryAndStates: resetAllCharacterMemoryAndStates,
     getOfflineSession: getOfflineSession,

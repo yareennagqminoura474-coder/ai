@@ -2587,6 +2587,7 @@
     getElement("groupSettingsBtn").addEventListener("click", window.GroupManager.openActiveGroupSettings);
     addClick("groupWorldBookBtn", window.GroupManager.openActiveGroupWorldBookSelector);
     getElement("groupMemoryBtn").addEventListener("click", window.GroupManager.openActiveGroupMemory);
+    getElement("groupClearChatHistoryBtn").addEventListener("click", window.GroupManager.clearActiveGroupChatHistory);
     getElement("groupSearchBtn").addEventListener("click", window.GroupManager.openActiveGroupSearch);
     getElement("groupBatchMessageSelectBtn").addEventListener("click", window.GroupManager.openGroupMessageSelectionMode);
     getElement("groupOfflineBtn").addEventListener("click", window.GroupManager.openActiveGroupOffline);

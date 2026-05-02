@@ -3238,6 +3238,28 @@
     }
   }
 
+  function clearActiveGroupChatHistory() {
+    var group = activeGroupId ? getGroupById(activeGroupId) : null;
+
+    closeAllMenus();
+
+    if (!group) {
+      return;
+    }
+
+    if (!window.confirm("确定要清空这个群聊的聊天记录吗？群聊记录、群聊记忆、群聊心声和身体状态都会一起清空，但不会删除群聊、成员、世界书绑定和钱包账单。")) {
+      return;
+    }
+
+    window.AppStorage.clearChatAll("group", group.id);
+    window.alert("已清空群聊聊天记录和相关会话状态");
+    if (typeof updateThoughtButton === "function") {
+      updateThoughtButton(group.id);
+    }
+    scheduleGroupRender(group.id);
+    scheduleGroupListRender();
+  }
+
   function renderUserPersonaOptions(selectedId) {
     var personas = window.AppStorage.getUserPersonas ? window.AppStorage.getUserPersonas() : [];
 
@@ -3303,8 +3325,7 @@
       '<div class="section-title-row"><h3>记忆设置</h3><span>Memory</span></div>',
       '<label class="switch-row"><input data-group-settings-field="memorySharingEnabled" type="checkbox"' + (settings.memorySharingEnabled !== false ? " checked" : "") + '>群聊记忆共享</label>',
       '<button class="outline-button" type="button" data-group-settings-action="view-memory">查看本群聊记忆</button>',
-      '<button class="outline-button danger" type="button" data-group-settings-action="clear-chat-memory">清空本群聊记忆</button>',
-      '<button class="outline-button danger" type="button" data-group-settings-action="clear-group-memory">清空成员群聊记忆</button>',
+      '<button class="outline-button danger" type="button" data-group-settings-action="clear-chat-history">清空聊天记录</button>',
       "</section>",
       '<section class="form-section">',
       '<div class="section-title-row"><h3>私聊记忆互通 🔗</h3><span>桥接</span></div>',
@@ -3377,29 +3398,15 @@
       return;
     }
 
-    if (button.dataset.groupSettingsAction === "clear-chat-memory" && window.confirm("确定清空本群聊记忆吗？")) {
-      window.AppStorage.resetGroupMemoryState(group.id);
-      addGroupSystemMessage(group.id, "本群聊状态已重置，记忆和群聊思想已清除。");
-      window.alert("已清空本群聊记忆并恢复默认群组状态");
-      updateThoughtButton(group.id);
+    if (button.dataset.groupSettingsAction === "clear-chat-history" && window.confirm("确定要清空这个群聊的聊天记录吗？群聊记录、群聊记忆、群聊心声和身体状态都会一起清空，但不会删除群聊、成员、世界书绑定和钱包账单。")) {
+      window.AppStorage.clearChatAll("group", group.id);
+      window.alert("已清空群聊聊天记录和相关会话状态");
+      if (typeof updateThoughtButton === "function") {
+        updateThoughtButton(group.id);
+      }
       scheduleGroupRender(group.id);
       scheduleGroupListRender();
       return;
-    }
-
-    if (button.dataset.groupSettingsAction === "clear-group-memory" && window.confirm("确定清空成员的群聊记忆吗？")) {
-      (group.memberIds || []).forEach(function (memberId) {
-        var kept = window.AppStorage.getCharacterMemory(memberId).filter(function (memory) {
-          return !(memory.source === "group" && String(memory.targetId || "") === String(group.id));
-        });
-        window.AppStorage.saveCharacterMemory(memberId, kept);
-      });
-      window.AppStorage.resetGroupMemoryState(group.id);
-      addGroupSystemMessage(group.id, "群成员在本群的记忆已清理，群聊状态已重置。");
-      window.alert("已清空成员群聊记忆并恢复默认群组状态");
-      updateThoughtButton(group.id);
-      scheduleGroupRender(group.id);
-      scheduleGroupListRender();
     }
   }
 
@@ -3613,6 +3620,7 @@
     openActiveGroupMemory: openActiveGroupMemory,
     openActiveGroupWorldBookSelector: openActiveGroupWorldBookSelector,
     openActiveGroupBodyState: openActiveGroupBodyState,
+    clearActiveGroupChatHistory: clearActiveGroupChatHistory,
     openActiveGroupRegenerateReply: openActiveGroupRegenerateReply,
     saveGroupSettings: saveGroupSettings,
     openActiveGroupThoughts: openActiveGroupThoughts,
