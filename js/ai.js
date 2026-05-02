@@ -2123,11 +2123,11 @@
   }
 
   function buildPrivateMessageSchema(profile) {
-    return "{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[{\"type\":\"blockUser\",\"reason\":\"原因，仅强烈符合人设和剧情时使用\"}],\"thoughts\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"嘴硬的在意\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}";
+    return "{\"messages\":[{\"type\":\"text\",\"content\":\"第一条\"},{\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[{\"type\":\"blockUser\",\"reason\":\"原因，仅强烈符合人设和剧情时使用\"}],\"thoughts\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"内心内容\",\"mood\":\"此刻情绪\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"" + (profile && profile.id || "角色ID") + "\",\"content\":\"要写入记忆的内容\"}]}";
   }
 
   function buildGroupMessageSchema() {
-    return "{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"},{\"characterId\":\"角色id\",\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"characterId\":\"角色id\",\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"试探\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}";
+    return "{\"messages\":[{\"characterId\":\"角色id\",\"type\":\"text\",\"content\":\"角色回复内容\"},{\"characterId\":\"角色id\",\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\"},{\"characterId\":\"角色id\",\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"此刻情绪\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}";
   }
 
   function buildOfflineEventSchema() {
@@ -2138,7 +2138,7 @@
         {"type": "action", "content": "【承接上一条 event 的具体情境，不重复已用动词/部位】"},
         {"type": "speech", "characterId": "角色ID", "content": "台词内容", "money": {"type": "transfer", "amount": "37.50", "direction": "income", "note": "备注"}}
       ],
-      "thoughts": [{"characterId": "角色ID", "content": "内心内容", "mood": "压着火", "visibleSummary": "一句摘要"}],
+      "thoughts": [{"characterId": "角色ID", "content": "内心内容", "mood": "此刻情绪", "visibleSummary": "一句摘要"}],
       "memories": [{"characterId": "角色ID", "content": "要写入记忆的内容"}]
     });
   }
@@ -2277,7 +2277,10 @@
     return [
       "心声生成要求 thoughtGenerationRules",
       "thoughts 必须和本轮 " + primary + " 同步返回，不要单独调用 API。",
-      "thoughts 不是心情，不是对聊天内容的摘要，也不是第三方旁白。thoughts 必须体现角色本轮真实动机和关系推进方向。",
+      "thoughts 不是心情标签集合，也不是聊天摘要。它是角色没说出口的一闪念。",
+      "每条 thought 都要来自本轮具体上下文，不允许复用固定心情词。",
+      "mood 是短标签，content 是没说出口的话，visibleSummary 是给用户看的克制摘要；三者必须不同。",
+      "如果想不出不重复的 mood，可以省略 mood，不能硬填固定词。",
       "thoughts 要回答下面这些问题（不要写成清单，要像心里一闪而过）：",
       "  - 角色想靠近还是拉远？",
       "  - 角色想压住用户还是试探用户？",
@@ -2287,9 +2290,18 @@
       "心声要像角色当下心里真的闪过的一句话：有偏心、有顾虑、有暗流、有占有欲、有不甘，但要符合人设；可以矛盾、隐忍、嘴硬、动摇。",
       "thoughts 和 " + primary + " 必须围绕同一个 emotionCore：心声里的情绪要在说出口的话或动作里留下痕迹，不能内心很贴人设、外面却像客服模板。",
       "如果世界规则压住了角色，thoughts 可以写真实冲动或不甘，" + primary + " 必须体现被压住后的克制、距离、拒绝或回避。",
-      "thoughts 必须能看出角色本轮的关系推进方向：拉近、拉远、压制、试探、暴露、转移、清算或沉默，不要只写泛泛心情。",
-      "如果心声里在吃醋、生气、控制、试探、嘴硬或不安，可见回复要自然带出对应的别扭、压迫、反问、短促、回避或改口。",
-      "mood 必须是本轮具体情绪短词，不要只写“复杂、紧张、平静、烦躁”；优先使用“嘴硬的在意、压着火、不想低头、被戳穿后的不快、心软但不认、试探、冷处理、占有欲上来”等具体状态。",
+      "thoughts 的 content 可以体现关系推进方向，例如拉近、拉远、压制、回避、转移、清算或沉默；但 mood 不能直接写这些功能词，mood 要写角色此刻的私人情绪。",
+      "如果心声里在吃醋、生气、控制、嘴硬或不安，可见回复要自然带出对应的别扭、压迫、反问、短促、回避或改口。",
+      "mood 必须由本轮上下文临时生成，不使用固定词库，不照抄示例，不连续复用最近心声的 mood。",
+      "mood 是当前心情标签，只写 2-10 个中文字符，像一个私人情绪短名；不要写成长句，不要写成总结。",
+      "mood 必须来自本轮具体触发点：用户刚说的话、上一轮余波、世界书限制、人设反应、关系张力、身体状态或金钱事件。",
+      "mood 不要使用泛词：复杂、紧张、平静、烦躁、开心、难过、在意、试探、冷处理、压着火、嘴硬的在意、心软但不认、占有欲上来。",
+      "如果想表达这些意思，也必须换成贴合本轮具体内容的新词，而不是复用固定词。",
+      "mood、content、visibleSummary 三个字段必须分工不同：",
+      "1. mood：只写当前心情短标签，不写完整句子，不解释原因。",
+      "2. content：写角色没说出口的真实想法，要像心里一闪而过的一句话，可以矛盾、偏心、嘴硬、回避，但不能只是 mood 的扩写。",
+      "3. visibleSummary：写用户能看到的一句心声摘要，要比 content 更克制，不能剧透全部真实动机。",
+      "禁止三字段互相复读：mood 不能是 content 的标题，content 不能只是 mood 加一句解释，visibleSummary 不能和 content 同义改写。",
       "mood 不得连续复用最近心声里已经出现的 mood；如果 recentHeartVoice 已有同词，本轮必须换成更贴近当前内容的新短词。",
       "每条心声包含 characterId（私聊可省略）、content、mood、visibleSummary。visibleSummary 是用户能看到的一句短摘要，不要剧透真实动机。",
       mode === "group" ? "群聊心声只为本群相关成员生成，不要写群外角色。" : "私聊心声只为当前角色生成。"
@@ -5503,6 +5515,49 @@
     return "";
   }
 
+  function normalizeThoughtTextForCompare(text) {
+    return String(text || "")
+      .replace(/\s+/g, "")
+      .replace(/[，。！？、；：,.!?;:"""'''（）()【】\[\]{}<>《》\-—_…~～]/g, "")
+      .trim();
+  }
+
+  function isSimilarThoughtField(a, b) {
+    var x = normalizeThoughtTextForCompare(a);
+    var y = normalizeThoughtTextForCompare(b);
+
+    if (!x || !y) {
+      return false;
+    }
+
+    if (x === y) {
+      return true;
+    }
+
+    return x.indexOf(y) !== -1 || y.indexOf(x) !== -1;
+  }
+
+  function cleanRepeatedThoughtFields(thought) {
+    var item = Object.assign({}, thought || {});
+    var mood = String(item.mood || "").trim();
+    var content = String(item.content || "").trim();
+    var visibleSummary = String(item.visibleSummary || "").trim();
+
+    if (isSimilarThoughtField(mood, content)) {
+      item.mood = "";
+    }
+
+    if (isSimilarThoughtField(content, visibleSummary)) {
+      item.visibleSummary = "";
+    }
+
+    if (isSimilarThoughtField(mood, visibleSummary)) {
+      item.visibleSummary = "";
+    }
+
+    return item;
+  }
+
   function normalizeThoughtList(thoughts) {
     var list;
 
@@ -5518,7 +5573,7 @@
       return [];
     }
 
-    return list.map(function (thought) {
+    var rawThoughts = list.map(function (thought) {
       var source = thought && typeof thought === "object" ? thought : { content: thought };
       return {
         characterId: source.characterId ? String(source.characterId) : "",
@@ -5529,6 +5584,32 @@
     }).filter(function (thought) {
       return thought.content;
     }).slice(0, 50);
+
+    var removedDuplicateMoodCount = 0;
+    var removedDuplicateVisibleSummaryCount = 0;
+
+    var normalizedThoughts = rawThoughts.map(function (thought) {
+      var before = { mood: thought.mood, visibleSummary: thought.visibleSummary };
+      var cleaned = cleanRepeatedThoughtFields(thought);
+      if (before.mood && !cleaned.mood) {
+        removedDuplicateMoodCount++;
+      }
+      if (before.visibleSummary && !cleaned.visibleSummary) {
+        removedDuplicateVisibleSummaryCount++;
+      }
+      return cleaned;
+    });
+
+    if (localStorage.getItem("myAiApp.debugThoughts") === "1") {
+      console.debug("[ThoughtDebug]", {
+        before: rawThoughts,
+        after: normalizedThoughts,
+        removedDuplicateMoodCount: removedDuplicateMoodCount,
+        removedDuplicateVisibleSummaryCount: removedDuplicateVisibleSummaryCount
+      });
+    }
+
+    return normalizedThoughts;
   }
 
   function normalizeMemoryList(memories) {
@@ -8263,7 +8344,7 @@
       "1. 必须输出合法 JSON，格式：",
       '{"messages":[{"characterId":"角色ID","type":"text","content":"发言"},{"type":"action","content":"旁白动作"}],"thoughts":[{"characterId":"角色ID","content":"内心独白","mood":"具体心情","visibleSummary":"摘要"}],"memories":[{"characterId":"角色ID","content":"值得记录的事件","relatedCharacterIds":["其他角色ID"]}]}',
       "2. messages 的 type 只能是 text 或 action；action 类型不填 characterId。",
-      "3. thoughts 每个角色最多 1 条；mood 要具体，例如：压着火 / 嘴硬的在意 / 冷处理 / 试探 / 被戳穿后的不快 / 心软但不认 / 占有欲上来 / 不想低头。",
+      "3. thoughts 每个角色最多 1 条；mood 要由本轮上下文生成，只写 2-10 个中文字符，不得复用固定词，可以为空字符串。",
       "4. memories 只在发生了值得角色记住的事情时才填，不要每轮都写；A 和 B 的记忆要分别写，视角不同。",
       "5. memories.content 要写成角色真实经历过的记忆，不要写“观看模式里”“旁观者看到”“用户设置”等元信息；如果没有值得记住的事，memories 返回空数组。",
       "6. content 里禁止出现“观看模式”“用户”“旁观者”“系统”“AI”等词。",
