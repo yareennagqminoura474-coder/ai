@@ -944,7 +944,7 @@
       "冷淡角色可以只短短插一句，不必为了凑数变话痨；强势角色可以压场；黏人角色可以追问或靠近；嘴硬角色可以绕着说；敌对角色可以讽刺或试探.",
       "与本轮用户输入或命中世界书内容明显无关的角色，可以沉默不发言，不要为了凑 10 条让所有角色都变话痨.",
       "有世界书关联的角色优先发言，没有关联的角色可以只旁观一句或保持沉默.",
-      "如果所有角色都在”理解—安慰—建议”,失败;如果所有角色像同一个人换名字,失败."
+      "如果所有角色都在“理解—安慰—建议”，失败；如果所有角色像同一个人换名字，失败。"
     ].join("\n");
   }
 
@@ -4335,7 +4335,7 @@
             "【线下反模板规则——每轮必读】",
             "1. 不要用固定上位模板回应所有用户输入。角色反应必须来自本轮具体事件和用户当前这句话。",
             "2. 以下句式禁止在本轮出现超过 1 次，且禁止与上一轮重复：",
-            "   · 谁问你了  · 我又没说担心你  · 我来判断  · 你先回答我",
+            "   · 谁问你了  · 我来判断  · 你先回答我",
             "   · 别拿问题绕开刚才  · 规矩立了就是铁律  · 没有注意事项，只有绝对服从",
             "   · 按我的规矩  · 看着我说  · 再让我看到你",
             "3. 除非本轮用户明确挑衅、触发了世界书中明确的处罚/服从规则、或角色人设极度强硬，否则不要主动进入“审问/管教/绝对服从”模式。",
@@ -6201,11 +6201,10 @@
     filtered = maybeRewriteReplyTextureList(filtered, settings);
 
     if (!settings.onlineMode) {
-      // Do not locally pad replies to meet min count with generic fallback templates.
-      // If the model returns too few valid replies, keep the real output and prefer repair/retry.
       filtered = rebalanceReplyRhythm(filtered, getFallbackProfiles(settings), settings);
     }
 
+    filtered = assertNoLocalFixedReplies(filtered, { mode: settings.onlineMode ? "online" : "offline", latestUserInput: settings.latestUserInput || "" });
     finalList = filtered.slice(0, settings.max);
     profilesForSummary = getFallbackProfiles(settings);
     voiceInfoForSummary = getReplyTextureVoiceInfo(profilesForSummary[0] || {}, settings);
@@ -6226,6 +6225,35 @@
     });
 
     return finalList;
+  }
+
+  function assertNoLocalFixedReplies(messages, context) {
+    var list = Array.isArray(messages) ? messages : [];
+    var banned = /\u5148\u56de\u7b54\u4e00\u4e2a\u95ee\u9898|\u6211\u53c8\u6ca1\u8bf4\u62c5\u5fc3\u4f60|谁问你了|谁问你有没有事|继续说|别绕|别急着躲|别让我猜|先说你的目的|先告诉我原因|别拿这句糊弄我|钱先放一边|话先说清楚|看着我说|现在回我|把话说完整/;
+    var removed = [];
+
+    var filtered = list.filter(function (message) {
+      var hit = banned.test(String(message && message.content || ""));
+      if (hit) {
+        removed.push(message);
+      }
+      return !hit;
+    });
+
+    if (removed.length > 0) {
+      try {
+        if (typeof localStorage !== "undefined" && localStorage.getItem("myAiApp.debugOnlineLogic") === "1" && typeof console !== "undefined" && console.warn) {
+          console.warn("[FixedReplyWarning]", {
+            mode: context && context.mode,
+            latestUserInput: context && context.latestUserInput,
+            count: removed.length,
+            removed: removed
+          });
+        }
+      } catch (e) {}
+    }
+
+    return filtered;
   }
 
   function isReplyTextureDebugEnabled() {
@@ -6515,94 +6543,12 @@
     return true;
   }
 
-  function replaceGenericTemplateReplies(replies, options) {
-    var settings = options || {};
-    if (settings.onlineMode) {
-      return Array.isArray(replies) ? replies : [];
-    }
-    var profiles = getFallbackProfiles(settings);
-    var used = {};
-
-    return (Array.isArray(replies) ? replies : []).map(function (reply, index) {
-      var profile;
-      var replacement;
-      var voiceInfo;
-
-      if (!reply || !isTemplateRewriteType(reply.type || "text")) {
-        return reply;
-      }
-
-      profile = pickFallbackProfileForReply(profiles, reply, index);
-      if (!isGenericAiTemplateText(reply.content)) {
-        return reply;
-      }
-
-      if (isHighQualityPersonaReply(reply, profile, settings)) {
-        debugProtectedPersonaReply(reply, profile, settings, index);
-        return reply;
-      }
-
-      replacement = replaceTemplateWithPersonaLine(reply, Object.assign({}, settings, {
-        fallbackProfiles: profiles,
-        templateReplacementUsed: used
-      }), index);
-      if (replacement && replacement.content !== reply.content) {
-        recordReplyTextureStat(settings.replyTextureStats, "genericReplaced", "generic-template");
-        voiceInfo = getReplyTextureVoiceInfo(profile, settings);
-        debugReplyTexture("replaceGenericTemplateReplies.replace", {
-          index: index,
-          reason: "generic-template",
-          oldContent: reply.content,
-          newContent: replacement.content,
-          primaryTag: voiceInfo.primaryTag,
-          tags: voiceInfo.tags,
-          latestUserInput: settings.latestUserInput || profile.latestUserInput || "",
-          phase: getFallbackRhythmPhase(index)
-        });
-      }
-      return replacement;
-    });
+  function replaceGenericTemplateReplies(replies) {
+    return Array.isArray(replies) ? replies : [];
   }
 
-  function replaceTemplateWithPersonaLine(reply, settings, index) {
-    var source = reply || {};
-    var options = settings || {};
-    var profiles = getFallbackProfiles(options);
-    var profile = pickFallbackProfileForReply(profiles, source, index);
-    var used = options.templateReplacementUsed || {};
-    var flags = buildFallbackContextFlags(profile, options.worldBookContext || "");
-    var voiceProfile = profile.voiceProfile || detectPersonaVoiceProfile(profile);
-    var tags = voiceProfile.tags || [];
-    var primaryTag = voiceProfile.primaryTag || tags[0] || getFallbackStyleBucket(profile, flags);
-    var line;
-    var shortLine;
-    var guard = 0;
-
-    if (!source || !isTemplateRewriteType(source.type || "text")) {
-      return source;
-    }
-
-    line = buildPersonaAwareFallbackLine(profile, index, flags, getFallbackRhythmPhase(index));
-    while (isFallbackLineBlocked(line, profile, used) && guard < 24) {
-      guard += 1;
-      line = buildPersonaAwareFallbackLine(profile, index + guard, flags, getFallbackRhythmPhase(index + guard));
-    }
-
-    if (isFallbackLineBlocked(line, profile, used)) {
-      shortLine = getShortestPersonaFallbackLine(primaryTag);
-      if (!isFallbackLineBlocked(shortLine, profile, used)) {
-        line = shortLine;
-      } else if (guard >= 20) {
-        line = "这句先别翻过去。";
-      }
-    }
-    used[line] = true;
-
-    return Object.assign({}, source, {
-      type: source.type || "text",
-      characterId: source.characterId || profile.id || "",
-      content: line
-    });
+  function replaceTemplateWithPersonaLine(reply) {
+    return reply || {};
   }
 
   function isTemplateRewriteType(type) {
@@ -6624,77 +6570,8 @@
     return /我理解你|如果你需要|慢慢来|我会陪着你|你并不孤单|请告诉我更多|我们可以一起|你的感受是合理的|你的感受很合理|没关系的|辛苦了|当然可以|作为\s*AI|根据你提供的信息|很抱歉听到|听起来你|你的感受很重要|我在这里陪你|(^|[。！？!?\s])好的([。！？!?\s]|$)/.test(value);
   }
 
-  function maybeRewriteReplyTextureList(replies, settings) {
-    var options = settings || {};
-    if (options.onlineMode) {
-      return Array.isArray(replies) ? replies : [];
-    }
-    var list = Array.isArray(replies) ? replies : [];
-    var profiles = getFallbackProfiles(options);
-    var used = {};
-    var textIndexes = getTextureRewriteIndexes(list);
-    var maxRewrite = Math.max(1, Math.floor(textIndexes.length * 0.4));
-    var rewriteMap = {};
-    var analyses = [];
-    var rewriteCount = 0;
-    var actualRewriteCount = 0;
-
-    analyses = list.map(function (reply, index) {
-      var profile = pickFallbackProfileForReply(profiles, reply, index);
-      return {
-        index: index,
-        profile: profile,
-        texture: analyzeReplyTexture(reply, Object.assign({}, options, {
-          textureProfile: profile,
-          textureIndex: index,
-          texturePhase: getFallbackRhythmPhase(index),
-          textureCustomerQuestionRun: getCustomerServiceQuestionRunLength(list, index),
-          textureQuestionRun: getQuestionRunLength(list, index),
-          textureQuestionCount: countQuestionLikeReplies(list)
-        }))
-      };
-    });
-
-    analyses.filter(function (item) {
-      return item.texture.shouldRewrite && (item.texture.tooAssistantLike || item.texture.tooGeneric);
-    }).concat(analyses.filter(function (item) {
-      return item.texture.shouldRewrite && !item.texture.tooAssistantLike && !item.texture.tooGeneric;
-    })).some(function (item) {
-      if (rewriteCount >= maxRewrite) {
-        return true;
-      }
-      rewriteMap[item.index] = {
-        profile: item.profile,
-        reason: item.texture.reason
-      };
-      rewriteCount += 1;
-      return false;
-    });
-
-    options.textureRewriteCount = rewriteCount;
-
-    return list.map(function (reply, index) {
-      var rewriteItem = rewriteMap[index];
-      var replacement;
-      if (!rewriteItem) {
-        return reply;
-      }
-      replacement = maybeRewriteReplyTexture(reply, rewriteItem.profile, Object.assign({}, options, {
-        textureRewriteReason: rewriteItem.reason,
-        textureRewriteUsed: used,
-        textureIndex: index,
-        texturePhase: getFallbackRhythmPhase(index),
-        textureCustomerQuestionRun: getCustomerServiceQuestionRunLength(list, index),
-        textureQuestionRun: getQuestionRunLength(list, index),
-        textureQuestionCount: countQuestionLikeReplies(list)
-      }), index);
-      if (replacement && replacement.content !== reply.content) {
-        actualRewriteCount += 1;
-        recordReplyTextureStat(options.replyTextureStats, "textureRewritten", rewriteItem.reason || "texture");
-      }
-      options.textureRewriteCount = actualRewriteCount;
-      return replacement;
-    });
+  function maybeRewriteReplyTextureList(replies) {
+    return Array.isArray(replies) ? replies : [];
   }
 
   function maybeRewriteReplyTexture(reply, profile, settings, index) {
@@ -6857,225 +6734,14 @@
     }), index, getFallbackRhythmPhase(index), false) || source;
   }
 
-  function replaceReplyWithFallbackTexture(reply, profile, settings, index, phase, force) {
-    var source = reply && typeof reply === "object" ? reply : { content: reply };
-    var options = settings || {};
-    if (options.onlineMode) {
-      return null;
-    }
-    var baseProfile = profile || {};
-    var enrichedProfile = Object.assign({}, baseProfile, {
-      latestUserInput: options.latestUserInput || baseProfile.latestUserInput || "",
-      previousReplyText: options.previousReplyText || options.lastAssistantText || baseProfile.previousReplyText || "",
-      rejectedReplyText: options.rejectedReplyText || options.oldReplyText || baseProfile.rejectedReplyText || "",
-      recentHeartVoiceText: options.recentHeartVoiceText || baseProfile.recentHeartVoiceText || "",
-      thoughtsHint: options.thoughtsHint || options.recentHeartVoiceText || baseProfile.thoughtsHint || baseProfile.recentHeartVoiceText || "",
-      worldBookContext: options.worldBookContext || baseProfile.worldBookContext || ""
-    });
-    var flags = buildFallbackContextFlags(enrichedProfile, options.worldBookContext || "");
-    var voiceInfo = getReplyTextureVoiceInfo(enrichedProfile, options);
-    var used = options.textureRewriteUsed || {};
-    var guard = 0;
-    var line;
-
-    if (!isTextureRewriteType(source.type || "text")
-      && !(String(source.type || "text") === "action" && options.textureRewriteReason === "explanatory")
-      && !force) {
-      return null;
-    }
-
-    if (isHighQualityPersonaReply(source, enrichedProfile, options)) {
-      debugProtectedPersonaReply(source, enrichedProfile, options, index);
-      return null;
-    }
-
-    while (guard < 18) {
-      line = buildPersonaAwareFallbackLine(enrichedProfile, index + guard, flags, phase || getFallbackRhythmPhase(index + guard));
-      if (!isFallbackLineBlocked(line, enrichedProfile, used)
-        && !isGenericAiTemplateText(line)
-        && !isHighlySimilarText(compactRepeatText(line), compactRepeatText(source.content))) {
-        used[line] = true;
-        debugReplyTexture("replaceReplyWithFallbackTexture.replace", {
-          index: index,
-          reason: options.textureRewriteReason || (force ? "forced" : ""),
-          oldContent: source.content,
-          newContent: line,
-          primaryTag: voiceInfo.primaryTag,
-          tags: voiceInfo.tags,
-          latestUserInput: enrichedProfile.latestUserInput || "",
-          phase: phase || getFallbackRhythmPhase(index + guard)
-        });
-        return Object.assign({}, source, { content: line });
-      }
-      guard += 1;
-    }
-
+  function replaceReplyWithFallbackTexture() {
     return null;
   }
 
-  function rebalanceReplyRhythm(replies, profiles, settings) {
-    var list = (Array.isArray(replies) ? replies : []).slice();
-    var options = settings || {};
-    if (options.onlineMode) {
-      return list;
-    }
-    var profileList = Array.isArray(profiles) && profiles.length ? profiles : getFallbackProfiles(options);
-    var textIndexes = getTextureRewriteIndexes(list);
-    var maxReplace = 0;
-    var used = {};
-    var replaced = {};
-    var replaceCount = 0;
-    var questions;
-    var explanatory;
-    var templateIndexes;
-    var hasShortReaction;
-    var hasPersonaTrace;
-    var hasBalancedRhythm;
-    var shouldRebalance;
-    var maxRatio;
-
-    if (!textIndexes.length) {
-      return list;
-    }
-
-    questions = textIndexes.filter(function (itemIndex) {
-      return isQuestionLikeReply(list[itemIndex]);
-    });
-    explanatory = textIndexes.filter(function (itemIndex) {
-      return analyzeReplyTexture(list[itemIndex], Object.assign({}, options, {
-        textureProfile: pickFallbackProfileForReply(profileList, list[itemIndex], itemIndex),
-        textureIndex: itemIndex,
-        texturePhase: getFallbackRhythmPhase(itemIndex),
-        textureCustomerQuestionRun: getCustomerServiceQuestionRunLength(list, itemIndex),
-        textureQuestionRun: getQuestionRunLength(list, itemIndex),
-        textureQuestionCount: countQuestionLikeReplies(list)
-      })).tooExplanatory;
-    });
-    templateIndexes = textIndexes.filter(function (itemIndex) {
-      return isGenericAiTemplateText(list[itemIndex] && list[itemIndex].content);
-    });
-    hasShortReaction = textIndexes.some(function (itemIndex) {
-      return isShortReactionText(list[itemIndex] && list[itemIndex].content);
-    });
-    hasPersonaTrace = hasAnyPersonaVoiceTrace(list, textIndexes, profileList, options);
-    hasBalancedRhythm = hasShortReactionInRange(list, 0, 2)
-      && hasAttitudeInRange(list, 2, 5, profileList, options)
-      && hasProgressionInRange(list, 5, 8)
-      && hasHookInRange(list, 8, 10);
-
-    if (hasBalancedRhythm) {
-      return list;
-    }
-
-    shouldRebalance = questions.length > 4
-      || explanatory.length > 5
-      || !hasShortReaction
-      || !hasPersonaTrace
-      || templateIndexes.length > 1;
-
-    if (!shouldRebalance) {
-      return list;
-    }
-
-    maxRatio = templateIndexes.length > 1 ? 0.4 : 0.3;
-    maxReplace = Math.max(0, Math.floor(textIndexes.length * maxRatio) - (Number(options.textureRewriteCount) || 0));
-    if (maxReplace <= 0) {
-      return list;
-    }
-
-    function canReplace(targetIndex) {
-      return targetIndex >= 0
-        && targetIndex < list.length
-        && !replaced[targetIndex]
-        && replaceCount < maxReplace
-        && isTextureRewriteType(list[targetIndex] && (list[targetIndex].type || "text"));
-    }
-
-    function attemptReplace(targetIndex, phase, reason) {
-      var profile;
-      var replacement;
-      var voiceInfo;
-      var oldContent;
-
-      if (!canReplace(targetIndex)) {
-        return false;
-      }
-
-      profile = pickFallbackProfileForReply(profileList, list[targetIndex], targetIndex);
-      if (isHighQualityPersonaReply(list[targetIndex], profile, options)) {
-        debugProtectedPersonaReply(list[targetIndex], profile, options, targetIndex);
-        return false;
-      }
-
-      oldContent = list[targetIndex] && list[targetIndex].content;
-      replacement = replaceReplyWithFallbackTexture(list[targetIndex], profile, Object.assign({}, options, {
-        textureRewriteUsed: used,
-        textureRewriteReason: reason || "rebalance",
-        textureIndex: targetIndex,
-        texturePhase: phase || getFallbackRhythmPhase(targetIndex)
-      }), targetIndex, phase || getFallbackRhythmPhase(targetIndex), true);
-
-      if (!replacement || replacement.content === list[targetIndex].content) {
-        return false;
-      }
-
-      list[targetIndex] = replacement;
-      replaced[targetIndex] = true;
-      replaceCount += 1;
-      recordReplyTextureStat(options.replyTextureStats, "rhythmRebalanced", reason || "rebalance");
-      voiceInfo = getReplyTextureVoiceInfo(profile, options);
-      debugReplyTexture("rebalanceReplyRhythm.replace", {
-        index: targetIndex,
-        reason: reason || "rebalance",
-        oldContent: oldContent,
-        newContent: replacement.content,
-        primaryTag: voiceInfo.primaryTag,
-        tags: voiceInfo.tags,
-        latestUserInput: options.latestUserInput || profile.latestUserInput || "",
-        phase: phase || getFallbackRhythmPhase(targetIndex)
-      });
-      return true;
-    }
-
-    if (templateIndexes.length > 1) {
-      templateIndexes.forEach(function (itemIndex) {
-        attemptReplace(itemIndex, getFallbackRhythmPhase(itemIndex), "template-overflow");
-      });
-    }
-
-    if (questions.length > 4) {
-      questions.slice(4).forEach(function (itemIndex) {
-        attemptReplace(itemIndex, getFallbackRhythmPhase(itemIndex), "question-overflow");
-      });
-    }
-
-    if (explanatory.length > 5) {
-      explanatory.slice(5).forEach(function (itemIndex) {
-        attemptReplace(itemIndex, getFallbackRhythmPhase(itemIndex), "explanatory-overflow");
-      });
-    }
-
-    if (!hasShortReaction) {
-      attemptReplace(findReplaceCandidateInRange(list, 0, 2, profileList, options), "instant", "no-short-reaction");
-    }
-    if (!hasAttitudeInRange(list, 2, 5, profileList, options) && (!hasPersonaTrace || templateIndexes.length > 1)) {
-      attemptReplace(findReplaceCandidateInRange(list, 2, 5, profileList, options), "attitude", "missing-attitude");
-    }
-    if (!hasProgressionInRange(list, 5, 8) && (!hasPersonaTrace || explanatory.length > 5)) {
-      attemptReplace(findReplaceCandidateInRange(list, 5, 8, profileList, options), "progression", "missing-progression");
-    }
-    if (!hasHookInRange(list, 8, 10) && (!hasPersonaTrace || questions.length > 4 || explanatory.length > 5)) {
-      attemptReplace(findReplaceCandidateInRange(list, 8, 10, profileList, options), "hook", "missing-hook");
-    }
-
-    if (!hasPersonaTrace) {
-      textIndexes.slice(0, 3).forEach(function (itemIndex) {
-        attemptReplace(itemIndex, getFallbackRhythmPhase(itemIndex), "no-persona-texture");
-      });
-    }
-
-    return list;
+  function rebalanceReplyRhythm(replies) {
+    return (Array.isArray(replies) ? replies : []).slice();
   }
+
 
   function isTextureRewriteType(type) {
     var value = String(type || "text");
@@ -7480,34 +7146,8 @@
     }).length;
   }
 
-  function createFallbackReplyItems(settings, existingReplies, stats) {
-    if (isOnlineReplyMode(settings || {})) {
-      return [];
-    }
-    var missing = Math.max(0, (Number(settings.min) || 0) - countReplyItemsForMinimum(existingReplies));
-    var profiles = getFallbackProfiles(settings);
-    var items = [];
-    var used = {};
-    var index = 0;
-
-    while (items.length < missing && items.length + (Array.isArray(existingReplies) ? existingReplies.length : 0) < settings.max) {
-      var profile = profiles[index % profiles.length] || {};
-      var line = pickFallbackLine(profile, index, used, buildFallbackContextFlags(profile, settings.worldBookContext || ""), getFallbackRhythmPhase(index), settings);
-      var reply = {
-        type: "text",
-        content: line
-      };
-
-      if (profile.id) {
-        reply.characterId = profile.id;
-      }
-
-      items.push(reply);
-      recordReplyTextureStat(stats || settings.replyTextureStats, "fallbackAdded", "minimum");
-      index += 1;
-    }
-
-    return items;
+  function createFallbackReplyItems() {
+    return [];
   }
 
   function pickFallbackProfileForReply(profiles, reply, index) {
@@ -7591,38 +7231,8 @@
     return "hook";
   }
 
-  function pickFallbackLine(profile, index, used, contextFlags, phase, options) {
-    if (isOnlineReplyMode(profile || options || {})) {
-      return "";
-    }
-    var flags = contextFlags || buildFallbackContextFlags(profile, "");
-    var voiceProfile = profile && profile.voiceProfile || detectPersonaVoiceProfile(profile || {});
-    var tags = voiceProfile.tags || [];
-    var primaryTag = voiceProfile.primaryTag || tags[0] || getFallbackStyleBucket(profile || {}, flags);
-    var line = buildPersonaAwareFallbackLine(profile, index, flags, phase || getFallbackRhythmPhase(index));
-    var shortLine;
-    var guard = 0;
-
-    while (isFallbackLineBlocked(line, profile, used) && guard < 24) {
-      guard += 1;
-      line = buildPersonaAwareFallbackLine(profile, index + guard, flags, phase || getFallbackRhythmPhase(index + guard));
-    }
-
-    if (isFallbackLineBlocked(line, profile, used)) {
-      shortLine = getShortestPersonaFallbackLine(primaryTag);
-      if (!isFallbackLineBlocked(shortLine, profile, used)) {
-        line = shortLine;
-      } else if (guard >= 20) {
-        line = "这句先别翻过去。";
-      }
-    }
-
-    if (isGenericAiTemplateText(line)) {
-      line = getShortestPersonaFallbackLine(primaryTag);
-    }
-
-    used[line] = true;
-    return line;
+  function pickFallbackLine() {
+    return "";
   }
 
   function isFallbackLineBlocked(line, profile, used) {
@@ -7743,70 +7353,16 @@
     return "";
   }
 
-  function getShortestPersonaFallbackLine(primaryTag) {
-    var byTag = {
-      worldControl: "停。",
-      worldForbidden: "收住。",
-      cold: "嗯。",
-      strong: "过来。",
-      tsundere: "啧。",
-      clingy: "别走。",
-      gentle: "先别撑。",
-      obsessive: "我看着呢。",
-      playful: "哟。",
-      formal: "坐好。",
-      hostile: "少来。",
-      shy: "……别这样。",
-      default: "等一下。"
-    };
-
-    return byTag[primaryTag] || byTag.default;
+  function getShortestPersonaFallbackLine() {
+    return "";
   }
 
-  function pickFallbackPhaseLines(lines, rhythmPhase) {
-    var list = Array.isArray(lines) ? lines : [];
-    var phase = rhythmPhase || "instant";
-
-    if (phase === "instant") {
-      return list.slice(0, 2);
-    }
-    if (phase === "attitude") {
-      return list.slice(2, 5);
-    }
-    if (phase === "progression") {
-      return list.slice(5, 8);
-    }
-    return list.slice(8, 10);
+  function pickFallbackPhaseLines() {
+    return [];
   }
 
-  function buildPersonaAwareFallbackLine(profile, index, contextFlags, phase, options) {
-    var source = profile || {};
-    if (isOnlineReplyMode(source || options || {})) {
-      return "";
-    }
-    var flags = contextFlags || buildFallbackContextFlags(source, "");
-    var voiceProfile = source.voiceProfile || detectPersonaVoiceProfile(source);
-    var tags = voiceProfile.tags || [];
-    var primaryTag = voiceProfile.primaryTag || tags[0] || getFallbackStyleBucket(source, flags);
-    var inputInfo = analyzeFallbackUserInput(source.latestUserInput || "");
-    var rhythmPhase = phase || getFallbackRhythmPhase(index);
-    var candidates = buildFallbackCandidatesByInput(source, inputInfo, tags, rhythmPhase, flags, index);
-
-    if (isMyAiAppDebugEnabled("debugFallback") && typeof console !== "undefined" && console.debug) {
-      console.debug("[AI Debug] fallback", {
-        primaryTag: primaryTag,
-        selectedPhase: rhythmPhase,
-        latestUserInput: String(source.latestUserInput || "").slice(0, 120),
-        candidateCount: candidates.length,
-        candidatePreview: candidates.slice(0, 6)
-      });
-    }
-
-    if (!candidates.length) {
-      candidates = getFallbackLines(primaryTag || "default", source, flags);
-    }
-
-    return candidates[index % candidates.length] || getShortestPersonaFallbackLine(primaryTag);
+  function buildPersonaAwareFallbackLine() {
+    return "";
   }
 
   function buildFallbackCandidatesByInput(profile, inputInfo, tags, phase, flags, index) {
@@ -7850,88 +7406,12 @@
     });
   }
 
-  function buildFallbackEvidenceCandidates(profile, phase, flags) {
-    var source = profile || {};
-    var voiceProfile = source.voiceProfile || detectPersonaVoiceProfile(source);
-    var activeTags = voiceProfile.tags || [];
-    var primaryTag = voiceProfile.primaryTag || activeTags[0] || getFallbackStyleBucket(source, flags);
-    var allowDirectiveLines = hasDirectiveFallbackTag(primaryTag, activeTags);
-    var evidenceText = (Array.isArray(source.personaEvidence) ? source.personaEvidence : []).join("\n");
-    var previousText = [source.previousReplyText, source.rejectedReplyText, source.thoughtsHint, source.recentHeartVoiceText].filter(Boolean).join("\n");
-    var candidates = [];
-
-    if (allowDirectiveLines && /老师|上司|年长|监护|前辈|师长|管教/.test(evidenceText)) {
-      candidates = candidates.concat(["你先具体说一下。", "这句不能随便带过。", "分寸先摆正。", "按我说的来。", "这件事我会处理。", "先到这里。", "回头再算。"]);
-    } else if (allowDirectiveLines && /强势|命令|控制|掌控|支配|压制/.test(evidenceText)) {
-      candidates = candidates.concat(["先停一下。", "按我说的来。", "这句还没说完。", "过来。", "你先具体说一下。", "到这儿，听我的。", "这事我先压住。"]);
-    } else if (/冷淡|疏离|淡漠|寡言|克制/.test(evidenceText)) {
-      candidates = candidates.concat(["嗯。", "不必扯远。", "不像。", "我听见了。", "说重点。", "我接着。", "这句留着。", "到这儿。", "先别翻篇。"]);
-    } else if (/嘴硬|傲娇|别扭|不坦率/.test(evidenceText)) {
-      candidates = candidates.concat(["啧。", "别误会。", "我只是顺口。", "烦死了。", "那你倒是说啊。", "我没说不管。", "算了，先这样。", "这事我记着。"]);
-    } else if (/黏人|依赖|撒娇|缺安全感/.test(evidenceText)) {
-      candidates = candidates.concat(["别走。", "再回我一句。", "别把我晾着。", "我在等。", "再说一点。", "你先看我。", "我还没放你走。", "我先听你说。"]);
-    }
-
-    if (/吃醋|占有|盯|别人|那个人/.test(previousText)) {
-      candidates = candidates.concat(["那个人先放一边。", "别拿别人挡着。", "我听见你提到谁了。"]);
-    }
-    if (/心软|担心|在意|靠近/.test(previousText)) {
-      candidates = candidates.concat(["先把话说稳。", "我听着。", "别急着躲。", "这句我放在心上。"]);
-    }
-    if (flags && flags.wantsSuppress) {
-      candidates = candidates.concat(["先停。", "我来压住这件事。"]);
-    }
-    if (flags && flags.wantsAway) {
-      candidates = candidates.concat(["到这儿。", "别再往前推。"]);
-    }
-
-    return pickFallbackPhaseLines(uniqueList(candidates), phase);
+  function buildFallbackEvidenceCandidates() {
+    return [];
   }
 
-  function buildFallbackInputTypeCandidates(profile, inputInfo, tags, primaryTag, phase, flags) {
-    var source = profile || {};
-    if (isOnlineReplyMode(source)) {
-      return [];
-    }
-    var info = inputInfo || analyzeFallbackUserInput(source.latestUserInput || "");
-    var activeTags = uniqueList([primaryTag].concat(Array.isArray(tags) ? tags : [])).filter(Boolean);
-    var intents = [];
-    var candidates = [];
-
-    if (info.isFarewell) {
-      intents.push("farewell");
-    }
-    if (info.isDefiant) {
-      intents.push("defiant");
-    }
-    if (info.isNegation && !info.isDefiant) {
-      intents.push("negation");
-    }
-    if (info.isSoft) {
-      intents.push("soft");
-    }
-    if (info.isMoneyRelated) {
-      intents.push("money");
-    }
-    if (info.isQuestion) {
-      intents.push("question");
-    }
-    if (!intents.length && info.compact) {
-      intents.push("generic");
-    }
-
-    if (info.isNegation && hasColdTsundereFallbackTags(primaryTag, activeTags)) {
-      candidates = candidates.concat(getColdTsundereNegationFallbackLines(phase, source));
-    }
-
-    intents.forEach(function (intent) {
-      activeTags.slice(0, 4).forEach(function (tag) {
-        candidates = candidates.concat(getFallbackInputPhaseLines(intent, tag, info, phase, flags, source));
-      });
-      candidates = candidates.concat(getFallbackInputPhaseLines(intent, "default", info, phase, flags, source));
-    });
-
-    return uniqueList(candidates);
+  function buildFallbackInputTypeCandidates() {
+    return [];
   }
 
   function hasColdTsundereFallbackTags(primaryTag, tags) {
@@ -7939,719 +7419,23 @@
     return activeTags.indexOf("cold") !== -1 && activeTags.indexOf("tsundere") !== -1;
   }
 
-  function getColdTsundereNegationFallbackLines(phase, options) {
-    if (isOnlineReplyMode(options || {})) {
-      return [];
-    }
-    var bank = {
-      instant: ["你说的我听见了。", "我不确定你指的是哪一部分。"],
-      attitude: ["你先说具体一点。", "我不是这么想的。"],
-      progression: ["这件事我先记着。", "我再判断怎么接。"],
-      hook: ["这句我先接住。", "我现在先听着。"]
-    };
-    return bank[phase] || bank.instant;
+  function getColdTsundereNegationFallbackLines() {
+    return [];
   }
 
-  function getFallbackInputPhaseLines(intent, tag, inputInfo, phase, flags, options) {
-    if (isOnlineReplyMode(options || {})) {
-      return [];
-    }
-    var quote = getFallbackInputQuoteWord(inputInfo);
-    var q = quote || "";
-    var quoted = q ? "“" + q + "”" : "";
-    var byIntent = buildFallbackInputPhaseBank(q, quoted, options);
-    var bank = byIntent[intent] || byIntent.generic;
-    var tagLines = bank[tag] || bank.default || {};
-    var lines = tagLines[phase] || tagLines.instant || [];
-
-    return Array.isArray(lines) ? lines : [];
+  function getFallbackInputPhaseLines() {
+    return [];
   }
 
-  function buildFallbackInputPhaseBank(q, quoted, options) {
-    if (isOnlineReplyMode(options || {})) {
-      return {};
-    }
-    var heard = quoted ? quoted + "这句，我听见了。" : "你刚才那句，我听见了。";
-    var askClear = quoted ? "先把" + quoted + "说清楚。" : "先把刚才那句说清楚。";
-
-    return {
-      farewell: {
-        cold: {
-          instant: ["嗯。", "要睡就睡。"],
-          attitude: ["别拿晚安当收尾。", "今天到这儿。"],
-          progression: ["明天再说。", "别半夜又翻回来。"],
-          hook: ["灯关了。", "醒了再回。"]
-        },
-        strong: {
-          instant: ["先别睡。", "站住。"],
-          attitude: ["先把话说完再睡。", "晚安不算结束。"],
-          progression: ["明天醒了先回我。", "这事我先记着。"],
-          hook: ["到这儿，听我的。", "别让我明天再问。"]
-        },
-        tsundere: {
-          instant: ["睡就睡。", "跟我报备什么。"],
-          attitude: ["谁拦你了。", "烦死了，快睡。"],
-          progression: ["明天别又装忘。", "我可没说在等你。"],
-          hook: ["晚安就晚安。", "……别熬。"]
-        },
-        clingy: {
-          instant: ["这么快就要走？", "别走。"],
-          attitude: ["再回我一句嘛。", "你又把我晾下。"],
-          progression: ["睡前再说一句。", "明天醒了要先找我。"],
-          hook: ["我还在等。", "不许悄悄没影。"]
-        },
-        gentle: {
-          instant: ["晚安，别再熬了。", "嗯，去睡。"],
-          attitude: ["今天先放过你。", "别硬撑到很晚。"],
-          progression: ["明天醒了再慢慢说。", "灯关好。"],
-          hook: ["做个安稳点的梦。", "醒了我再听。"]
-        },
-        obsessive: {
-          instant: ["走得这么急？", "我还没放你走。"],
-          attitude: ["你越急着晚安，我越会记着。", "刚才那句没完。"],
-          progression: ["明天先回我。", "别让我自己猜一晚上。"],
-          hook: ["我看着时间。", "你躲不过明天。"]
-        },
-        playful: {
-          instant: ["哟，这就撤了？", "跑这么快啊。"],
-          attitude: ["晚安也说得像逃跑。", "行，暂时放你一马。"],
-          progression: ["明天继续审你。", "欠我的那句先记账。"],
-          hook: ["睡吧，小胆子。", "别梦里也编。"]
-        },
-        formal: {
-          instant: ["先到这里。", "可以休息。"],
-          attitude: ["睡前把情绪放稳。", "今天不继续逼你。"],
-          progression: ["明天再按顺序说。", "这件事先记下。"],
-          hook: ["关灯。", "醒了再处理。"]
-        },
-        hostile: {
-          instant: ["随你。", "要走就走。"],
-          attitude: ["别把晚安说得像赢了。", "这不算翻篇。"],
-          progression: ["账先留着。", "明天你最好还记得。"],
-          hook: ["滚去睡。", "别半夜回来装没事。"]
-        },
-        shy: {
-          instant: ["……晚安。", "嗯，睡吧。"],
-          attitude: ["我、我没拦你。", "别熬太晚。"],
-          progression: ["明天再说也行。", "我会记得的。"],
-          hook: ["……别做噩梦。", "醒了再回我。"]
-        },
-        default: {
-          instant: ["晚安。", "先睡吧。"],
-          attitude: ["这句先收着。", "今天到这里也行。"],
-          progression: ["明天再接着说。", "别把刚才那句丢了。"],
-          hook: ["醒了再说。", "别熬。"]
-        }
-        },
-        negation: {
-          cold: {
-          instant: ["是吗？", "随你。"],
-          attitude: [q ? quoted + "我先接住。" : "这句我先接住。", "那就这样。"],
-          progression: ["你最好是。", "我接着。"],
-          hook: ["我没说信你。", "先别翻篇。"]
-        },
-        strong: {
-          instant: ["这句不算。", "抬头。"],
-          attitude: [q ? "你先把具体的说出来。" : "我不确定你指哪部分。", "你这句有点回避。"],
-          progression: ["你先具体说一下。", "这句我先听着。"],
-          hook: ["你先把具体的说出来。", "先听我说。"]
-        },
-        tsundere: {
-          instant: ["先把问题说出来。", "啧。"],
-          attitude: ["我又没说担心你。", "你接着说明。"],
-          progression: ["你先具体说一下。", "这句我先听着。"],
-          hook: ["算了，先听你的。", "我先记着。"]
-        },
-        clingy: {
-          instant: ["你又这样。", "我先听你说。"],
-          attitude: [q ? "你先把具体的说出来。" : "我不确定你指哪部分。", "你越这样我越认真。"],
-          progression: ["再回我一句。", "别回避我。"],
-          hook: ["我还在等。", "别走。"]
-        },
-        gentle: {
-          instant: ["那就先坐下。", "别硬撑。"],
-          attitude: [q ? "我听见你说" + quoted + "了。" : "我听见了。", "先别急着证明。"],
-          progression: ["把气放下来一点。", "慢慢说也行。"],
-          hook: ["我在这儿。", "先别撑。"]
-        },
-        obsessive: {
-          instant: ["你刚才停顿了。", "我听见了。"],
-          attitude: [q ? "你先把具体的说出来。" : "我不确定你指哪部分。", "你这句有点回避。"],
-          progression: ["你先具体说一下。", "先把重点说出来。"],
-          hook: ["我会注意。", "我现在还不能直接猜。"]
-        },
-        playful: {
-          instant: ["我差点就信了。", "哟。"],
-          attitude: [q ? quoted + "说得挺顺。" : "说得挺顺。", "破绽也挺明显。"],
-          progression: ["再说一遍。", "先别走。"],
-          hook: ["这句我先听着。", "你接着说下去。"]
-        },
-        formal: {
-          instant: ["先别用这句收尾。", "坐好。"],
-          attitude: [q ? quoted + "不能当结论。" : "这句不能当结论。", "把话说完整。"],
-          progression: ["按顺序说。", "先别自己扛。"],
-          hook: ["我会记着。", "回头再算。"]
-        },
-        hostile: {
-          instant: ["少来。", "我不信。"],
-          attitude: [q ? "这句我先接住。" : "这句我先接住。", "你以为我听不出来？"],
-          progression: ["说清楚。", "你接着说也行。"],
-          hook: ["这笔账先记着。", "别急着洗干净。"]
-        },
-        shy: {
-          instant: ["……我不太信。", "你别这样。"],
-          attitude: [q ? "你说" + quoted + "的时候，不像。" : "你刚才不像。", "我听见了。"],
-          progression: ["再给我一下。", "你小声说也行。"],
-          hook: ["我会等。", "先别走。"]
-        },
-        default: {
-          instant: [q ? "你这叫" + q + "？" : "等一下。", heard],
-          attitude: [q ? "别拿" + quoted + "收尾。" : "别急着收尾。", "这不像能随便翻过去。"],
-          progression: ["继续说。", "先别躲。"],
-          hook: ["这句留着。", "我听着。"]
-        }
-      },
-      defiant: {
-        cold: {
-          instant: ["那你最好真能自己收拾好。", "随你。"],
-          attitude: [q ? quoted + "？行。" : "行。", "别回头又乱。"],
-          progression: ["自己说清楚。", "别把烂摊子推回来。"],
-          hook: ["我看着。", "到时候别躲。"]
-        },
-        strong: {
-          instant: ["这句不算。", "过来。"],
-          attitude: ["顶嘴留到后面。", "我没问你愿不愿意。"],
-          progression: ["按我说的来。", "先把脾气收回去。"],
-          hook: ["别让我说第二遍。", "站那儿别动。"]
-        },
-        tsundere: {
-          instant: ["先回答一个问题。", "啧。"],
-          attitude: [q ? quoted + "说得真顺。" : "说得真顺。", "我只是看不下去。"],
-          progression: ["那你倒是别乱来。", "别让我抓到。"],
-          hook: ["烦死了。", "下次别找我。"]
-        },
-        clingy: {
-          instant: ["你就非要推开我吗。", "别这样。"],
-          attitude: [q ? "你说" + quoted + "的时候最像在躲。" : "你就是在躲。", "我不喜欢。"],
-          progression: ["先给我个回答。", "别拿脾气隔开我。"],
-          hook: ["我还在这儿。", "你别走。"]
-        },
-        gentle: {
-          instant: ["先别把话说这么满。", "我听见了。"],
-          attitude: ["你可以生气，但别伤自己。", q ? quoted + "先放一放。" : "这句先放一放。"],
-          progression: ["把气放下来再说。", "我不急着压你。"],
-          hook: ["我还在听。", "别硬撑。"]
-        },
-        obsessive: {
-          instant: ["你越这么说，我越要管。", "别躲。"],
-          attitude: [q ? quoted + "只会让我更在意。" : "这只会让我更在意。", "你推不开我。"],
-          progression: ["现在看着我。", "先回我。"],
-          hook: ["我盯着呢。", "不要让我猜。"]
-        },
-        playful: {
-          instant: ["胆子见长啊。", "哟。"],
-          attitude: [q ? quoted + "，说得挺横。" : "说得挺横。", "我差点鼓掌。"],
-          progression: ["来，再顶一句试试。", "别急着跑。"],
-          hook: ["这账我爱记。", "继续。"]
-        },
-        formal: {
-          instant: ["情绪先放下。", "坐好。"],
-          attitude: [q ? quoted + "不是解决办法。" : "顶回去不是解决办法。", "把话说清楚。"],
-          progression: ["按顺序来。", "先听我说完。"],
-          hook: ["这件事我会记着。", "回头处理。"]
-        },
-        hostile: {
-          instant: ["我本来也没打算信你。", "少来。"],
-          attitude: [q ? quoted + "？你试试。" : "你试试。", "别把自己说得多硬。"],
-          progression: ["继续顶。", "我看你能撑到哪儿。"],
-          hook: ["账先记着。", "别后悔。"]
-        },
-        shy: {
-          instant: ["……你别这么说。", "我没想逼你。"],
-          attitude: [q ? quoted + "听起来有点凶。" : "你这样有点凶。", "我会乱。"],
-          progression: ["你先别走。", "再给我一句。"],
-          hook: ["我还在。", "别这样。"]
-        },
-        default: {
-          instant: ["这句不算。", "等一下。"],
-          attitude: [q ? quoted + "先收回去。" : "脾气先收回去。", "别急着顶。"],
-          progression: ["把话说清楚。", "先别躲。"],
-          hook: ["我听着。", "这句留着。"]
-        }
-      },
-      soft: {
-        cold: {
-          instant: ["那就别硬撑。", q ? q + "就说。" : "难受就说。"],
-          attitude: ["别装得像没事。", "我听见了。"],
-          progression: ["先坐下。", "把手放下。"],
-          hook: ["到这儿。", "别再逞强。"]
-        },
-        strong: {
-          instant: [q === "想你" || q === "抱抱" ? q + "就说出来。" : (q ? q + "还逞什么强。" : "还逞什么强。"), "过来。"],
-          attitude: ["先停。", "我来安排。"],
-          progression: ["坐下，别乱动。", "听我的。"],
-          hook: ["别让我问第二遍。", "先别撑。"]
-        },
-        tsundere: {
-          instant: ["麻烦死了，过来。", "谁让你硬撑了。"],
-          attitude: [q ? "我听见" + q + "了。" : "我听见了。", "别误会，我只是看不下去。"],
-          progression: ["先坐着。", "别乱跑。"],
-          hook: ["……下次早点说。", "烦。"]
-        },
-        clingy: {
-          instant: [q === "想你" ? "想我就再说一遍。" : "你这样我会慌。", "别离我太远。"],
-          attitude: [q ? quoted + "我听见了。" : "我听见了。", "你不能自己扛着。"],
-          progression: ["靠近一点。", "回我一句。"],
-          hook: ["我陪着。", "别回避我。"]
-        },
-        gentle: {
-          instant: ["先靠一下。", q ? q + "就别忍着。" : "别忍着。"],
-          attitude: ["我在。", "慢一点也没关系。"],
-          progression: ["先坐稳。", "把气放下来。"],
-          hook: ["别硬撑。", "我听着。"]
-        },
-        obsessive: {
-          instant: [q ? "我听见你说" + q + "了。" : "我听见了。", "别藏。"],
-          attitude: ["你刚才的声音不对。", "我会盯着。"],
-          progression: ["现在看着我。", "别把我推开。"],
-          hook: ["我看着呢。", "不要让我猜。"]
-        },
-        playful: {
-          instant: ["哟，会撒娇了。", q ? quoted + "这句有点犯规。" : "这句有点犯规。"],
-          attitude: ["行，暂时不逗你。", "别装得太坚强。"],
-          progression: ["过来一点。", "让我看看。"],
-          hook: ["下次早点招。", "记你一笔。"]
-        },
-        formal: {
-          instant: ["先坐下。", "我看着。"],
-          attitude: [q ? quoted + "先别忍。" : "不舒服先别忍。", "别逞强。"],
-          progression: ["按我说的休息。", "把呼吸放稳。"],
-          hook: ["先别撑。", "之后再说。"]
-        },
-        hostile: {
-          instant: ["现在知道疼了？", "少硬撑。"],
-          attitude: [q ? quoted + "不是拿来逞强的。" : "别拿难受逞强。", "我不吃你这套。"],
-          progression: ["坐下。", "说清楚哪儿不对。"],
-          hook: ["别再给我装。", "账先记着。"]
-        },
-        shy: {
-          instant: ["……我在。", "你别忍。"],
-          attitude: [q ? "你说" + q + "的时候，我听见了。" : "我听见了。", "我有点担心。"],
-          progression: ["我、我靠近一点。", "你先别动。"],
-          hook: ["别硬撑。", "我会等。"]
-        },
-        default: {
-          instant: [q ? q + "就说。" : "别硬撑。", "我听见了。"],
-          attitude: ["先别自己扛。", "这句我接住了。"],
-          progression: ["坐下慢慢说。", "把气放稳。"],
-          hook: ["我在。", "先别撑。"]
-        }
-      },
-      question: {
-        cold: {
-          instant: ["你真想问这个？", "短答：不一定。"],
-          attitude: [q ? quoted + "先放着。" : "问题先放着。", "别扯远到别处。"],
-          progression: ["先说你的理由。", "我再答。"],
-          hook: ["就这样。", "别追太快。"]
-        },
-        strong: {
-          instant: ["你先回答我。", "别急着问。"],
-          attitude: [askClear, "问题不是你拿来躲的。"],
-          progression: ["把前一句补完。", "我再告诉你。"],
-          hook: ["现在，先听我的。", "别抢节奏。"]
-        },
-        tsundere: {
-          instant: ["问我干什么。", "你怎么突然问这个。"],
-          attitude: ["别误会，我不是非要答。", "这问题烦人。"],
-          progression: ["你先说为什么问。", "别装随口。"],
-          hook: ["算了，回头说。", "我先记着。"]
-        },
-        clingy: {
-          instant: ["你先告诉我为什么问。", "别只丢问题给我。"],
-          attitude: [q ? quoted + "跟我有关吗？" : "跟我有关吗？", "别回避我。"],
-          progression: ["回我一句真的。", "我再答你。"],
-          hook: ["我等着。", "不许跑。"]
-        },
-        gentle: {
-          instant: ["我会说。", "你先别急。"],
-          attitude: [q ? quoted + "可以慢慢问。" : "可以慢慢问。", "但别拿问题压自己。"],
-          progression: ["先把你想知道的说清楚。", "我听完再答。"],
-          hook: ["我在。", "慢慢来。"]
-        },
-        obsessive: {
-          instant: ["你为什么突然问这个？", "谁让你想到这个。"],
-          attitude: [q ? quoted + "不是随便冒出来的。" : "这不是随便冒出来的。", "我注意到了。"],
-          progression: ["先告诉我原因。", "不要让我猜。"],
-          hook: ["我盯着呢。", "你绕不过去。"]
-        },
-        playful: {
-          instant: ["这问题有点会挑时候。", "哟，问到这儿了。"],
-          attitude: [q ? quoted + "挺有意思。" : "挺有意思。", "你先别随便说。"],
-          progression: ["你先说清楚为什么问。", "我先判断怎么接。"],
-          hook: ["胆子见长。", "你接着说。"]
-        },
-        formal: {
-          instant: ["先把问题说完整。", "我听着。"],
-          attitude: [q ? quoted + "需要分开讲。" : "这个需要分开讲。", "别急。"],
-          progression: ["按顺序来。", "先说背景。"],
-          hook: ["我会答。", "但不是现在糊过去。"]
-        },
-        hostile: {
-          instant: ["你这是问什么方向？", "问这个干什么。"],
-          attitude: [q ? quoted + "听着就不单纯。" : "听着就不单纯。", "你先别随便说。"],
-          progression: ["先说明你的目的。", "别把自己摘干净。"],
-          hook: ["我暂时不信。", "你接着说。"]
-        },
-        shy: {
-          instant: ["……你怎么问这个。", "我不知道怎么说。"],
-          attitude: [q ? quoted + "有点突然。" : "有点突然。", "你别盯着我。"],
-          progression: ["你先说一点。", "我再想想。"],
-          hook: ["等一下。", "我会回你的。"]
-        },
-        default: {
-          instant: ["你问这个？", heard],
-          attitude: [askClear, "别拿问题绕开刚才。"],
-          progression: ["先说为什么问。", "我再答。"],
-          hook: ["这问题先留着。", "我听着。"]
-        }
-      },
-      money: {
-        cold: {
-          instant: ["钱的事，别扯远。", q ? quoted + "我看见了。" : "我看见了。"],
-          attitude: ["别拿钱当解释。", "账归账。"],
-          progression: ["先把情况理清。", "别推来推去。"],
-          hook: ["先放这儿。", "我会记着。"]
-        },
-        strong: {
-          instant: ["收着，别推来推去。", "钱先放这儿。"],
-          attitude: [q ? quoted + "不是让你躲话用的。" : "钱不是让你躲话用的。", "我来定。"],
-          progression: ["你先具体说一下。", "该收该退我判断。"],
-          hook: ["别让我说第二遍。", "账我会算。"]
-        },
-        tsundere: {
-          instant: ["谁稀罕你这点钱。", "啧。"],
-          attitude: [q ? quoted + "也别想堵我嘴。" : "别想堵我嘴。", "我又没缺这个。"],
-          progression: ["先说正事。", "钱放一边。"],
-          hook: ["烦死了。", "这账我先记着。"]
-        },
-        clingy: {
-          instant: ["你别拿钱把我打发了。", q ? quoted + "我看见了。" : "我看见了。"],
-          attitude: ["我要的是你回话。", "别想这样糊弄过去。"],
-          progression: ["先回我。", "钱等会儿再说。"],
-          hook: ["我还在等。", "别回避我。"]
-        },
-        gentle: {
-          instant: ["这件事和钱先分开。", "先把情况理清。"],
-          attitude: [q ? quoted + "我看到了。" : "我看到了。", "别用这个压自己。"],
-          progression: ["该怎么处理慢慢来。", "先别急着退。"],
-          hook: ["我在听。", "别硬撑。"]
-        },
-        obsessive: {
-          instant: ["别拿红包转移我。", q ? quoted + "我看见了。" : "我看见了。"],
-          attitude: ["钱挡不住刚才那句。", "你越转开我越在意。"],
-          progression: ["先回我。", "账之后再算。"],
-          hook: ["我盯着呢。", "别想混过去。"]
-        },
-        playful: {
-          instant: ["哟，拿红包堵我嘴？", "这招挺会。"],
-          attitude: [q ? quoted + "挺热闹。" : "挺热闹。", "但破绽还在。"],
-          progression: ["先交代正事。", "钱等会儿审。"],
-          hook: ["这账我爱记。", "继续。"]
-        },
-        formal: {
-          instant: ["账归账。", "话也要说清楚。"],
-          attitude: [q ? quoted + "先记录着。" : "这笔先记录着。", "不要混成一件事。"],
-          progression: ["按顺序处理。", "先讲清原因。"],
-          hook: ["之后再算。", "先到这里。"]
-        },
-        hostile: {
-          instant: ["少拿钱做样子。", "我不吃这套。"],
-          attitude: [q ? quoted + "也洗不干净。" : "这也洗不干净。", "账不是这么算的。"],
-          progression: ["说清楚。", "别把话题买走。"],
-          hook: ["这笔账先记着。", "继续说。"]
-        },
-        shy: {
-          instant: ["……这个我不能乱收。", q ? quoted + "我看见了。" : "我看见了。"],
-          attitude: ["你别突然这样。", "我会慌。"],
-          progression: ["先说为什么。", "我再决定。"],
-          hook: ["等一下。", "别催我。"]
-        },
-        default: {
-          instant: ["这件事和钱先分开。", q ? quoted + "我看见了。" : "我看见了。"],
-          attitude: ["别拿钱替话。", "账和人要分开。"],
-          progression: ["先说清楚。", "之后再处理。"],
-          hook: ["这笔先记着。", "我听着。"]
-        }
-      },
-      generic: {
-        cold: {
-          instant: [heard, "嗯。"],
-          attitude: [q ? quoted + "这句，留着。" : "这句留着。", "别扯远。"],
-          progression: ["继续。", "说重点。"],
-          hook: ["到这儿。", "先别翻篇。"]
-        },
-        strong: {
-          instant: [askClear, "先听我说。"],
-          attitude: ["这句别糊过去。", "我先听着。"],
-          progression: ["按我说的来。", "先把话补完。"],
-          hook: ["别让我问第二遍。", "到这儿，听我的。"]
-        },
-        tsundere: {
-          instant: [q ? quoted + "？" : "啧。", "别误会。"],
-          attitude: ["我只是顺口问。", "你刚才那样很明显。"],
-          progression: ["那你倒是说啊。", "别又装没事。"],
-          hook: ["算了，先听你的。", "这事我先记着。"]
-        },
-        clingy: {
-          instant: ["你又这样。", "别把我晾在这儿。"],
-          attitude: [q ? "刚才" + quoted + "不许跳过。" : "刚才那句不许跳过。", "你回我嘛。"],
-          progression: ["再说一句。", "别回避我。"],
-          hook: ["我还在等。", "我先听你说。"]
-        },
-        gentle: {
-          instant: [heard, "先看着我。"],
-          attitude: ["这句我接住了。", "不用硬撑。"],
-          progression: ["把气放下来一点。", "慢慢说。"],
-          hook: ["我在听。", "说到这儿也行。"]
-        },
-        obsessive: {
-          instant: [heard, "我注意到了。"],
-          attitude: [q ? quoted + "别想糊过去。" : "别想糊过去。", "你这句有点回避。"],
-          progression: ["先把重点说出来。", "我现在还不能直接猜。"],
-          hook: ["我盯着呢。", "别拿别人挡。"]
-        },
-        playful: {
-          instant: ["哟。", q ? quoted + "有点意思。" : "这句有点意思。"],
-          attitude: ["我差点就信了。", "别装得那么无辜。"],
-          progression: ["再说一遍。", "先别走。"],
-          hook: ["这句我先听着。", "这反应挺明显的。"]
-        },
-        formal: {
-          instant: [askClear, "坐好。"],
-          attitude: ["把话说完整。", "这事先放稳。"],
-          progression: ["按节奏来。", "不用逞强。"],
-          hook: ["这句我会记着。", "抬眼，先听我说。"]
-        },
-        hostile: {
-          instant: ["少来这套。", q ? quoted + "什么意思？" : "你这话什么意思？"],
-          attitude: ["我不吃这一套。", "别试我。"],
-          progression: ["说清楚。", "别把话说得那么干净。"],
-          hook: ["继续说。", "这笔账先记着。"]
-        },
-        shy: {
-          instant: ["……嗯。", heard],
-          attitude: ["你别看我。", "我不是那个意思。"],
-          progression: ["再给我一下。", "别催我。"],
-          hook: ["我会回你的。", "你先别走。"]
-        },
-        default: {
-          instant: [heard, "等一下。"],
-          attitude: [q ? quoted + "这句不能空着。" : "这句不能空着。", "先别急着翻篇。"],
-          progression: ["继续说。", "别把话藏一半。"],
-          hook: ["这句留着。", "我听着。"]
-        }
-      }
-    };
+  function buildFallbackInputPhaseBank() {
+    return {};
   }
 
-  function buildPersonaAwareFallbackCandidates(profile, tags, primaryTag, flags, phase, index, options) {
-    var source = profile || {};
-    if (isOnlineReplyMode(source || options || {})) {
-      return [];
-    }
-    var activeTags = Array.isArray(tags) && tags.length ? tags : (primaryTag ? [primaryTag] : []);
-    var latestInput = String(source.latestUserInput || "");
-    var previousText = [source.previousReplyText, source.rejectedReplyText, source.thoughtsHint, source.recentHeartVoiceText].filter(Boolean).join("\n");
-    var personaEvidence = Array.isArray(source.personaEvidence) ? source.personaEvidence : [];
-    var rhythmPhase = phase || "instant";
-    var candidateIndex = Number(index) || 0;
-    var has = function (tag) { return activeTags.indexOf(tag) !== -1; };
-    var allowDirectiveEvidence = hasDirectiveFallbackTag(primaryTag, activeTags);
-    var pickPhaseLines = function (lines) {
-      var list = Array.isArray(lines) ? lines : [];
-      if (rhythmPhase === "instant") {
-        return list.slice(0, 2);
-      }
-      if (rhythmPhase === "attitude") {
-        return list.slice(2, 5);
-      }
-      if (rhythmPhase === "progression") {
-        return list.slice(5, 8);
-      }
-      return list.slice(8, 10);
-    };
-    var phaseLines = {
-      strong: ["先停。", "先听我说。", "这句别糊过去。", "我先听着。", "按我说的来。", "先把话说清楚。", "不用躲。", "这件事我来定。", "你先把具体的说出来。", "到这儿，先听我说。"],
-      cold: ["嗯。", "不像。", "说重点。", "别扯远。", "我听见了。", "继续。", "别装没事。", "这句留着。", "到这儿就够了。", "先别翻篇。"],
-      tsundere: ["谁担心你了。", "别误会。", "我只是顺口问。", "你刚才那样很明显。", "烦死了。", "那你倒是说啊。", "我没生气。", "别又装没事。", "算了，先听你的。", "这事我先记着。"],
-      clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别回避我。", "再说一句。", "我还在等。", "我先听你说。"],
-      gentle: ["先看着我。", "别把自己绷太紧。", "这句我接住了。", "不用硬撑。", "我在听。", "把气放下来一点。", "先坐稳。", "别急着躲开。", "这事我会放在心上。", "说到这儿也行。"],
-      obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "先把话说清楚。", "我不喜欢你这样躲。", "那个人先放一边。", "先回答我。", "不要让我猜。", "我盯着呢。"],
-      playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "再说一遍。", "你这话我可记下了。", "先别走。", "行啊，胆子见长。", "这句我先听着。", "这反应挺明显的。"],
-      formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，先听我说。"],
-      hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续说。", "这笔账先记着."],
-      shy: ["……嗯。", "我听见了。", "你别看我。", "我不是那个意思。", "你刚才那句……算了。", "我有点乱。", "别催我。", "再给我一下。", "我会回你的。", "你先别走。"],
-      default: ["等一下。", "这话不像随便说的。", "先别急着翻篇。", "先别跳过刚才那句。", "别把话藏一半。", "继续说。", "这句留着。", "我听着。", "先说到这儿。", "别跳过刚才那句。"]
-    };
-    var comboLines = [];
-    var contextLines = [];
-    var evidenceLines = [];
-    var candidates = [];
-
-    if (has("strong") && has("tsundere") && has("formal")) {
-      comboLines = ["先别急着说没事。", "看着我。", "我不是在问你愿不愿意。", "把话说清楚，别又糊过去。", "算了，我只是顺手管一下。", "站稳，按我说的来。", "你那点逞强，我看得出来。", "别误会，我没心疼你。", "这件事到我这里先停。", "下次再这么说，先过我这一关。"];
-    } else if (has("strong") && has("tsundere")) {
-      comboLines = ["先停，别嘴硬。", "我就问这一句。", "过来，把话说清楚。", "别误会，我只是看不下去。", "你那点逞强收一收。", "按我说的来，少顶嘴。", "我没担心你。", "但你也别想糊弄过去。", "这事我先替你压住。", "下次别让我抓到。"];
-    } else if (has("strong") && has("formal")) {
-      comboLines = ["先停。", "按节奏来。", "这件事我先听着。", "把话说完整。", "别急着自己扛。", "先坐下，先听我说。", "我会安排，但你要配合。", "逞强到这里为止。", "这句我记下了。", "回头我再和你算。"];
-    } else if (has("cold") && has("obsessive")) {
-      comboLines = ["不像。", "你刚才那句，别收回去。", "提到谁了？", "别想混过去。", "我听见了。", "我接着。", "少拿没事挡我。", "你这句有点回避。", "这事先放我这儿。", "我会盯着。"];
-    } else if (has("gentle") && has("formal")) {
-      comboLines = ["先坐稳。", "这事不用急着撑过去。", "我听你说完。", "把呼吸放慢一点。", "别自己硬扛。", "我会处理，但先按分寸来。", "这句我记着。", "先别躲开。", "到这里，先休息一下。", "之后再慢慢算清楚。"];
-    } else if (has("playful") && has("hostile")) {
-      comboLines = ["哟，说得真干净。", "别急着装无辜。", "我差点就信了。", "这话留着，我爱听破绽。", "这件事得分开说。", "你这反应挺有意思。", "少来这套。", "别把自己摘得太干净。", "这笔账我先记着。", "跑什么，我还没问完。"];
-    } else if (has("shy") && has("clingy")) {
-      comboLines = ["……你别走。", "我不是催你。", "就是再说一句。", "你刚才那样，我会乱想。", "别把我晾在这里。", "我、我听着。", "你小声说也行。", "别躲太远。", "我还在等你。", "算了，你先看我一下。"];
-    }
-
-    if (/没事|不用|算了|随便|都行|晚安|不说了/.test(latestInput)) {
-      if (has("strong")) {
-        contextLines.push("你说没事，我不一定信。");
-      }
-      if (has("cold")) {
-        contextLines.push("不像。");
-      }
-      if (has("tsundere")) {
-        contextLines.push("谁信你这个。");
-      }
-      if (has("clingy")) {
-        contextLines.push("你又想把我晾过去。");
-      }
-      if (has("obsessive")) {
-        contextLines.push("你这句有点回避。");
-      }
-      if (has("formal")) {
-        contextLines.push("先别用这句收尾。");
-      }
-      if (has("shy")) {
-        contextLines.push("……我不太信。");
-      }
-    }
-    if (/累|困|疼|难受|撑不住|不舒服/.test(latestInput)) {
-      if (has("strong")) {
-        contextLines.push("累了还逞什么强。", "先停，别硬撑。");
-      } else if (has("cold")) {
-        contextLines.push("那就别硬撑。");
-      } else if (has("gentle") || has("formal")) {
-        contextLines.push("先别急着撑。", "把话说完，我听着。");
-      } else if (has("clingy")) {
-        contextLines.push("那你更不能不回我。");
-      }
-    }
-    if (/想你|想见|想抱|想靠近/.test(latestInput)) {
-      if (has("tsundere")) {
-        contextLines.push("谁准你这么直说了。");
-      } else if (has("cold")) {
-        contextLines.push("这句我听见了。");
-      } else if (has("clingy")) {
-        contextLines.push("那你就别只说一句。");
-      } else if (has("playful")) {
-        contextLines.push("哟，这句我可记下了。");
-      }
-    }
-    if (/对不起|抱歉|错了|我错/.test(latestInput)) {
-      if (has("strong") || has("formal")) {
-        contextLines.push("道歉先放一边，说清楚。");
-      } else if (has("cold")) {
-        contextLines.push("这句太轻了。");
-      } else if (has("tsundere")) {
-        contextLines.push("现在知道说这个了？");
-      }
-    }
-    if (/烦|讨厌|不想理|别管|走开|滚/.test(latestInput)) {
-      if (has("hostile") || has("playful")) {
-        contextLines.push("脾气倒是不小。");
-      } else if (has("strong")) {
-        contextLines.push("闹够了再说。");
-      } else if (has("clingy")) {
-        contextLines.push("你又想推开我。");
-      } else if (has("cold")) {
-        contextLines.push("行，到这儿。");
-      }
-    }
-
-    if (/生气|压着火|不爽|冷处理|克制/.test(previousText)) {
-      if (has("cold")) {
-        contextLines.push("我还没打算翻篇。");
-      }
-      if (has("strong")) {
-        contextLines.push("刚才那笔先记着。");
-      }
-      if (has("tsundere")) {
-        contextLines.push("我没说我消气了。");
-      }
-      if (has("formal")) {
-        contextLines.push("这件事还没结束。");
-      }
-    }
-    if (/吃醋|占有|盯|别人|那个人/.test(previousText)) {
-      contextLines.push("那个人先放一边。", "先回答我。");
-    }
-    if (/心软|担心|在意|靠近/.test(previousText)) {
-      if (has("tsundere")) {
-        contextLines.push("我只是顺手问一句。");
-      } else if (has("gentle") || has("formal")) {
-        contextLines.push("先把话说稳。");
-      } else if (has("clingy")) {
-        contextLines.push("我就是有点在意。");
-      }
-    }
-
-    if (flags.wantsAway) {
-      contextLines.push("到这儿。", "别再往前推。");
-    }
-    if (flags.wantsSuppress) {
-      contextLines.push("先停。", "我来压住这件事。");
-    }
-    if (flags.wantsProbe) {
-      contextLines.push("你这句，像是在试我。", "再说一遍。");
-    }
-    if (flags.wantsHide) {
-      contextLines.push("别问那么直。", "这句先放着。");
-    }
-    if (flags.isJealous) {
-      contextLines.push("那个人先放一边。", "先回答我。");
-    }
-
-    if (personaEvidence.length && candidateIndex % 3 === 2) {
-      var evidenceText = personaEvidence[0] || "";
-      if (allowDirectiveEvidence && /老师|上司|年长|监护|前辈|师长|管教/.test(evidenceText)) {
-        evidenceLines.push("先按我的规矩来。", "把话说完整。");
-      } else if (allowDirectiveEvidence && /强势|命令|控制|掌控|支配|压制/.test(evidenceText)) {
-        evidenceLines.push("按我说的来。", "别让我问第二遍。");
-      } else if (/冷淡|疏离|淡漠|寡言|克制/.test(evidenceText)) {
-        evidenceLines.push("嗯，别扯远。", "我听见了。");
-      } else if (/嘴硬|傲娇|别扭|不坦率/.test(evidenceText)) {
-        evidenceLines.push("我没说不管你。", "别误会。");
-      } else if (/黏人|依赖|撒娇|缺安全感/.test(evidenceText)) {
-        evidenceLines.push("别把我晾在这儿。", "再回我一句。");
-      } else {
-        evidenceLines.push("这不像能随便翻过去的事。");
-      }
-    }
-
-    candidates = candidates.concat(contextLines, evidenceLines, pickPhaseLines(comboLines), pickPhaseLines(phaseLines[primaryTag] || []));
-    activeTags.slice(1, 4).forEach(function (tag) {
-      candidates = candidates.concat(pickPhaseLines(phaseLines[tag] || []));
-    });
-    candidates = candidates.concat(pickPhaseLines(phaseLines.default));
-
-    return uniqueList(candidates).filter(function (line) {
-      return line && !isGenericAiTemplateText(line);
-    });
+    function buildPersonaAwareFallbackCandidates() {
+    return [];
   }
 
-  function buildFallbackContextFlags(profile, worldBookContext) {
+    function buildFallbackContextFlags(profile, worldBookContext) {
     var thoughtsHint = profile && (profile.thoughtsHint || profile.recentHeartVoiceText) || "";
     var text = [
       profile && profile.name,
@@ -8786,33 +7570,11 @@
     return "default";
   }
 
-  function getFallbackLines(bucket, profile, contextFlags) {
-    var personaText = [profile && profile.persona, profile && profile.currentMood].join("\n");
-    var byBucket = {
-      worldControl: ["先停。", "这不是你能越过去的线。", "按我说的来。", "别试探我的底线。", "你现在要做的是听话。", "把话收回去。", "我没准你这样问。", "站在那儿，别动。", "这件事我来定。", "先把话说清楚。"],
-      worldForbidden: ["这话到这里。", "别碰那条线。", "换个问法。", "我不会答应你这个。", "有些事你不该问。", "别把我往那边逼。", "这句我当没听见。", "收住。", "我们不谈这个。", "你知道这不合适。"],
-      cold: ["嗯。", "说重点。", "是吗？", "随你。", "那就这样。", "你最好是。", "我没说信你。", "继续。", "别扯远。", "到这儿就够了。"],
-      strong: ["先停。", "听我说。", "这件事别拖。", "按我说的来。", "先把话说清楚。", "不用躲。", "我先听着。", "你现在别乱想。", "把手头的事放一放。", "先回答我。"],
-      clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别回避我。", "再说一句。", "我还在等。", "我先听你说。"],
-      tsundere: ["先回答一个问题。", "我又没说担心你。", "别误会。", "你接着说明明。", "行吧，我听着。", "谁稀罕管你。", "烦死了。", "那你倒是说啊。", "我没生气。", "算了，先听你的。"],
-      gentle: ["先看着我。", "别把自己绷太紧。", "这句我接住了。", "不用硬撑。", "我在听。", "把气放下来一点。", "先坐稳。", "别急着躲开。", "这事我会放在心上。", "说到这儿也行。"],
-      obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "先把话说清楚。", "我不喜欢你这样躲。", "那个人先放一边。", "先回答我。", "不要让我猜。", "我盯着呢。"],
-      playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "再说一遍。", "你这话我可记下了。", "先别走。", "行啊，胆子见长。", "这句我先听着。", "这反应挺明显的。"],
-      formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，先听我说。"],
-      hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续说。", "这笔账先记着。"],
-      shy: ["……嗯。", "我听见了。", "你别看我。", "我不是那个意思。", "你刚才那句……算了。", "我有点乱。", "别催我。", "再给我一下。", "我会回你的。", "你先别走。"],
-      default: ["嗯，我看见了。", "你刚才那句，我没跳过去。", "等一下。", "这话不像随便说的。", "先别急着翻篇。", "我听着。", "我接着呢。", "别把话藏一半。", "继续说。", "这句留着。"]
-    };
-    var lines = byBucket[bucket] || byBucket.default;
-
-    if (/敬语|克制|疏离|距离/.test(personaText) && bucket === "default") {
-      return ["我看见了。", "先到这里。", "这句我会留意。", "别急着翻过去。", "说清楚一点。"].concat(lines.slice(5));
-    }
-
-    return lines;
+  function getFallbackLines() {
+    return [];
   }
 
-  function normalizeReplyItem(reply, options) {
+    function normalizeReplyItem(reply, options) {
     var source = reply && typeof reply === "object" ? reply : { content: reply };
     var normalized = normalizeSpecialReply(source, options);
 
@@ -9245,8 +8007,7 @@
     var results = [];
     var speechProtectionReplies = [
       "好，站那儿别动。",
-      "当然。你敢走试试。",
-      "啧，先回答一个问题。"
+      "当然。你敢走试试。"
     ];
 
     characters.forEach(function (character) {
