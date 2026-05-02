@@ -150,6 +150,8 @@
         recentCharacterLinesText: source.recentCharacterLinesText || ""
       }),
       buildRelationshipDriveRules("private"),
+      buildUserIntentUnderstandingRules("private"),
+      buildOnlineConversationLogicRules("private"),
       buildRelationshipProgressionRules("private"),
       buildCharacterDecisionCore("private", worldBookContext),
       source.recentGroupContextText ? [
@@ -680,7 +682,7 @@
       base = base.concat(oilyWords);
     }
     if ((hasTag("gentle") || hasTag("shy") || hasTag("cold")) && !hasDirectivePersona) {
-      base = base.concat(["先按我的规矩来", "按我的规矩来", "看着我说"]);
+      base = base.concat(["先按我的规矩来", "按我的规矩来", "先把话说清楚再按我的规矩"]);
     }
 
     return [
@@ -1362,10 +1364,192 @@
       "同一句话在不同关系下反应必须不同：恋人会在意、追问、吃醋、别扭；上位者/管教者会判断、安排、约束、压住对方；冷淡关系会短、克制、不主动安慰；敌对关系会讽刺、防备、试探；熟人不会过度客气，有默认熟悉感。",
       "关系比任务更重要。用户要解释时，角色可以先在意态度；用户求安慰时，角色可以嘴硬或别扭；用户挑衅时，角色可以反压；用户沉默时，角色可以追问、冷处理或自己推进。",
       "角色不是为了让用户满意才说话，而是在维护自己的面子、边界、占有欲、秩序感、亲密感、控制感、距离感或关系里的旧账。",
+      "关系驱动不能覆盖用户意图。用户明确提问时，先处理问题，再体现关系态度。不要把所有提问都误判成挑衅、逃避、套话或撒娇。",
       isGroup ? "群聊里每个发言者都要先按自己和用户/其他成员的关系反应，不要像同一个助手在分配台词；群成员之间可以互相打断、帮腔、拆台或沉默旁观。" : "私聊里不要把关系抹平；越熟越有默认语气，越疏离越要有距离和保留，关系紧张时不要突然变成温柔客服。"
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
+  }
+
+  function buildUserIntentUnderstandingRules(mode) {
+    return [
+      "",
+      "D+. 用户意图理解 userIntentUnderstanding",
+      "生成前先判断用户这句话的真实意图：",
+      "1. 是在提问、求解释、转移话题、撒娇、挑衅、示弱、汇报、拒绝、试探，还是给出新信息？",
+      "2. 如果是提问，必须先处理问题本身：回答、回避、拒答、反问或解释为什么不能答；不能直接套‘别绕/谁问你了/继续说’。",
+      "3. 如果问题涉及世界书、设定、师门、角色关系、场景规则，要先判断当前角色是否知道、是否愿意说、是否被世界书限制；再按角色语气处理。",
+      "4. 如果角色不知道，可以自然说不知道、怀疑、追问来源；但不能假装用户在逃避。",
+      "5. 如果角色知道但不想说，要给出符合人设的回避理由或半透露，而不是模板化责问。",
+      "6. 如果用户只问一个普通信息问题，不要无故变成审问、压制、吃醋或追责。",
+      "7. 每轮至少有 2 条 messages/events 直接承接用户输入里的关键词或问题核心。",
+      "8. 关系驱动不能覆盖用户意图。用户明确提问时，先处理问题，再体现关系态度。不要把所有提问都误判成挑衅、逃避、套话或撒娇。"
+    ].join("\n");
+  }
+
+  function analyzeOnlineUserIntent(userInput) {
+    var text = String(userInput || "").trim();
+    var compact = text.replace(/\s+/g, "");
+    var isQuestion = /[?？]|什么|为什么|怎么|有没有|是谁|在哪|哪里|多少|几|吗|呢/.test(compact);
+    var isWorldBookQuestion = /世界书|设定|规则|师门|门规|旧规矩|背景|人设|世界观/.test(compact);
+    var isMoney = /红包|转账|收款|退款|退回|钱|金额|账/.test(compact);
+    var isSoft = /想你|疼|难受|害怕|累|不舒服|抱|陪/.test(compact);
+    var keywords = compact.match(/世界书|设定|规则|师门|门规|旧规矩|红包|转账|为什么|什么|怎么|有没有|是谁|在哪/g) || [];
+
+    return {
+      raw: text,
+      compact: compact,
+      isQuestion: isQuestion,
+      isWorldBookQuestion: isWorldBookQuestion,
+      isMoney: isMoney,
+      isSoft: isSoft,
+      keywords: keywords
+    };
+  }
+
+  function isOnlineReplyMode(options) {
+    var source = options || {};
+    var mode = String(source.mode || source.taskMode || source.selfCheckMode || source.targetType || "").toLowerCase();
+    return source.onlineMode === true
+      || mode === "private"
+      || mode === "group"
+      || mode === "reenter"
+      || mode === "reentergroup";
+  }
+
+  function hasTemplateInterrogationTone(text) {
+    return /谁问你了|谁问你有没有事|别绕|别急着躲|别让我猜|不要让我猜|你套我话|少装随口|先说你的目的|先告诉我原因|继续装|别拿问题绕开|来，先交代|我再看答不答|话先说清楚|钱先放一边|别用这句敷衍过去|别用这句挡我|你拿这句挡我|你在挡我|你躲得太快了|那你倒是别躲|说完再说|说完再装|继续编|别敷衍我|别让我重复一次|看着我说|现在回我|把话说完整|先别跳过刚才那句|刚才那句不许跳过/.test(String(text || ""));
+  }
+
+  function countTemplateTone(messages) {
+    var list = Array.isArray(messages) ? messages : [];
+    return list.reduce(function (count, item) {
+      return count + (hasTemplateInterrogationTone(item && item.content) ? 1 : 0);
+    }, 0);
+  }
+
+  function checkOnlineIntentCoverage(userInput, messages) {
+    var intent = analyzeOnlineUserIntent(userInput);
+    var list = Array.isArray(messages) ? messages : [];
+    var texts = list.map(function (m) {
+      return String(m && m.content || "");
+    }).filter(Boolean);
+    var joined = texts.join("\n");
+    var first = texts[0] || "";
+    var templateCount = texts.filter(hasTemplateInterrogationTone).length;
+    var isQuestion = intent.isQuestion || intent.isWorldBookQuestion || intent.isMoney;
+    var hasQuestionKeywordCoverage = intent.keywords.length && intent.keywords.some(function (keyword) {
+      return joined.indexOf(keyword) !== -1;
+    });
+    var coveredWorld = intent.isWorldBookQuestion && /世界书|设定|规则|师门|门规|旧规矩|师门规矩|门里旧说法|你听谁|你说的是/.test(joined);
+
+    if (!intent.compact) {
+      return { ok: true, reason: "empty-input", intent: intent, templateCount: templateCount };
+    }
+
+    if (isQuestion && hasTemplateInterrogationTone(first)) {
+      return { ok: false, reason: "question-started-with-template-interrogation", intent: intent, templateCount: templateCount };
+    }
+
+    if (templateCount >= 2) {
+      return { ok: false, reason: "too-many-template-interrogation-lines", intent: intent, templateCount: templateCount };
+    }
+
+    if (intent.isWorldBookQuestion && !coveredWorld) {
+      return { ok: false, reason: "worldbook-question-not-covered", intent: intent, templateCount: templateCount };
+    }
+
+    if (isQuestion && intent.keywords.length && !hasQuestionKeywordCoverage && joined.length < 20) {
+      return { ok: false, reason: "question-keyword-not-covered", intent: intent, templateCount: templateCount };
+    }
+
+    return { ok: true, reason: "ok", intent: intent, templateCount: templateCount };
+  }
+
+  function filterOnlineTemplateReplies(replies) {
+    return (Array.isArray(replies) ? replies : []).filter(function (reply) {
+      return reply && reply.content && !hasTemplateInterrogationTone(reply.content);
+    });
+  }
+
+  async function repairOnlineMessages(context, messages, reason) {
+    var source = context || {};
+    var currentMessages = Array.isArray(messages) ? messages : [];
+    var systemLines = [
+      "你正在修复线上聊天 messages。本轮只修复已有消息，不要重写整段剧情。",
+      "保留已有合理内容，改写或删除明显审问模板。",
+      "必须先接住用户输入的真实意图。",
+      "如果用户在提问，优先回答、回避、拒答、半透露或合理追问。",
+      "禁止使用：谁问你了、别绕、别急着躲、别让我猜、不要让我猜、先说你的目的、先告诉我原因、继续装、少装随口、话先说清楚、这件事和钱先分开先分开。",
+      "禁止把普通问题改成审问或压制。",
+      source.regenerateRequest ? "本轮是重回改写。用户点击重回代表上一版不满意。" : "",
+      source.regenerateRequest && !String(source.regenerateInstruction || "").trim()
+        ? "用户没有填写额外要求，所以默认需要明显换方向，不要同义复述。"
+        : "",
+      source.regenerateInstruction ? "用户重回要求：" + source.regenerateInstruction : "",
+      source.rejectedReplyText || source.oldReplyText
+        ? "上一版被否定的回复摘要：\n" + limitText(source.rejectedReplyText || source.oldReplyText, 700)
+        : "",
+      reason === "regenerate-too-similar"
+        ? "当前修复原因：新回复和上一版太相似。必须换第一反应、语气角度、推进顺序和收束方式。"
+        : "",
+      "只返回 JSON，格式为 {\"messages\":[{\"characterId\":...,\"type\":...,\"content\":...}]}。",
+      source.mode === "group" ? "当前模式：线上群聊。" : "当前模式：线上私聊。",
+      source.latestUserInput ? "本轮用户输入：" + source.latestUserInput : "本轮用户输入：暂无。",
+      source.worldBookContext ? "本轮世界书状态：" + source.worldBookContext : "本轮未命中世界书或未绑定世界书。",
+      source.characterPersonaText ? "角色人设：" + source.characterPersonaText : "角色人设：暂无。",
+      source.participantPersonaText ? "群成员人设：" + source.participantPersonaText : ""
+    ].filter(function (line) { return line !== "" && line != null; });
+
+    var userLines = [
+      "当前已生成 messages：",
+      currentMessages.length ? currentMessages.map(function (reply, index) {
+        return String(index + 1) + ". [" + (reply.characterId || "?") + "] " + String(reply.content || "");
+      }).join("\n") : "无消息。",
+      "本轮不合格原因：" + String(reason || "unknown"),
+      "请修复上述 messages，仅返回 JSON，不要添加解释。"
+    ];
+
+    try {
+      var rawContent = await sendConfiguredChatMessages([
+        { role: "system", content: systemLines.join("\n") },
+        { role: "user", content: userLines.join("\n") }
+      ]);
+      var parsed = parseJsonFromText(rawContent);
+      return getOutputMessages(parsed);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function buildOnlineConversationLogicRules(mode) {
+    if (mode === "offline") {
+      return "";
+    }
+    return [
+      "",
+      "E+. 线上对话逻辑 onlineConversationLogic",
+      "这是手机聊天气泡，不是审问模板生成器。",
+      "本轮第一目标：接住用户输入，不许跳过用户真正问的问题。",
+      "如果用户问‘X有什么/为什么/怎么回事/你知道吗’，角色必须先围绕 X 处理：回答、回避、拒答、半透露、说明不知道或追问 X 是哪一条。",
+      "不允许直接套‘谁问你了/别绕/继续说/先说目的/别让我猜’。",
+      "只有当用户真的在逃避上一轮关键问题，且角色人设适合，才可以轻微追问；不能把所有提问都当逃避。",
+      "如果用户提到‘世界书/设定/规则/师门设定’，角色不要复述后台词汇；要转成角色视角能理解的现实说法，比如‘师门规矩’、‘门里那些旧事’、‘你听谁说的’。",
+      "如果当前聊天未绑定或未命中世界书，不要编内容；可以自然说不知道、问用户指哪一条、或者按人设回避。",
+      "每轮至少 2 条 messages 要直接承接用户输入里的关键词或问题核心。",
+      "关系推进必须服从用户意图：先接问题，再体现嘴硬、冷淡、强势、黏人、吃醋或回避。"
+    ].join("\n");
+  }
+
+  function debugOnlineLogicReport(report) {
+    try {
+      if (!isMyAiAppDebugEnabled("debugOnlineLogic") || typeof console === "undefined" || !console.debug) {
+        return;
+      }
+      console.debug("[OnlineLogicDebug]", report);
+    } catch (error) {
+      /* ignore */
+    }
   }
 
   function buildRelationshipProgressionRules(mode) {
@@ -1403,9 +1587,10 @@
       "5. 隐藏内容：哪些真实想法只进 thoughts，不直接说出口；尤其是吃醋、占有、心软、受伤、心虚、试探或想控制。",
       "6. 外显痕迹：隐藏内容必须在 " + primary + "/events 里露一点痕迹，比如称呼变了、句子短了、停顿、反问、动作、绕开或突然压住话题。",
       "7. 世界书或关系限制：如果命中规则限制角色能不能说、能不能做、能不能靠近或透露，本轮必须先受限制，再按角色方式反应。",
-      "8. 时间感知：如果最近时间线相邻消息超过 3 小时，角色可以自然察觉；超过 12 小时建议带出；超过 24 小时才必须自然带出一次。若上下文已提过时间差，不要反复说“这么久”。",
+      "8. 如果本轮用户输入是普通问题，不要强行选择压制/清算/审问；可以选择回答、含糊、解释不知道、轻微反问或按人设转移。",
+      "9. 时间感知：如果最近时间线相邻消息超过 3 小时，角色可以自然察觉；超过 12 小时建议带出；超过 24 小时才必须自然带出一次。若上下文已提过时间差，不要反复说“这么久”。",
       hasWorldBook ? "本轮已有命中的世界书上下文：角色决策必须先判断规则边界，再让 personaVoiceFingerprint 通过称呼、语气、动作和沉默表现出来，不要把规则讲成说明文。" : "本轮没有命中的世界书上下文时，不要编造规则；角色决策只由人设、关系、记忆、最近心声和当前输入驱动。",
-      "这些判断只能影响 " + primary + "/events/thoughts 的语气、节奏、用词、动作和取舍；不允许写成判断过程，不允许作为字段输出。"
+      "这些判断只能影响 " + primary + "/events/thoughts 的语气、节奏、用词、动作和取舍；不允许写成判断过程，不允许作为字段输出."
       + "\n硬性失败条件：如果 " + primary + " 看不出本轮说话纹理，就不合格；如果 thoughts 和 " + primary + " 的语气完全断裂，就不合格；如果这一轮换成别的角色也成立，就不合格。"
     ].join("\n");
   }
@@ -1584,6 +1769,90 @@
     }).join("\n");
   }
 
+  function compactForSimilarity(text) {
+    return String(text || "")
+      .replace(/\s+/g, "")
+      .replace(/[，。！？、；：,.!?;:\"“”‘’'（）()【】\[\]{}<>《》\-—_…~～]/g, "")
+      .trim();
+  }
+
+  function calculateTextSimilarity(a, b) {
+    var x = compactForSimilarity(a);
+    var y = compactForSimilarity(b);
+    var i;
+    var hit = 0;
+    var grams = {};
+    var key;
+
+    if (!x || !y) {
+      return 0;
+    }
+
+    if (x === y) {
+      return 1;
+    }
+
+    for (i = 0; i < x.length - 1; i += 1) {
+      grams[x.slice(i, i + 2)] = true;
+    }
+
+    for (i = 0; i < y.length - 1; i += 1) {
+      key = y.slice(i, i + 2);
+      if (grams[key]) {
+        hit += 1;
+      }
+    }
+
+    return hit / Math.max(1, Math.min(x.length, y.length) - 1);
+  }
+
+  function checkRegenerateDifference(oldText, messagesOrEvents) {
+    var oldValue = String(oldText || "").trim();
+    var list = Array.isArray(messagesOrEvents) ? messagesOrEvents : [];
+    var newValue = list.map(function (item) {
+      return String(item && item.content || "");
+    }).filter(Boolean).join("\n");
+    var similarity = calculateTextSimilarity(oldValue, newValue);
+
+    return {
+      ok: !oldValue || !newValue || similarity < 0.62,
+      similarity: similarity,
+      oldText: oldValue,
+      newText: newValue
+    };
+  }
+
+  function buildRegenerateRewriteRules(mode, options) {
+    var source = options || {};
+    var instruction = String(source.regenerateInstruction || "").trim();
+    var oldText = String(source.rejectedReplyText || source.oldReplyText || "").trim();
+    var primary = mode === "offline" ? "events" : "messages";
+    var hasInstruction = !!instruction;
+
+    if (!source.regenerateRequest && !oldText) {
+      return "";
+    }
+
+    return [
+      "",
+      "R. 重回改写规则 regenerateRewriteRules",
+      "本轮是重回/重新生成。用户点击重回，本身就代表对上一版不满意。",
+      hasInstruction
+        ? "用户额外重回要求：" + instruction
+        : "用户没有填写额外要求；默认理解为：上一版方向、语气、节奏或内容不满意。必须明显换一个方向重写，不要只做同义改写。",
+      oldText ? "上一版被否定的回复摘要（必须避开）：\n" + limitText(oldText, 700) : "",
+      "硬性要求：",
+      "1. 不要复刻上一版的开头、结尾、核心句式、推进顺序和主要情绪角度。",
+      "2. 不要只替换几个词；至少改变切入角度、第一条反应、关系动作或情绪策略中的 2 项。",
+      "3. 如果上一版是追问，这版可以改成回答、沉默、回避、半透露、转移、压住或收束。",
+      "4. 如果上一版是解释，这版可以改成短句、反问、动作式推进或更符合人设的态度。",
+      "5. 如果上一版模板化、客服味、审问味或没有接住用户输入，这版必须先接住用户输入。",
+      "6. " + primary + " 不能和上一版高度相似；相似就视为失败，需要重写。",
+      "7. 保留世界书、人设、记忆和关系事实，但换一种自然表达方式。",
+      "8. 不要在可见回复里说‘我重写一下’‘上一版’‘重新生成’‘你不满意’。"
+    ].filter(Boolean).join("\n");
+  }
+
   function buildUserTaskPrompt(options) {
     var source = options || {};
     var requestOptions = source.requestOptions || {};
@@ -1619,7 +1888,8 @@
           "1. 先判断命中规则是否限制角色能不能说、做、靠近、离开、透露、改称呼、改关系。",
           "2. 强规则、禁止规则、身份边界、场景事实必须优先于普通聊天记忆和群聊互通记忆。",
           "3. 不能为了顺用户话而违反世界书。",
-          "4. 不要在可见回复里说「世界书写着」「设定里说」「规则要求」，只自然表现。"
+          "4. 不要在可见回复里说「世界书写着」「设定里说」「规则要求」，只自然表现。",
+          "5. 当用户提到‘世界书/设定/规则/师门设定’时，角色不要把它当后台词汇复述；要转换成角色视角能理解的现实说法。能答就答，不能答就自然回避或追问，不要模板化责问。"
         ].join("\n")
       : (effectiveWorldBookMeta.hasSelectedWorldBooks
           ? "【本轮世界书状态】当前聊天绑定了世界书，但本轮没有命中具体条目；不要编造未命中设定。"
@@ -1637,6 +1907,14 @@
       source.contextLabel || "最近 10-16 条上下文：",
       source.recentHistory || "暂无",
       buildTemporalAwarenessRules(requestOptions),
+      buildUserIntentUnderstandingRules(taskMode),
+      buildOnlineConversationLogicRules(taskMode),
+      buildRegenerateRewriteRules(taskMode, {
+        regenerateRequest: source.regenerateRequest,
+        regenerateInstruction: source.regenerateInstruction,
+        rejectedReplyText: requestOptions.rejectedReplyText || source.rejectedReplyText,
+        oldReplyText: requestOptions.oldReplyText || source.oldReplyText
+      }),
       buildCurrentTask(taskMode, {
         userInput: source.userInput,
         requestOptions: requestOptions,
@@ -2099,11 +2377,7 @@
     var hasSelected;
     var matchedCount;
 
-    try {
-      debugEnabled = window.localStorage && window.localStorage.getItem("myAiApp.debugWorldBook") === "1";
-    } catch (error) {
-      debugEnabled = false;
-    }
+    debugEnabled = isMyAiAppDebugEnabled("debugWorldBook");
 
     if (!window.console) {
       return;
@@ -2147,6 +2421,16 @@
         };
       })
     });
+  }
+
+  function isMyAiAppDebugEnabled(flag) {
+    try {
+      return typeof window !== "undefined"
+        && window.localStorage
+        && window.localStorage.getItem("myAiApp." + String(flag)) === "1";
+    } catch (error) {
+      return false;
+    }
   }
 
   function limitText(text, maxLength) {
@@ -2246,7 +2530,7 @@
   }
 
   function hasCharacterAttitudeText(text) {
-    return /站那儿|别动|少来|骗我|又骗|过来|我没说|你敢|嗯？|是吗|装什么|别装|还装|继续装|看着我|别躲|糊弄|听我的|少拿|谁信|别嘴硬|我不信|别试我|说清楚|按我说|啧|行啊|又来|你倒是|少顶嘴|站住|坐好|收住|闭嘴|别走|不问了|我看着|我盯着|别让我|账先记着/.test(String(text || ""));
+    return /站那儿|别动|骗我|又骗|过来|我没说|你敢|嗯？|是吗|装什么|还装|听我的|少拿|别嘴硬|我不信|别试我|按我说|啧|行啊|又来|你倒是|少顶嘴|站住|坐好|收住|闭嘴|别走|不问了|账先记着/.test(String(text || ""));
   }
 
   function isInvalidAiMessageText(text) {
@@ -2263,7 +2547,7 @@
     return hasBannedAssistantTone(value);
   }
 
-  function filterAiMessageText(text) {
+  function filterAiMessageText(text, options) {
     var value = String(text || "").trim();
     var fullHasAttitude = hasCharacterAttitudeText(value) && !/(?:AI|人工智能|语言模型|机器人|助手|系统默认|后台显示|金额字段|结构化\s*amount)/i.test(value);
     var parts;
@@ -2278,6 +2562,9 @@
         return part.trim();
       })
       .filter(function (part) {
+        if (options && isOnlineReplyMode(options) && hasTemplateInterrogationTone(part)) {
+          return false;
+        }
         return !isInvalidAiMessageText(part) || isHarmlessAttitudeLeadText(part, fullHasAttitude);
       });
 
@@ -2292,7 +2579,7 @@
     return /^(?:好|好的|好啊|当然|当然可以|明白了|理解了)[。！？!?\s]*$/.test(String(text || "").trim());
   }
 
-  function normalizeAiMessageText(text) {
+  function normalizeAiMessageText(text, options) {
     var value = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
     var paragraphs;
 
@@ -2300,7 +2587,7 @@
       return "";
     }
 
-    value = filterAiMessageText(value);
+    value = filterAiMessageText(value, options);
     if (!value) {
       return "";
     }
@@ -2529,17 +2816,21 @@
 
   async function sendPrivateChatRequest(character, chatHistory, options) {
     var requestOptions = options || {};
+    var effectiveRegenerateInstruction = String(requestOptions.regenerateInstruction || "").trim();
+    if (requestOptions.regenerateRequest && !effectiveRegenerateInstruction) {
+      effectiveRegenerateInstruction = "用户没有填写具体要求，但点击重回代表上一版不满意；请明显换一个方向、语气和推进方式，不要同义复述。";
+    }
     var messages = buildPrivateReplyMessages(character, chatHistory, requestOptions);
     var rawContent = await sendConfiguredChatMessages(messages);
     var parsed = parseJsonFromText(rawContent);
     var replies = getOutputMessages(parsed);
-
-    return normalizeAiResult(rawContent, parsed, {
+    var normalizationSettings = {
       replies: replies,
       min: MIN_CHAT_REPLY_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
       defaultType: "text",
-      allowRawFallback: !parsed,
+      allowRawFallback: false,
+      onlineMode: true,
       fallbackProfile: buildReplyFallbackProfile(character),
       previousReplyText: requestOptions.previousReplyText,
       rejectedReplyText: requestOptions.rejectedReplyText,
@@ -2548,7 +2839,101 @@
       recentHeartVoiceText: requestOptions.recentHeartVoiceText,
       thoughtsHint: requestOptions.thoughtsHint,
       recentCharacterLinesText: requestOptions.recentCharacterLinesText
+    };
+    var normalized = normalizeAiResult(rawContent, parsed, normalizationSettings);
+    var regenerateDiff = requestOptions.regenerateRequest ? checkRegenerateDifference(
+      requestOptions.rejectedReplyText || requestOptions.oldReplyText,
+      normalized.replies || replies || messages
+    ) : null;
+    var coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, normalized.replies);
+    var repaired = false;
+    var templateToneCountBefore = countTemplateTone(normalized.replies);
+    var templateToneCountAfter = templateToneCountBefore;
+    var removedTemplateMessages = 0;
+
+    if (regenerateDiff && !regenerateDiff.ok) {
+      var similarityRepairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
+        mode: "private",
+        regenerateRequest: requestOptions.regenerateRequest,
+        regenerateInstruction: effectiveRegenerateInstruction,
+        rejectedReplyText: requestOptions.rejectedReplyText,
+        oldReplyText: requestOptions.oldReplyText,
+        latestUserInput: requestOptions.latestUserInput,
+        worldBookContext: requestOptions.worldBookContext,
+        characterPersonaText: [
+          "角色名：" + valueOrFallback(character.name),
+          buildMergedCharacterPersona(character)
+        ].join("\n")
+      }), normalized.replies || replies || messages, "regenerate-too-similar");
+
+      if (Array.isArray(similarityRepairMessages) && similarityRepairMessages.length) {
+        normalized.replies = normalizeReplyList("", similarityRepairMessages, normalizationSettings);
+        regenerateDiff = checkRegenerateDifference(
+          requestOptions.rejectedReplyText || requestOptions.oldReplyText,
+          normalized.replies || replies || messages
+        );
+        repaired = true;
+      }
+
+      if (regenerateDiff && !regenerateDiff.ok) {
+        var similarityCleaned = filterOnlineTemplateReplies(normalized.replies);
+        if (similarityCleaned.length) {
+          normalized.replies = similarityCleaned;
+        }
+      }
+    }
+
+    if (!coverage.ok) {
+      var repairMessages = await repairOnlineMessages({
+        mode: "private",
+        latestUserInput: requestOptions.latestUserInput,
+        worldBookContext: requestOptions.worldBookContext,
+        characterPersonaText: [
+          "角色名：" + valueOrFallback(character.name),
+          buildMergedCharacterPersona(character)
+        ].join("\n")
+      }, normalized.replies, coverage.reason);
+
+      if (Array.isArray(repairMessages) && repairMessages.length) {
+        normalized.replies = normalizeReplyList("", repairMessages, normalizationSettings);
+        repaired = true;
+        coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, normalized.replies);
+      }
+    }
+
+    if (!coverage.ok) {
+      var cleaned = filterOnlineTemplateReplies(normalized.replies);
+      if (cleaned.length) {
+        removedTemplateMessages = normalized.replies.length - cleaned.length;
+        templateToneCountAfter = countTemplateTone(cleaned);
+        normalized.replies = cleaned;
+      }
+      if (!normalized.replies.length) {
+        normalized.replies = [{ type: "text", content: "这次没回出来，换个方式重试一下。" }];
+      }
+    }
+
+    debugOnlineLogicReport({
+      mode: "private",
+      targetId: character && character.id,
+      userInput: requestOptions.latestUserInput,
+      intent: coverage.intent,
+      rawMessageCount: replies.length,
+      normalizedMessageCount: normalized.replies.length,
+      templateToneCountBefore: templateToneCountBefore,
+      templateToneCountAfter: templateToneCountAfter,
+      templateToneCount: coverage.templateCount,
+      intentCovered: coverage.ok,
+      qualityReason: coverage.reason,
+      regenerateRequest: !!requestOptions.regenerateRequest,
+      regenerateInstruction: requestOptions.regenerateInstruction || effectiveRegenerateInstruction || "",
+      regenerateSimilarity: regenerateDiff ? regenerateDiff.similarity : null,
+      regenerateDifferentEnough: regenerateDiff ? regenerateDiff.ok : null,
+      repaired: repaired,
+      removedTemplateMessages: removedTemplateMessages
     });
+
+    return normalized;
   }
 
   function buildPersonaCountHint(profile) {
@@ -2635,6 +3020,10 @@
     var profile = character || {};
     var chatSettings = profile.chatSettings || {};
     var requestOptions = options || {};
+    var effectiveRegenerateInstruction = String(requestOptions.regenerateInstruction || "").trim();
+    if (requestOptions.regenerateRequest && !effectiveRegenerateInstruction) {
+      effectiveRegenerateInstruction = "用户没有填写具体要求，但点击重回代表上一版不满意；请明显换一个方向、语气和推进方式，不要同义复述。";
+    }
     var userContext = buildUserContext(chatSettings);
     var memories = chatSettings.memoryEnabled === false ? [] : getMemoryForCharacter(profile.id);
     var chatMemories = getChatMemoriesForPrompt("private", profile.id, requestOptions.chatMemories);
@@ -2761,8 +3150,15 @@
             relationshipPhaseHint: relationshipPhaseHint
           }),
           buildRelationshipDriveRules("private"),
+          buildRegenerateRewriteRules(systemMode, {
+            regenerateRequest: requestOptions.regenerateRequest,
+            regenerateInstruction: effectiveRegenerateInstruction,
+            rejectedReplyText: requestOptions.rejectedReplyText,
+            oldReplyText: requestOptions.oldReplyText
+          }),
           buildRelationshipProgressionRules("private"),
           buildCharacterDecisionCore(systemMode, worldBookContext),
+          buildOnlineConversationLogicRules(systemMode),
           recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -2921,6 +3317,13 @@
       buildRelationshipDriveRules("group"),
       buildRelationshipProgressionRules("group"),
       buildCharacterDecisionCore(groupMode, resolvedWorldBookContext),
+      buildOnlineConversationLogicRules(groupMode),
+      buildRegenerateRewriteRules(groupMode, {
+        regenerateRequest: requestOptions.regenerateRequest,
+        regenerateInstruction: effectiveRegenerateInstruction,
+        rejectedReplyText: requestOptions.rejectedReplyText,
+        oldReplyText: requestOptions.oldReplyText
+      }),
       recentHeartVoiceText,
       buildMemoryStream({
         chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -2943,6 +3346,10 @@
 
   async function sendGroupChatRequest(group, characters, groupHistory, sharedMemories, options) {
     var requestOptions = options || {};
+    var effectiveRegenerateInstruction = String(requestOptions.regenerateInstruction || "").trim();
+    if (requestOptions.regenerateRequest && !effectiveRegenerateInstruction) {
+      effectiveRegenerateInstruction = "用户没有填写具体要求，但点击重回代表上一版不满意；请明显换一个方向、语气和推进方式，不要同义复述。";
+    }
     var messages = buildGroupMessages(group, characters, groupHistory, sharedMemories, requestOptions);
     var rawContent = await sendConfiguredChatMessages(messages);
     var parsed = parseJsonFromText(rawContent);
@@ -2953,12 +3360,13 @@
     var replies = getOutputMessages(parsed);
     var result;
 
-    result = normalizeAiResult(rawContent, parsed, {
+    var normalizationSettings = {
       replies: replies,
       min: MIN_CHAT_REPLY_COUNT,
       max: replyLimit,
       defaultType: "text",
-      allowRawFallback: !parsed,
+      allowRawFallback: false,
+      onlineMode: true,
       fallbackProfiles: (characters || []).map(buildReplyFallbackProfile),
       previousReplyText: requestOptions.previousReplyText,
       rejectedReplyText: requestOptions.rejectedReplyText,
@@ -2967,6 +3375,103 @@
       recentHeartVoiceText: requestOptions.recentHeartVoiceText,
       thoughtsHint: requestOptions.thoughtsHint,
       recentCharacterLinesText: requestOptions.recentCharacterLinesText
+    };
+    result = normalizeAiResult(rawContent, parsed, normalizationSettings);
+    var regenerateDiff = requestOptions.regenerateRequest ? checkRegenerateDifference(
+      requestOptions.rejectedReplyText || requestOptions.oldReplyText,
+      result.replies || replies || messages
+    ) : null;
+
+    var coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, result.replies);
+    var repaired = false;
+    var templateToneCountBefore = countTemplateTone(result.replies);
+    var templateToneCountAfter = templateToneCountBefore;
+    var removedTemplateMessages = 0;
+
+    if (regenerateDiff && !regenerateDiff.ok) {
+      var similarityRepairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
+        mode: "group",
+        regenerateRequest: requestOptions.regenerateRequest,
+        regenerateInstruction: effectiveRegenerateInstruction,
+        rejectedReplyText: requestOptions.rejectedReplyText,
+        oldReplyText: requestOptions.oldReplyText,
+        latestUserInput: requestOptions.latestUserInput,
+        worldBookContext: requestOptions.worldBookContext,
+        participantPersonaText: (characters || []).map(function (character) {
+          return [
+            "群成员：" + valueOrFallback(character && character.name),
+            buildMergedCharacterPersona(character)
+          ].join("\n");
+        }).join("\n\n")
+      }), result.replies || replies || messages, "regenerate-too-similar");
+
+      if (Array.isArray(similarityRepairMessages) && similarityRepairMessages.length) {
+        result.replies = normalizeReplyList("", similarityRepairMessages, normalizationSettings);
+        regenerateDiff = checkRegenerateDifference(
+          requestOptions.rejectedReplyText || requestOptions.oldReplyText,
+          result.replies || replies || messages
+        );
+        repaired = true;
+      }
+
+      if (regenerateDiff && !regenerateDiff.ok) {
+        var similarityCleaned = filterOnlineTemplateReplies(result.replies);
+        if (similarityCleaned.length) {
+          result.replies = similarityCleaned;
+        }
+      }
+    }
+
+    if (!coverage.ok) {
+      var repairMessages = await repairOnlineMessages({
+        mode: "group",
+        latestUserInput: requestOptions.latestUserInput,
+        worldBookContext: requestOptions.worldBookContext,
+        participantPersonaText: (characters || []).map(function (character) {
+          return [
+            "群成员：" + valueOrFallback(character && character.name),
+            buildMergedCharacterPersona(character)
+          ].join("\n");
+        }).join("\n\n")
+      }, result.replies, coverage.reason);
+
+      if (Array.isArray(repairMessages) && repairMessages.length) {
+        result.replies = normalizeReplyList("", repairMessages, normalizationSettings);
+        repaired = true;
+        coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, result.replies);
+      }
+    }
+
+    if (!coverage.ok) {
+      var cleaned = filterOnlineTemplateReplies(result.replies);
+      if (cleaned.length) {
+        removedTemplateMessages = result.replies.length - cleaned.length;
+        templateToneCountAfter = countTemplateTone(cleaned);
+        result.replies = cleaned;
+      }
+      if (!result.replies.length) {
+        result.replies = [{ type: "text", content: "这次没回出来，换个方式重试一下。" }];
+      }
+    }
+
+    debugOnlineLogicReport({
+      mode: "group",
+      targetId: group && group.id,
+      userInput: requestOptions.latestUserInput,
+      intent: coverage.intent,
+      rawMessageCount: replies.length,
+      normalizedMessageCount: result.replies.length,
+      templateToneCountBefore: templateToneCountBefore,
+      templateToneCountAfter: templateToneCountAfter,
+      templateToneCount: coverage.templateCount,
+      intentCovered: coverage.ok,
+      qualityReason: coverage.reason,
+      regenerateRequest: !!requestOptions.regenerateRequest,
+      regenerateInstruction: requestOptions.regenerateInstruction || effectiveRegenerateInstruction || "",
+      regenerateSimilarity: regenerateDiff ? regenerateDiff.similarity : null,
+      regenerateDifferentEnough: regenerateDiff ? regenerateDiff.ok : null,
+      repaired: repaired,
+      removedTemplateMessages: removedTemplateMessages
     });
 
     if (group && group.settings && group.settings.allowSpecialMessages === false) {
@@ -3116,6 +3621,10 @@
 
   function buildGroupMessages(group, characters, groupHistory, sharedMemories, options) {
     var requestOptions = options || {};
+    var effectiveRegenerateInstruction = String(requestOptions.regenerateInstruction || "").trim();
+    if (requestOptions.regenerateRequest && !effectiveRegenerateInstruction) {
+      effectiveRegenerateInstruction = "用户没有填写具体要求，但点击重回代表上一版不满意；请明显换一个方向、语气和推进方式，不要同义复述。";
+    }
     var userContext = buildUserContext(group && group.settings || {});
     var worldBookContext;
     var groupSettingsText;
@@ -3335,6 +3844,22 @@
     ].filter(Boolean).join("\n");
   }
 
+  function buildOfflineCausalLogicRules() {
+    return [
+      "",
+      "线下因果逻辑规则 offlineCausalLogic",
+      "线下不是随机发台词，而是连续场景。",
+      "每一轮必须先确定：用户刚做了什么/说了什么 → 角色看见或听懂了什么 → 角色为什么这样反应 → 动作如何导致下一句台词。",
+      "events 必须形成因果链：上一条 action/speech 会影响下一条 action/speech。",
+      "禁止每条台词互相独立，禁止每条都像从模板池抽出来。",
+      "如果用户问问题，至少前 3 条 event 要围绕这个问题本身展开：听见问题、判断能不能答、给出回答/回避/追问。",
+      "如果角色转移话题，必须有理由：不愿说、不能说、被戳中、场景不允许、世界书限制、关系紧张等。",
+      "不能无理由从用户的问题跳到‘你在躲我/别绕/继续说’。",
+      "action 不能只是‘靠近/垂眼/停顿’随机堆叠；必须承接上一条台词或用户行为。",
+      "speech 不能只承担人设展示，也要推进当前问题或当前动作。"
+    ].join("\n");
+  }
+
   function buildInlineOfflineMessages(context) {
     var mode = context.mode === "group" ? "group" : "private";
     var participants = Array.isArray(context.participants) ? context.participants : [];
@@ -3451,6 +3976,7 @@
           buildRelationshipProgressionRules("offline"),
           buildCharacterDecisionCore("offline", worldBookContext),
           buildOfflineSceneContinuityRules(recentSceneHint),
+          buildOfflineCausalLogicRules(),
           recentHeartVoiceText,
           buildMemoryStream({
             chatMemoryText: formatChatMemoryList(chatMemories) || "暂无",
@@ -3590,7 +4116,9 @@
           "1. 保留所有原有 speech 台词，不得改写台词内容或语义。",
           "2. 保留原有有意义的 action，在 speech 之间补充新的 action。",
           "3. 修复后 action 总数至少 " + OFFLINE_ACTION_MIN_COUNT + " 条，且不得有连续超过 4 条 speech 无 action 穿插。",
-          "4. 每条新增 action 必须承接前一条 event 的情境，由当前场景和角色状态自然生成，不得使用固定句库。",
+          "4. 保留原始用户输入意图；如果本轮问题尚未回答，必须补上回答、回避或合理追问。",
+          "5. 不要引入‘谁问你了’、‘别绕’、‘别让我猜’、‘继续装’、‘先说你的目的’等固定模板审问句。",
+          "6. 每条新增 action 必须承接前一条 event 的情境，由当前场景和角色状态自然生成，不得使用固定句库。",
           "5. 同一轮中不得重复动词、视线方向或身体部位描写；避免反复使用「垂眼」「偏头」「靠近」「转身」「目光一沉」「停在原地」等泛用动作词。",
           "6. action 用第三人称写，有镜头感，一条写一个完整画面，不超过三句。",
           "7. repair 只补动作和节奏，不得为了补 action 改时间、地点、光线、天气、站位或正在做的事；必须保留原场景。",
@@ -3873,6 +4401,7 @@
             "不要使用固定模板台词，如“过来”“看着我”“别让我猜”“别逞强”“先回我”；台词要源自当前角色与情境。",
             "action 描写要连贯且不要重复同一动作细节，避免使用简单套话式动作。",
             buildOfflineSceneContinuityRules(recentSceneHint),
+            buildOfflineCausalLogicRules(),
             "如果剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。"
           ].join("\n")
         })
@@ -5040,7 +5569,7 @@
     while (events.length < missing && countOfflineSpeechEvents(existingEvents) + events.length < settings.max) {
       var profile = pickOfflineFallbackProfile(profiles, settings, index);
       var contextFlags = buildFallbackContextFlags(profile, settings.worldBookContext || "");
-      var content = pickFallbackLine(profile, index, usedSpeech, contextFlags);
+      var content = pickFallbackLine(profile, index, usedSpeech, contextFlags, null, settings);
       var characterId = profile.id || pickOfflineSpeaker(settings.validIds || [], settings.fallbackId, settings.mode, index);
 
       if (!characterId) {
@@ -5358,11 +5887,11 @@
     filtered = replaceGenericTemplateReplies(filtered, settings);
     filtered = maybeRewriteReplyTextureList(filtered, settings);
 
-    if (countReplyItemsForMinimum(filtered) < settings.min) {
-      filtered = filtered.concat(createFallbackReplyItems(settings, filtered, stats));
+    if (!settings.onlineMode) {
+      // Do not locally pad replies to meet min count with generic fallback templates.
+      // If the model returns too few valid replies, keep the real output and prefer repair/retry.
+      filtered = rebalanceReplyRhythm(filtered, getFallbackProfiles(settings), settings);
     }
-
-    filtered = rebalanceReplyRhythm(filtered, getFallbackProfiles(settings), settings);
 
     finalList = filtered.slice(0, settings.max);
     profilesForSummary = getFallbackProfiles(settings);
@@ -5675,6 +6204,9 @@
 
   function replaceGenericTemplateReplies(replies, options) {
     var settings = options || {};
+    if (settings.onlineMode) {
+      return Array.isArray(replies) ? replies : [];
+    }
     var profiles = getFallbackProfiles(settings);
     var used = {};
 
@@ -5781,6 +6313,9 @@
 
   function maybeRewriteReplyTextureList(replies, settings) {
     var options = settings || {};
+    if (options.onlineMode) {
+      return Array.isArray(replies) ? replies : [];
+    }
     var list = Array.isArray(replies) ? replies : [];
     var profiles = getFallbackProfiles(options);
     var used = {};
@@ -6012,6 +6547,9 @@
   function replaceReplyWithFallbackTexture(reply, profile, settings, index, phase, force) {
     var source = reply && typeof reply === "object" ? reply : { content: reply };
     var options = settings || {};
+    if (options.onlineMode) {
+      return null;
+    }
     var baseProfile = profile || {};
     var enrichedProfile = Object.assign({}, baseProfile, {
       latestUserInput: options.latestUserInput || baseProfile.latestUserInput || "",
@@ -6065,6 +6603,9 @@
   function rebalanceReplyRhythm(replies, profiles, settings) {
     var list = (Array.isArray(replies) ? replies : []).slice();
     var options = settings || {};
+    if (options.onlineMode) {
+      return list;
+    }
     var profileList = Array.isArray(profiles) && profiles.length ? profiles : getFallbackProfiles(options);
     var textIndexes = getTextureRewriteIndexes(list);
     var maxReplace = 0;
@@ -6546,10 +7087,7 @@
       }
     });
 
-    if (countReplyItemsForMinimum(filtered) < settings.min) {
-      filtered = filtered.concat(createFallbackReplyItems(settings, filtered, settings.replyTextureStats));
-    }
-
+    // Do not locally pad replies with generic fallback templates after重复过滤。
     return filtered.slice(0, settings.max);
   }
 
@@ -6630,6 +7168,9 @@
   }
 
   function createFallbackReplyItems(settings, existingReplies, stats) {
+    if (isOnlineReplyMode(settings || {})) {
+      return [];
+    }
     var missing = Math.max(0, (Number(settings.min) || 0) - countReplyItemsForMinimum(existingReplies));
     var profiles = getFallbackProfiles(settings);
     var items = [];
@@ -6638,7 +7179,7 @@
 
     while (items.length < missing && items.length + (Array.isArray(existingReplies) ? existingReplies.length : 0) < settings.max) {
       var profile = profiles[index % profiles.length] || {};
-      var line = pickFallbackLine(profile, index, used, buildFallbackContextFlags(profile, settings.worldBookContext || ""), getFallbackRhythmPhase(index));
+      var line = pickFallbackLine(profile, index, used, buildFallbackContextFlags(profile, settings.worldBookContext || ""), getFallbackRhythmPhase(index), settings);
       var reply = {
         type: "text",
         content: line
@@ -6692,7 +7233,9 @@
         rejectedReplyText: settings.rejectedReplyText || settings.oldReplyText || profile.rejectedReplyText || "",
         worldBookContext: settings.worldBookContext || profile.worldBookContext || "",
         recentHeartVoiceText: settings.recentHeartVoiceText || profile.recentHeartVoiceText || "",
-        thoughtsHint: settings.thoughtsHint || settings.recentHeartVoiceText || profile.thoughtsHint || profile.recentHeartVoiceText || ""
+        thoughtsHint: settings.thoughtsHint || settings.recentHeartVoiceText || profile.thoughtsHint || profile.recentHeartVoiceText || "",
+        onlineMode: settings.onlineMode === true,
+        mode: String(settings.mode || settings.taskMode || settings.selfCheckMode || settings.targetType || "").toLowerCase()
       });
       enriched.voiceProfile = profile.voiceProfile || detectPersonaVoiceProfile(enriched, enriched.latestUserInput || "");
       enriched.voiceTags = Array.isArray(enriched.voiceTags) && enriched.voiceTags.length
@@ -6735,7 +7278,10 @@
     return "hook";
   }
 
-  function pickFallbackLine(profile, index, used, contextFlags, phase) {
+  function pickFallbackLine(profile, index, used, contextFlags, phase, options) {
+    if (isOnlineReplyMode(profile || options || {})) {
+      return "";
+    }
     var flags = contextFlags || buildFallbackContextFlags(profile, "");
     var voiceProfile = profile && profile.voiceProfile || detectPersonaVoiceProfile(profile || {});
     var tags = voiceProfile.tags || [];
@@ -6920,14 +7466,28 @@
     return list.slice(8, 10);
   }
 
-  function buildPersonaAwareFallbackLine(profile, index, contextFlags, phase) {
+  function buildPersonaAwareFallbackLine(profile, index, contextFlags, phase, options) {
     var source = profile || {};
+    if (isOnlineReplyMode(source || options || {})) {
+      return "";
+    }
     var flags = contextFlags || buildFallbackContextFlags(source, "");
     var voiceProfile = source.voiceProfile || detectPersonaVoiceProfile(source);
     var tags = voiceProfile.tags || [];
     var primaryTag = voiceProfile.primaryTag || tags[0] || getFallbackStyleBucket(source, flags);
     var inputInfo = analyzeFallbackUserInput(source.latestUserInput || "");
-    var candidates = buildFallbackCandidatesByInput(source, inputInfo, tags, phase || getFallbackRhythmPhase(index), flags, index);
+    var rhythmPhase = phase || getFallbackRhythmPhase(index);
+    var candidates = buildFallbackCandidatesByInput(source, inputInfo, tags, rhythmPhase, flags, index);
+
+    if (isMyAiAppDebugEnabled("debugFallback") && typeof console !== "undefined" && console.debug) {
+      console.debug("[AI Debug] fallback", {
+        primaryTag: primaryTag,
+        selectedPhase: rhythmPhase,
+        latestUserInput: String(source.latestUserInput || "").slice(0, 120),
+        candidateCount: candidates.length,
+        candidatePreview: candidates.slice(0, 6)
+      });
+    }
 
     if (!candidates.length) {
       candidates = getFallbackLines(primaryTag || "default", source, flags);
@@ -6942,10 +7502,10 @@
     var activeTags = Array.isArray(tags) && tags.length ? tags : (voiceProfile.tags || []);
     var primaryTag = voiceProfile.primaryTag || activeTags[0] || getFallbackStyleBucket(source, flags);
     var rhythmPhase = phase || "instant";
-    var inputCandidates = buildFallbackInputTypeCandidates(source, inputInfo, activeTags, primaryTag, rhythmPhase, flags);
+    var inputCandidates = buildFallbackInputTypeCandidates(source, inputInfo, activeTags, primaryTag, rhythmPhase, flags, source);
     var tagCandidates = buildFallbackTagCandidates(source, activeTags, primaryTag, rhythmPhase, flags);
     var evidenceCandidates = buildFallbackEvidenceCandidates(source, rhythmPhase, flags);
-    var legacyCandidates = buildPersonaAwareFallbackCandidates(source, activeTags, primaryTag, flags, rhythmPhase, index);
+    var legacyCandidates = buildPersonaAwareFallbackCandidates(source, activeTags, primaryTag, flags, rhythmPhase, index, source);
     var defaultCandidates = pickFallbackPhaseLines(getFallbackLines("default", source, flags), rhythmPhase);
 
     return uniqueList([]
@@ -6988,19 +7548,19 @@
     var candidates = [];
 
     if (allowDirectiveLines && /老师|上司|年长|监护|前辈|师长|管教/.test(evidenceText)) {
-      candidates = candidates.concat(["先按我的规矩来。", "把话说完整。", "这句不能随便带过。", "分寸先摆正。", "看着我说。", "按节奏来。", "别急着躲。", "这件事我会处理。", "先到这里。", "回头再算。"]);
+      candidates = candidates.concat(["你先具体说一下。", "这句不能随便带过。", "分寸先摆正。", "按我说的来。", "这件事我会处理。", "先到这里。", "回头再算。"]);
     } else if (allowDirectiveLines && /强势|命令|控制|掌控|支配|压制/.test(evidenceText)) {
-      candidates = candidates.concat(["先停。", "按我说的来。", "这句不算。", "我来判断。", "别让我问第二遍。", "过来。", "把话说清楚。", "别躲。", "到这儿，听我的。", "这事我先压住。"]);
+      candidates = candidates.concat(["先停一下。", "按我说的来。", "这句还没说完。", "过来。", "你先具体说一下。", "到这儿，听我的。", "这事我先压住。"]);
     } else if (/冷淡|疏离|淡漠|寡言|克制/.test(evidenceText)) {
-      candidates = candidates.concat(["嗯。", "别绕。", "不像。", "我听见了。", "说重点。", "继续。", "别装。", "这句留着。", "到这儿。", "先别翻篇。"]);
+      candidates = candidates.concat(["嗯。", "不必扯远。", "不像。", "我听见了。", "说重点。", "我接着。", "这句留着。", "到这儿。", "先别翻篇。"]);
     } else if (/嘴硬|傲娇|别扭|不坦率/.test(evidenceText)) {
-      candidates = candidates.concat(["啧。", "别误会。", "谁问你了。", "我只是顺口。", "烦死了。", "那你倒是说啊。", "别又躲。", "我没说不管。", "算了，先这样。", "这事我记着。"]);
+      candidates = candidates.concat(["啧。", "别误会。", "我只是顺口。", "烦死了。", "那你倒是说啊。", "我没说不管。", "算了，先这样。", "这事我记着。"]);
     } else if (/黏人|依赖|撒娇|缺安全感/.test(evidenceText)) {
-      candidates = candidates.concat(["别走。", "再回我一句。", "你又想躲。", "别把我晾着。", "我在等。", "再说一点。", "别推开我。", "你先看我。", "我还没放你走。", "别敷衍我。"]);
+      candidates = candidates.concat(["别走。", "再回我一句。", "别把我晾着。", "我在等。", "再说一点。", "你先看我。", "我还没放你走。", "我先听你说。"]);
     }
 
     if (/吃醋|占有|盯|别人|那个人/.test(previousText)) {
-      candidates = candidates.concat(["那个人先放一边。", "你先回我。", "别拿别人挡着。", "我听见你提到谁了。"]);
+      candidates = candidates.concat(["那个人先放一边。", "别拿别人挡着。", "我听见你提到谁了。"]);
     }
     if (/心软|担心|在意|靠近/.test(previousText)) {
       candidates = candidates.concat(["先把话说稳。", "我听着。", "别急着躲。", "这句我放在心上。"]);
@@ -7017,6 +7577,9 @@
 
   function buildFallbackInputTypeCandidates(profile, inputInfo, tags, primaryTag, phase, flags) {
     var source = profile || {};
+    if (isOnlineReplyMode(source)) {
+      return [];
+    }
     var info = inputInfo || analyzeFallbackUserInput(source.latestUserInput || "");
     var activeTags = uniqueList([primaryTag].concat(Array.isArray(tags) ? tags : [])).filter(Boolean);
     var intents = [];
@@ -7045,14 +7608,14 @@
     }
 
     if (info.isNegation && hasColdTsundereFallbackTags(primaryTag, activeTags)) {
-      candidates = candidates.concat(getColdTsundereNegationFallbackLines(phase));
+      candidates = candidates.concat(getColdTsundereNegationFallbackLines(phase, source));
     }
 
     intents.forEach(function (intent) {
       activeTags.slice(0, 4).forEach(function (tag) {
-        candidates = candidates.concat(getFallbackInputPhaseLines(intent, tag, info, phase, flags));
+        candidates = candidates.concat(getFallbackInputPhaseLines(intent, tag, info, phase, flags, source));
       });
-      candidates = candidates.concat(getFallbackInputPhaseLines(intent, "default", info, phase, flags));
+      candidates = candidates.concat(getFallbackInputPhaseLines(intent, "default", info, phase, flags, source));
     });
 
     return uniqueList(candidates);
@@ -7063,21 +7626,27 @@
     return activeTags.indexOf("cold") !== -1 && activeTags.indexOf("tsundere") !== -1;
   }
 
-  function getColdTsundereNegationFallbackLines(phase) {
+  function getColdTsundereNegationFallbackLines(phase, options) {
+    if (isOnlineReplyMode(options || {})) {
+      return [];
+    }
     var bank = {
-      instant: ["谁问你有没有事了。", "嗯，随你。"],
-      attitude: ["别拿这句糊弄我。", "行，那就当你没事。"],
-      progression: ["你最好真没事。", "……嘴硬。"],
-      hook: ["我没说信你。", "那就这样。"]
+      instant: ["你说的我听见了。", "我不确定你指的是哪一部分。"],
+      attitude: ["你先说具体一点。", "我不是这么想的。"],
+      progression: ["这件事我先记着。", "我再判断怎么接。"],
+      hook: ["这句我先接住。", "我现在先听着。"]
     };
     return bank[phase] || bank.instant;
   }
 
-  function getFallbackInputPhaseLines(intent, tag, inputInfo, phase, flags) {
+  function getFallbackInputPhaseLines(intent, tag, inputInfo, phase, flags, options) {
+    if (isOnlineReplyMode(options || {})) {
+      return [];
+    }
     var quote = getFallbackInputQuoteWord(inputInfo);
     var q = quote || "";
     var quoted = q ? "“" + q + "”" : "";
-    var byIntent = buildFallbackInputPhaseBank(q, quoted);
+    var byIntent = buildFallbackInputPhaseBank(q, quoted, options);
     var bank = byIntent[intent] || byIntent.generic;
     var tagLines = bank[tag] || bank.default || {};
     var lines = tagLines[phase] || tagLines.instant || [];
@@ -7085,7 +7654,10 @@
     return Array.isArray(lines) ? lines : [];
   }
 
-  function buildFallbackInputPhaseBank(q, quoted) {
+  function buildFallbackInputPhaseBank(q, quoted, options) {
+    if (isOnlineReplyMode(options || {})) {
+      return {};
+    }
     var heard = quoted ? quoted + "这句，我听见了。" : "你刚才那句，我听见了。";
     var askClear = quoted ? "先把" + quoted + "说清楚。" : "先把刚才那句说清楚。";
 
@@ -7161,26 +7733,26 @@
         negation: {
           cold: {
           instant: ["是吗？", "随你。"],
-          attitude: [q ? "别拿" + quoted + "糊弄我。" : "别拿这句糊弄我。", "那就这样。"],
-          progression: ["你最好是。", "继续。"],
+          attitude: [q ? quoted + "我先接住。" : "这句我先接住。", "那就这样。"],
+          progression: ["你最好是。", "我接着。"],
           hook: ["我没说信你。", "先别翻篇。"]
         },
         strong: {
           instant: ["这句不算。", "抬头。"],
-          attitude: ["看着我说。", q ? "别用" + quoted + "挡我。" : "别用这句挡我。"],
-          progression: ["先坐下，把话说清楚。", "我来判断。"],
-          hook: ["别让我问第二遍。", "到这儿，听我的。"]
+          attitude: [q ? "你先把具体的说出来。" : "我不确定你指哪部分。", "你这句有点回避。"],
+          progression: ["你先具体说一下。", "这句我先听着。"],
+          hook: ["你先把具体的说出来。", "先听我说。"]
         },
         tsundere: {
-          instant: ["谁问你了。", "啧。"],
-          attitude: ["我又没说担心你。", "你爱说不说。"],
-          progression: ["那你倒是别躲。", "说完再装。"],
+          instant: ["先把问题说出来。", "啧。"],
+          attitude: ["我又没说担心你。", "你接着说明。"],
+          progression: ["你先具体说一下。", "这句我先听着。"],
           hook: ["算了，先听你的。", "我先记着。"]
         },
         clingy: {
-          instant: ["你又这样。", "别敷衍我。"],
-          attitude: [q ? "别用" + quoted + "把我晾过去。" : "别把我晾过去。", "你越这样我越慌。"],
-          progression: ["再回我一句。", "不许躲。"],
+          instant: ["你又这样。", "我先听你说。"],
+          attitude: [q ? "你先把具体的说出来。" : "我不确定你指哪部分。", "你越这样我越认真。"],
+          progression: ["再回我一句。", "别回避我。"],
           hook: ["我还在等。", "别走。"]
         },
         gentle: {
@@ -7191,15 +7763,15 @@
         },
         obsessive: {
           instant: ["你刚才停顿了。", "我听见了。"],
-          attitude: [q ? "你拿" + quoted + "挡我。" : "你在挡我。", "你躲得太快了。"],
-          progression: ["看着我说。", "现在回我。"],
-          hook: ["我会盯着。", "别让我猜。"]
+          attitude: [q ? "你先把具体的说出来。" : "我不确定你指哪部分。", "你这句有点回避。"],
+          progression: ["你先具体说一下。", "先把重点说出来。"],
+          hook: ["我会注意。", "我现在还不能直接猜。"]
         },
         playful: {
           instant: ["我差点就信了。", "哟。"],
           attitude: [q ? quoted + "说得挺顺。" : "说得挺顺。", "破绽也挺明显。"],
-          progression: ["来，再说一遍。", "别急着跑。"],
-          hook: ["这句我记下了。", "继续编。"]
+          progression: ["再说一遍。", "先别走。"],
+          hook: ["这句我先听着。", "你接着说下去。"]
         },
         formal: {
           instant: ["先别用这句收尾。", "坐好。"],
@@ -7209,8 +7781,8 @@
         },
         hostile: {
           instant: ["少来。", "我不信。"],
-          attitude: [q ? "别拿" + quoted + "糊弄我。" : "别拿这套糊弄我。", "你以为我听不出来？"],
-          progression: ["说清楚。", "继续装也行。"],
+          attitude: [q ? "这句我先接住。" : "这句我先接住。", "你以为我听不出来？"],
+          progression: ["说清楚。", "你接着说也行。"],
           hook: ["这笔账先记着。", "别急着洗干净。"]
         },
         shy: {
@@ -7240,7 +7812,7 @@
           hook: ["别让我说第二遍。", "站那儿别动。"]
         },
         tsundere: {
-          instant: ["谁稀罕管你。", "啧。"],
+          instant: ["先回答一个问题。", "啧。"],
           attitude: [q ? quoted + "说得真顺。" : "说得真顺。", "我只是看不下去。"],
           progression: ["那你倒是别乱来。", "别让我抓到。"],
           hook: ["烦死了。", "下次别找我。"]
@@ -7248,7 +7820,7 @@
         clingy: {
           instant: ["你就非要推开我吗。", "别这样。"],
           attitude: [q ? "你说" + quoted + "的时候最像在躲。" : "你就是在躲。", "我不喜欢。"],
-          progression: ["你先回我。", "别拿脾气隔开我。"],
+          progression: ["先给我个回答。", "别拿脾气隔开我。"],
           hook: ["我还在这儿。", "你别走。"]
         },
         gentle: {
@@ -7261,7 +7833,7 @@
           instant: ["你越这么说，我越要管。", "别躲。"],
           attitude: [q ? quoted + "只会让我更在意。" : "这只会让我更在意。", "你推不开我。"],
           progression: ["现在看着我。", "先回我。"],
-          hook: ["我盯着呢。", "别让我猜。"]
+          hook: ["我盯着呢。", "不要让我猜。"]
         },
         playful: {
           instant: ["胆子见长啊。", "哟。"],
@@ -7302,7 +7874,7 @@
           hook: ["到这儿。", "别再逞强。"]
         },
         strong: {
-          instant: [q === "想你" || q === "抱抱" ? q + "就看着我说。" : (q ? q + "还逞什么强。" : "还逞什么强。"), "过来。"],
+          instant: [q === "想你" || q === "抱抱" ? q + "就说出来。" : (q ? q + "还逞什么强。" : "还逞什么强。"), "过来。"],
           attitude: ["先停。", "我来安排。"],
           progression: ["坐下，别乱动。", "听我的。"],
           hook: ["别让我问第二遍。", "先别撑。"]
@@ -7317,7 +7889,7 @@
           instant: [q === "想你" ? "想我就再说一遍。" : "你这样我会慌。", "别离我太远。"],
           attitude: [q ? quoted + "我听见了。" : "我听见了。", "你不能自己扛着。"],
           progression: ["靠近一点。", "回我一句。"],
-          hook: ["我陪着。", "别躲我。"]
+          hook: ["我陪着。", "别回避我。"]
         },
         gentle: {
           instant: ["先靠一下。", q ? q + "就别忍着。" : "别忍着。"],
@@ -7329,7 +7901,7 @@
           instant: [q ? "我听见你说" + q + "了。" : "我听见了。", "别藏。"],
           attitude: ["你刚才的声音不对。", "我会盯着。"],
           progression: ["现在看着我。", "别把我推开。"],
-          hook: ["我看着呢。", "别让我猜。"]
+          hook: ["我看着呢。", "不要让我猜。"]
         },
         playful: {
           instant: ["哟，会撒娇了。", q ? quoted + "这句有点犯规。" : "这句有点犯规。"],
@@ -7365,7 +7937,7 @@
       question: {
         cold: {
           instant: ["你真想问这个？", "短答：不一定。"],
-          attitude: [q ? quoted + "先放着。" : "问题先放着。", "别绕到别处。"],
+          attitude: [q ? quoted + "先放着。" : "问题先放着。", "别扯远到别处。"],
           progression: ["先说你的理由。", "我再答。"],
           hook: ["就这样。", "别追太快。"]
         },
@@ -7383,7 +7955,7 @@
         },
         clingy: {
           instant: ["你先告诉我为什么问。", "别只丢问题给我。"],
-          attitude: [q ? quoted + "跟我有关吗？" : "跟我有关吗？", "你别躲我。"],
+          attitude: [q ? quoted + "跟我有关吗？" : "跟我有关吗？", "别回避我。"],
           progression: ["回我一句真的。", "我再答你。"],
           hook: ["我等着。", "不许跑。"]
         },
@@ -7396,14 +7968,14 @@
         obsessive: {
           instant: ["你为什么突然问这个？", "谁让你想到这个。"],
           attitude: [q ? quoted + "不是随便冒出来的。" : "这不是随便冒出来的。", "我注意到了。"],
-          progression: ["先告诉我原因。", "别让我猜。"],
+          progression: ["先告诉我原因。", "不要让我猜。"],
           hook: ["我盯着呢。", "你绕不过去。"]
         },
         playful: {
           instant: ["这问题有点会挑时候。", "哟，问到这儿了。"],
-          attitude: [q ? quoted + "挺有意思。" : "挺有意思。", "你先别装随口。"],
-          progression: ["来，先交代为什么问。", "我再看答不答。"],
-          hook: ["胆子见长。", "继续。"]
+          attitude: [q ? quoted + "挺有意思。" : "挺有意思。", "你先别随便说。"],
+          progression: ["你先说清楚为什么问。", "我先判断怎么接。"],
+          hook: ["胆子见长。", "你接着说。"]
         },
         formal: {
           instant: ["先把问题说完整。", "我听着。"],
@@ -7412,10 +7984,10 @@
           hook: ["我会答。", "但不是现在糊过去。"]
         },
         hostile: {
-          instant: ["你套我话？", "问这个干什么。"],
-          attitude: [q ? quoted + "听着就不单纯。" : "听着就不单纯。", "少装随口。"],
-          progression: ["先说你的目的。", "别把自己摘干净。"],
-          hook: ["我暂时不信。", "继续。"]
+          instant: ["你这是问什么方向？", "问这个干什么。"],
+          attitude: [q ? quoted + "听着就不单纯。" : "听着就不单纯。", "你先别随便说。"],
+          progression: ["先说明你的目的。", "别把自己摘干净。"],
+          hook: ["我暂时不信。", "你接着说。"]
         },
         shy: {
           instant: ["……你怎么问这个。", "我不知道怎么说。"],
@@ -7432,15 +8004,15 @@
       },
       money: {
         cold: {
-          instant: ["钱的事，别绕。", q ? quoted + "我看见了。" : "我看见了。"],
+          instant: ["钱的事，别扯远。", q ? quoted + "我看见了。" : "我看见了。"],
           attitude: ["别拿钱当解释。", "账归账。"],
-          progression: ["话说清楚再谈。", "别推来推去。"],
+          progression: ["先把情况理清。", "别推来推去。"],
           hook: ["先放这儿。", "我会记着。"]
         },
         strong: {
           instant: ["收着，别推来推去。", "钱先放这儿。"],
           attitude: [q ? quoted + "不是让你躲话用的。" : "钱不是让你躲话用的。", "我来定。"],
-          progression: ["先把话说清楚。", "该收该退我判断。"],
+          progression: ["你先具体说一下。", "该收该退我判断。"],
           hook: ["别让我说第二遍。", "账我会算。"]
         },
         tsundere: {
@@ -7453,10 +8025,10 @@
           instant: ["你别拿钱把我打发了。", q ? quoted + "我看见了。" : "我看见了。"],
           attitude: ["我要的是你回话。", "别想这样糊弄过去。"],
           progression: ["先回我。", "钱等会儿再说。"],
-          hook: ["我还在等。", "别躲我。"]
+          hook: ["我还在等。", "别回避我。"]
         },
         gentle: {
-          instant: ["钱先放一边。", "话先说清楚。"],
+          instant: ["这件事和钱先分开。", "先把情况理清。"],
           attitude: [q ? quoted + "我看到了。" : "我看到了。", "别用这个压自己。"],
           progression: ["该怎么处理慢慢来。", "先别急着退。"],
           hook: ["我在听。", "别硬撑。"]
@@ -7483,7 +8055,7 @@
           instant: ["少拿钱做样子。", "我不吃这套。"],
           attitude: [q ? quoted + "也洗不干净。" : "这也洗不干净。", "账不是这么算的。"],
           progression: ["说清楚。", "别把话题买走。"],
-          hook: ["这笔账先记着。", "继续装。"]
+          hook: ["这笔账先记着。", "继续说。"]
         },
         shy: {
           instant: ["……这个我不能乱收。", q ? quoted + "我看见了。" : "我看见了。"],
@@ -7492,7 +8064,7 @@
           hook: ["等一下。", "别催我。"]
         },
         default: {
-          instant: ["钱先放一边。", q ? quoted + "我看见了。" : "我看见了。"],
+          instant: ["这件事和钱先分开。", q ? quoted + "我看见了。" : "我看见了。"],
           attitude: ["别拿钱替话。", "账和人要分开。"],
           progression: ["先说清楚。", "之后再处理。"],
           hook: ["这笔先记着。", "我听着。"]
@@ -7501,13 +8073,13 @@
       generic: {
         cold: {
           instant: [heard, "嗯。"],
-          attitude: [q ? quoted + "这句，留着。" : "这句留着。", "别绕。"],
+          attitude: [q ? quoted + "这句，留着。" : "这句留着。", "别扯远。"],
           progression: ["继续。", "说重点。"],
           hook: ["到这儿。", "先别翻篇。"]
         },
         strong: {
-          instant: [askClear, "看着我。"],
-          attitude: ["这句别糊过去。", "我来判断。"],
+          instant: [askClear, "先听我说。"],
+          attitude: ["这句别糊过去。", "我先听着。"],
           progression: ["按我说的来。", "先把话补完。"],
           hook: ["别让我问第二遍。", "到这儿，听我的。"]
         },
@@ -7520,8 +8092,8 @@
         clingy: {
           instant: ["你又这样。", "别把我晾在这儿。"],
           attitude: [q ? "刚才" + quoted + "不许跳过。" : "刚才那句不许跳过。", "你回我嘛。"],
-          progression: ["再说一句。", "别躲我。"],
-          hook: ["我还在等。", "别敷衍我。"]
+          progression: ["再说一句。", "别回避我。"],
+          hook: ["我还在等。", "我先听你说。"]
         },
         gentle: {
           instant: [heard, "先看着我。"],
@@ -7531,27 +8103,27 @@
         },
         obsessive: {
           instant: [heard, "我注意到了。"],
-          attitude: [q ? quoted + "别想糊弄过去。" : "别想糊弄过去。", "你躲得太快了。"],
-          progression: ["现在回我。", "别让我猜。"],
+          attitude: [q ? quoted + "别想糊过去。" : "别想糊过去。", "你这句有点回避。"],
+          progression: ["先把重点说出来。", "我现在还不能直接猜。"],
           hook: ["我盯着呢。", "别拿别人挡。"]
         },
         playful: {
           instant: ["哟。", q ? quoted + "有点意思。" : "这句有点意思。"],
           attitude: ["我差点就信了。", "别装得那么无辜。"],
-          progression: ["来，再说一遍。", "别急着跑。"],
-          hook: ["我听着，你继续编。", "这反应挺明显的。"]
+          progression: ["再说一遍。", "先别走。"],
+          hook: ["这句我先听着。", "这反应挺明显的。"]
         },
         formal: {
           instant: [askClear, "坐好。"],
           attitude: ["把话说完整。", "这事先放稳。"],
           progression: ["按节奏来。", "不用逞强。"],
-          hook: ["这句我会记着。", "抬眼，看着我说。"]
+          hook: ["这句我会记着。", "抬眼，先听我说。"]
         },
         hostile: {
           instant: ["少来这套。", q ? quoted + "什么意思？" : "你这话什么意思？"],
           attitude: ["我不吃这一套。", "别试我。"],
           progression: ["说清楚。", "别把话说得那么干净。"],
-          hook: ["继续装。", "这笔账先记着。"]
+          hook: ["继续说。", "这笔账先记着。"]
         },
         shy: {
           instant: ["……嗯。", heard],
@@ -7569,8 +8141,11 @@
     };
   }
 
-  function buildPersonaAwareFallbackCandidates(profile, tags, primaryTag, flags, phase, index) {
+  function buildPersonaAwareFallbackCandidates(profile, tags, primaryTag, flags, phase, index, options) {
     var source = profile || {};
+    if (isOnlineReplyMode(source || options || {})) {
+      return [];
+    }
     var activeTags = Array.isArray(tags) && tags.length ? tags : (primaryTag ? [primaryTag] : []);
     var latestInput = String(source.latestUserInput || "");
     var previousText = [source.previousReplyText, source.rejectedReplyText, source.thoughtsHint, source.recentHeartVoiceText].filter(Boolean).join("\n");
@@ -7593,15 +8168,15 @@
       return list.slice(8, 10);
     };
     var phaseLines = {
-      strong: ["先停。", "看着我。", "这句别糊过去。", "我来判断。", "按我说的来。", "先把话说清楚。", "不用躲。", "这件事我来定。", "别让我问第二遍。", "到这儿，听我的。"],
-      cold: ["嗯。", "不像。", "说重点。", "别绕。", "我听见了。", "继续。", "别装没事。", "这句留着。", "到这儿就够了。", "先别翻篇。"],
+      strong: ["先停。", "先听我说。", "这句别糊过去。", "我先听着。", "按我说的来。", "先把话说清楚。", "不用躲。", "这件事我来定。", "你先把具体的说出来。", "到这儿，先听我说。"],
+      cold: ["嗯。", "不像。", "说重点。", "别扯远。", "我听见了。", "继续。", "别装没事。", "这句留着。", "到这儿就够了。", "先别翻篇。"],
       tsundere: ["谁担心你了。", "别误会。", "我只是顺口问。", "你刚才那样很明显。", "烦死了。", "那你倒是说啊。", "我没生气。", "别又装没事。", "算了，先听你的。", "这事我先记着。"],
-      clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别躲我。", "再说一句。", "我还在等。", "你别敷衍我。"],
+      clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别回避我。", "再说一句。", "我还在等。", "我先听你说。"],
       gentle: ["先看着我。", "别把自己绷太紧。", "这句我接住了。", "不用硬撑。", "我在听。", "把气放下来一点。", "先坐稳。", "别急着躲开。", "这事我会放在心上。", "说到这儿也行。"],
-      obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "看着我说。", "我不喜欢你这样躲。", "那个人先放一边。", "你现在回我。", "别让我猜。", "我盯着呢。"],
-      playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "来，再说一遍。", "你这话我可记下了。", "别急着跑。", "行啊，胆子见长。", "我听着，你继续编。", "这反应挺明显的。"],
-      formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，看着我说。"],
-      hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续装。", "这笔账先记着。"],
+      obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "先把话说清楚。", "我不喜欢你这样躲。", "那个人先放一边。", "先回答我。", "不要让我猜。", "我盯着呢。"],
+      playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "再说一遍。", "你这话我可记下了。", "先别走。", "行啊，胆子见长。", "这句我先听着。", "这反应挺明显的。"],
+      formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，先听我说。"],
+      hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续说。", "这笔账先记着."],
       shy: ["……嗯。", "我听见了。", "你别看我。", "我不是那个意思。", "你刚才那句……算了。", "我有点乱。", "别催我。", "再给我一下。", "我会回你的。", "你先别走。"],
       default: ["等一下。", "这话不像随便说的。", "先别急着翻篇。", "先别跳过刚才那句。", "别把话藏一半。", "继续说。", "这句留着。", "我听着。", "先说到这儿。", "别跳过刚才那句。"]
     };
@@ -7615,13 +8190,13 @@
     } else if (has("strong") && has("tsundere")) {
       comboLines = ["先停，别嘴硬。", "我就问这一句。", "过来，把话说清楚。", "别误会，我只是看不下去。", "你那点逞强收一收。", "按我说的来，少顶嘴。", "我没担心你。", "但你也别想糊弄过去。", "这事我先替你压住。", "下次别让我抓到。"];
     } else if (has("strong") && has("formal")) {
-      comboLines = ["先停。", "按节奏来。", "这件事我来判断。", "把话说完整。", "别急着自己扛。", "先坐下，看着我。", "我会安排，但你要配合。", "逞强到这里为止。", "这句我记下了。", "回头我再和你算。"];
+      comboLines = ["先停。", "按节奏来。", "这件事我先听着。", "把话说完整。", "别急着自己扛。", "先坐下，先听我说。", "我会安排，但你要配合。", "逞强到这里为止。", "这句我记下了。", "回头我再和你算。"];
     } else if (has("cold") && has("obsessive")) {
-      comboLines = ["不像。", "你刚才那句，别收回去。", "提到谁了？", "别想混过去。", "我听见了。", "继续。", "少拿没事挡我。", "你躲得太快了。", "这事先放我这儿。", "我会盯着。"];
+      comboLines = ["不像。", "你刚才那句，别收回去。", "提到谁了？", "别想混过去。", "我听见了。", "我接着。", "少拿没事挡我。", "你这句有点回避。", "这事先放我这儿。", "我会盯着。"];
     } else if (has("gentle") && has("formal")) {
       comboLines = ["先坐稳。", "这事不用急着撑过去。", "我听你说完。", "把呼吸放慢一点。", "别自己硬扛。", "我会处理，但先按分寸来。", "这句我记着。", "先别躲开。", "到这里，先休息一下。", "之后再慢慢算清楚。"];
     } else if (has("playful") && has("hostile")) {
-      comboLines = ["哟，说得真干净。", "别急着装无辜。", "我差点就信了。", "这话留着，我爱听破绽。", "继续编。", "你这反应挺有意思。", "少来这套。", "别把自己摘得太干净。", "这笔账我先记着。", "跑什么，我还没问完。"];
+      comboLines = ["哟，说得真干净。", "别急着装无辜。", "我差点就信了。", "这话留着，我爱听破绽。", "这件事得分开说。", "你这反应挺有意思。", "少来这套。", "别把自己摘得太干净。", "这笔账我先记着。", "跑什么，我还没问完。"];
     } else if (has("shy") && has("clingy")) {
       comboLines = ["……你别走。", "我不是催你。", "就是再说一句。", "你刚才那样，我会乱想。", "别把我晾在这里。", "我、我听着。", "你小声说也行。", "别躲太远。", "我还在等你。", "算了，你先看我一下。"];
     }
@@ -7640,7 +8215,7 @@
         contextLines.push("你又想把我晾过去。");
       }
       if (has("obsessive")) {
-        contextLines.push("你躲得太快了。");
+        contextLines.push("你这句有点回避。");
       }
       if (has("formal")) {
         contextLines.push("先别用这句收尾。");
@@ -7707,7 +8282,7 @@
       }
     }
     if (/吃醋|占有|盯|别人|那个人/.test(previousText)) {
-      contextLines.push("那个人先放一边。", "你先回我。");
+      contextLines.push("那个人先放一边。", "先回答我。");
     }
     if (/心软|担心|在意|靠近/.test(previousText)) {
       if (has("tsundere")) {
@@ -7732,7 +8307,7 @@
       contextLines.push("别问那么直。", "这句先放着。");
     }
     if (flags.isJealous) {
-      contextLines.push("那个人先放一边。", "你先回我。");
+      contextLines.push("那个人先放一边。", "先回答我。");
     }
 
     if (personaEvidence.length && candidateIndex % 3 === 2) {
@@ -7742,7 +8317,7 @@
       } else if (allowDirectiveEvidence && /强势|命令|控制|掌控|支配|压制/.test(evidenceText)) {
         evidenceLines.push("按我说的来。", "别让我问第二遍。");
       } else if (/冷淡|疏离|淡漠|寡言|克制/.test(evidenceText)) {
-        evidenceLines.push("嗯，别绕。", "我听见了。");
+        evidenceLines.push("嗯，别扯远。", "我听见了。");
       } else if (/嘴硬|傲娇|别扭|不坦率/.test(evidenceText)) {
         evidenceLines.push("我没说不管你。", "别误会。");
       } else if (/黏人|依赖|撒娇|缺安全感/.test(evidenceText)) {
@@ -7901,17 +8476,17 @@
   function getFallbackLines(bucket, profile, contextFlags) {
     var personaText = [profile && profile.persona, profile && profile.currentMood].join("\n");
     var byBucket = {
-      worldControl: ["先停。", "这不是你能越过去的线。", "按我说的来。", "别试探我的底线。", "你现在要做的是听话。", "把话收回去。", "我没准你这样问。", "站在那儿，别动。", "这件事我来定。", "看着我，再说一遍。"],
+      worldControl: ["先停。", "这不是你能越过去的线。", "按我说的来。", "别试探我的底线。", "你现在要做的是听话。", "把话收回去。", "我没准你这样问。", "站在那儿，别动。", "这件事我来定。", "先把话说清楚。"],
       worldForbidden: ["这话到这里。", "别碰那条线。", "换个问法。", "我不会答应你这个。", "有些事你不该问。", "别把我往那边逼。", "这句我当没听见。", "收住。", "我们不谈这个。", "你知道这不合适。"],
-      cold: ["嗯。", "说重点。", "是吗？", "随你。", "那就这样。", "你最好是。", "我没说信你。", "继续。", "别绕。", "到这儿就够了。"],
-      strong: ["先停。", "听我说。", "这件事别拖。", "按我说的来。", "先把话说清楚。", "不用躲。", "我来判断。", "你现在别乱想。", "把手头的事放一放。", "看着我回。"],
-      clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别躲我。", "再说一句。", "我还在等。", "你别敷衍我。"],
-      tsundere: ["谁问你了。", "我又没说担心你。", "别误会。", "你爱说不说。", "行吧，我听着。", "谁稀罕管你。", "烦死了。", "那你倒是说啊。", "我没生气。", "算了，先听你的。"],
+      cold: ["嗯。", "说重点。", "是吗？", "随你。", "那就这样。", "你最好是。", "我没说信你。", "继续。", "别扯远。", "到这儿就够了。"],
+      strong: ["先停。", "听我说。", "这件事别拖。", "按我说的来。", "先把话说清楚。", "不用躲。", "我先听着。", "你现在别乱想。", "把手头的事放一放。", "先回答我。"],
+      clingy: ["你又这样。", "别把我晾在这儿。", "再多说一点。", "刚才那句不许跳过。", "你回我嘛。", "我有点在意。", "别回避我。", "再说一句。", "我还在等。", "我先听你说。"],
+      tsundere: ["先回答一个问题。", "我又没说担心你。", "别误会。", "你接着说明明。", "行吧，我听着。", "谁稀罕管你。", "烦死了。", "那你倒是说啊。", "我没生气。", "算了，先听你的。"],
       gentle: ["先看着我。", "别把自己绷太紧。", "这句我接住了。", "不用硬撑。", "我在听。", "把气放下来一点。", "先坐稳。", "别急着躲开。", "这事我会放在心上。", "说到这儿也行。"],
-      obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "看着我说。", "我不喜欢你这样躲。", "那个人先放一边。", "你现在回我。", "别让我猜。", "我盯着呢。"],
-      playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "来，再说一遍。", "你这话我可记下了。", "别急着跑。", "行啊，胆子见长。", "我听着，你继续编。", "这反应挺明显的。"],
-      formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，看着我说。"],
-      hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续装。", "这笔账先记着。"],
+      obsessive: ["你刚才提到谁？", "别拿别人挡在中间。", "我注意到那句了。", "你别想糊弄过去。", "先把话说清楚。", "我不喜欢你这样躲。", "那个人先放一边。", "先回答我。", "不要让我猜。", "我盯着呢。"],
+      playful: ["哟，还会躲啊。", "这句有点意思。", "别装得那么无辜。", "我差点就信了。", "再说一遍。", "你这话我可记下了。", "先别走。", "行啊，胆子见长。", "这句我先听着。", "这反应挺明显的。"],
+      formal: ["先别急。", "把话说完整。", "我听着。", "这事先放稳。", "别自己扛着。", "按节奏来。", "先坐下。", "不用逞强。", "这句我会记着。", "抬眼，先听我说。"],
+      hostile: ["少来这套。", "你这话什么意思？", "别试我。", "我不吃这一套。", "说清楚。", "你以为我听不出来？", "别把话说得那么干净。", "我暂时信不了你。", "继续说。", "这笔账先记着。"],
       shy: ["……嗯。", "我听见了。", "你别看我。", "我不是那个意思。", "你刚才那句……算了。", "我有点乱。", "别催我。", "再给我一下。", "我会回你的。", "你先别走。"],
       default: ["嗯，我看见了。", "你刚才那句，我没跳过去。", "等一下。", "这话不像随便说的。", "先别急着翻篇。", "我听着。", "我接着呢。", "别把话藏一半。", "继续说。", "这句留着。"]
     };
@@ -7996,7 +8571,7 @@
       }
     }
 
-    reply.content = normalizeAiMessageText(content);
+    reply.content = normalizeAiMessageText(content, options);
     return reply;
   }
 
@@ -8358,7 +8933,7 @@
     var speechProtectionReplies = [
       "好，站那儿别动。",
       "当然。你敢走试试。",
-      "啧，谁问你了。"
+      "啧，先回答一个问题。"
     ];
 
     characters.forEach(function (character) {
