@@ -1498,6 +1498,12 @@
   async function repairOnlineMessages(context, messages, reason) {
     var source = context || {};
     var currentMessages = Array.isArray(messages) ? messages : [];
+    var reasons = String(reason || "").split(/;+/).map(function (item) {
+      return String(item || "").trim();
+    }).filter(function (item) { return item; });
+    var hasReason = function (value) {
+      return reasons.indexOf(value) !== -1;
+    };
     var systemLines = [
       "你正在修复线上聊天 messages。本轮只修复已有消息，不要重写整段剧情。",
       "保留已有合理内容，改写或删除明显审问模板。",
@@ -1513,7 +1519,7 @@
       source.rejectedReplyText || source.oldReplyText
         ? "上一版被否定的回复摘要：\n" + limitText(source.rejectedReplyText || source.oldReplyText, 700)
         : "",
-      reason === "regenerate-too-similar"
+      hasReason("regenerate-too-similar")
         ? "当前修复原因：新回复和上一版太相似。必须换第一反应、语气角度、推进顺序和收束方式。"
         : "",
       "只返回 JSON，格式为 {\"messages\":[{\"characterId\":...,\"type\":...,\"content\":...}]}。",
@@ -3353,6 +3359,7 @@
   function checkGroupPersonaWorldBookQuality(messages, characters, worldBookContext, worldBookMeta, latestUserInput) {
     var list = Array.isArray(messages) ? messages : [];
     var hasWorld = Boolean(String(worldBookContext || "").trim()) || Boolean(worldBookMeta && worldBookMeta.hasMatchedEntries);
+    var userNeedsWorld = /世界书|设定|规则|师门|门规|禁忌|身份|不能说|为什么/.test(String(latestUserInput || ""));
     var characterMap = {};
     var speakerCounts = {};
     var personaHits = {};
@@ -3401,15 +3408,15 @@
       return personaHits[id] > 0;
     }).length;
 
-    if (genericCount >= 3) {
+    if (genericCount >= 4) {
       return { ok: false, reason: "too-generic-assistant-tone", worldImpactCount: worldImpactCount, personaSpeakerCount: personaSpeakerCount };
     }
 
-    if (activeSpeakers.length >= 2 && personaSpeakerCount < Math.min(2, activeSpeakers.length)) {
+    if (activeSpeakers.length >= 2 && personaSpeakerCount === 0) {
       return { ok: false, reason: "group-persona-not-distinct", worldImpactCount: worldImpactCount, personaSpeakerCount: personaSpeakerCount };
     }
 
-    if (hasWorld && worldImpactCount < 2) {
+    if (hasWorld && userNeedsWorld && worldImpactCount < 1) {
       return { ok: false, reason: "worldbook-impact-not-visible", worldImpactCount: worldImpactCount, personaSpeakerCount: personaSpeakerCount };
     }
 
@@ -3576,13 +3583,31 @@
     ) : null;
 
     var coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, result.replies);
+    var groupPersonaWorldQuality = checkGroupPersonaWorldBookQuality(
+      result.replies,
+      characters,
+      requestOptions.worldBookContext,
+      requestOptions.worldBookMeta,
+      requestOptions.latestUserInput
+    );
     var repaired = false;
     var templateToneCountBefore = countTemplateTone(result.replies);
     var templateToneCountAfter = templateToneCountBefore;
     var removedTemplateMessages = 0;
 
+    var repairReasons = [];
     if (regenerateDiff && !regenerateDiff.ok) {
-      var similarityRepairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
+      repairReasons.push("regenerate-too-similar");
+    }
+    if (!coverage.ok) {
+      repairReasons.push(coverage.reason || "intent-not-covered");
+    }
+    if (!groupPersonaWorldQuality.ok) {
+      repairReasons.push(groupPersonaWorldQuality.reason || "group-persona-worldbook-quality");
+    }
+
+    if (repairReasons.length) {
+      var repairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
         mode: "group",
         regenerateRequest: requestOptions.regenerateRequest,
         regenerateInstruction: effectiveRegenerateInstruction,
@@ -3590,48 +3615,39 @@
         oldReplyText: requestOptions.oldReplyText,
         latestUserInput: requestOptions.latestUserInput,
         worldBookContext: requestOptions.worldBookContext,
+        worldBookMeta: requestOptions.worldBookMeta,
+        matchedWorldBookEntries: requestOptions.matchedWorldBookEntries,
         participantPersonaText: (characters || []).map(function (character) {
           return [
             "群成员：" + valueOrFallback(character && character.name),
-            buildMergedCharacterPersona(character)
+            "人设：" + buildMergedCharacterPersona(character),
+            "语气标签：" + detectPersonaVoiceProfile(character || {}, requestOptions.worldBookContext || "").tags.join("/")
           ].join("\n");
         }).join("\n\n")
-      }), result.replies || replies || messages, "regenerate-too-similar");
-
-      if (Array.isArray(similarityRepairMessages) && similarityRepairMessages.length) {
-        result.replies = normalizeReplyList("", similarityRepairMessages, normalizationSettings);
-        regenerateDiff = checkRegenerateDifference(
-          requestOptions.rejectedReplyText || requestOptions.oldReplyText,
-          result.replies || replies || messages
-        );
-        repaired = true;
-      }
-
-      if (regenerateDiff && !regenerateDiff.ok) {
-        var similarityCleaned = filterOnlineTemplateReplies(result.replies);
-        if (similarityCleaned.length) {
-          result.replies = similarityCleaned;
-        }
-      }
-    }
-
-    if (!coverage.ok) {
-      var repairMessages = await repairOnlineMessages({
-        mode: "group",
-        latestUserInput: requestOptions.latestUserInput,
-        worldBookContext: requestOptions.worldBookContext,
-        participantPersonaText: (characters || []).map(function (character) {
-          return [
-            "群成员：" + valueOrFallback(character && character.name),
-            buildMergedCharacterPersona(character)
-          ].join("\n");
-        }).join("\n\n")
-      }, result.replies, coverage.reason);
+      }), result.replies || replies || messages, repairReasons.join(";"));
 
       if (Array.isArray(repairMessages) && repairMessages.length) {
         result.replies = normalizeReplyList("", repairMessages, normalizationSettings);
         repaired = true;
+        regenerateDiff = requestOptions.regenerateRequest ? checkRegenerateDifference(
+          requestOptions.rejectedReplyText || requestOptions.oldReplyText,
+          result.replies || replies || messages
+        ) : null;
         coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, result.replies);
+        groupPersonaWorldQuality = checkGroupPersonaWorldBookQuality(
+          result.replies,
+          characters,
+          requestOptions.worldBookContext,
+          requestOptions.worldBookMeta,
+          requestOptions.latestUserInput
+        );
+      }
+    }
+
+    if (regenerateDiff && !regenerateDiff.ok) {
+      var similarityCleaned = filterOnlineTemplateReplies(result.replies);
+      if (similarityCleaned.length) {
+        result.replies = similarityCleaned;
       }
     }
 
@@ -3647,48 +3663,10 @@
       }
     }
 
-    var groupPersonaWorldQuality = checkGroupPersonaWorldBookQuality(
-      result.replies,
-      characters,
-      requestOptions.worldBookContext,
-      requestOptions.worldBookMeta,
-      requestOptions.latestUserInput
-    );
-    var groupPersonaRepaired = false;
-
     if (!groupPersonaWorldQuality.ok) {
-      var groupPersonaRepairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
-        mode: "group",
-        latestUserInput: requestOptions.latestUserInput,
-        worldBookContext: requestOptions.worldBookContext,
-        worldBookMeta: requestOptions.worldBookMeta,
-        matchedWorldBookEntries: requestOptions.matchedWorldBookEntries,
-        participantPersonaText: (characters || []).map(function (character) {
-          return [
-            "群成员：" + valueOrFallback(character && character.name),
-            "人设：" + buildMergedCharacterPersona(character),
-            "语气标签：" + detectPersonaVoiceProfile(character || {}, requestOptions.worldBookContext || "").tags.join("/")
-          ].join("\n");
-        }).join("\n\n")
-      }), result.replies, groupPersonaWorldQuality.reason);
-
-      if (Array.isArray(groupPersonaRepairMessages) && groupPersonaRepairMessages.length) {
-        result.replies = normalizeReplyList("", groupPersonaRepairMessages, normalizationSettings);
-        groupPersonaRepaired = true;
-        groupPersonaWorldQuality = checkGroupPersonaWorldBookQuality(
-          result.replies,
-          characters,
-          requestOptions.worldBookContext,
-          requestOptions.worldBookMeta,
-          requestOptions.latestUserInput
-        );
-      }
-
-      if (!groupPersonaWorldQuality.ok) {
-        var gpCleaned = filterOnlineTemplateReplies(result.replies);
-        if (gpCleaned.length) {
-          result.replies = gpCleaned;
-        }
+      var gpCleaned = filterOnlineTemplateReplies(result.replies);
+      if (gpCleaned.length) {
+        result.replies = gpCleaned;
       }
     }
 
@@ -3703,7 +3681,7 @@
         personaSpeakerCount: groupPersonaWorldQuality.personaSpeakerCount,
         worldImpactCount: groupPersonaWorldQuality.worldImpactCount,
         qualityReason: groupPersonaWorldQuality.reason,
-        repaired: groupPersonaRepaired,
+        repaired: repaired,
         worldBookMatched: requestOptions.worldBookMeta && requestOptions.worldBookMeta.hasMatchedEntries,
         matchedWorldBookEntries: (requestOptions.matchedWorldBookEntries || []).map(function (e) {
           return e && (e.title || e.keyword || e.id || "");
