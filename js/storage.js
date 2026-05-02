@@ -2213,7 +2213,9 @@
         }
 
         var keywords = normalizeWorldBookKeywords(entry);
+        var aliases = normalizeWorldBookKeywords({ keyword: entry.alias || "", keywords: entry.aliases || [] });
         var alwaysActive = isWorldBookEntryAlwaysActive(entry, book);
+
         var keywordScore = keywords.reduce(function (score, keyword) {
           var value = String(keyword || "").trim().toLowerCase();
 
@@ -2231,6 +2233,32 @@
 
           return score;
         }, 0);
+
+        var aliasScore = aliases.reduce(function (score, alias) {
+          var value = String(alias || "").trim().toLowerCase();
+
+          if (!value) {
+            return score;
+          }
+
+          if (text.indexOf(value) !== -1) {
+            return score + 5 + Math.min(4, value.length);
+          }
+
+          if (contextTokens.indexOf(value) !== -1) {
+            return score + 3;
+          }
+
+          return score;
+        }, 0);
+
+        var entryCharacterIds = normalizeWorldBookTargetIds(
+          entry.relatedCharacterIds || entry.characterIds || []
+        );
+        var characterIdScore = entryCharacterIds.length > 0 && relatedTargetIds.some(function (id) {
+          return entryCharacterIds.indexOf(id) !== -1;
+        }) ? 6 : 0;
+
         var titleScore = entry.title && text.indexOf(String(entry.title).toLowerCase()) !== -1 ? 5 : 0;
         var groupScore = entry.group && text.indexOf(String(entry.group).toLowerCase()) !== -1 ? 2 : 0;
         var contentScore = contextTokens.reduce(function (score, token) {
@@ -2241,10 +2269,25 @@
         }, 0);
         var baseScore = keywordScore + titleScore + groupScore + Math.min(contentScore, 6);
         var priority = Number(entry.priority) || 0;
-        var score = baseScore + priority + (alwaysActive ? 100 : 0);
+        var score = baseScore + aliasScore + characterIdScore + priority + (alwaysActive ? 100 : 0);
         var isTinyBook = bookEnabledCount <= 5;
-        var weakMatch = !keywords.length && priority >= 5;
-        var shouldInclude = alwaysActive || baseScore > 0 || weakMatch || isTinyBook;
+        var weakMatch = !keywords.length && !aliases.length && priority >= 5;
+        var shouldInclude = alwaysActive || baseScore > 0 || aliasScore > 0 || characterIdScore > 0 || weakMatch || isTinyBook;
+
+        var matchType;
+        if (alwaysActive) {
+          matchType = "常驻背景";
+        } else if (keywordScore >= 8) {
+          matchType = "强关键词命中";
+        } else if (aliasScore > 0) {
+          matchType = "别名命中";
+        } else if (characterIdScore > 0 && baseScore === 0) {
+          matchType = "角色关联命中";
+        } else if (baseScore > 0) {
+          matchType = "上下文语义命中";
+        } else {
+          matchType = "高优先级命中";
+        }
 
         if (shouldInclude) {
           matched.push(Object.assign({}, entry, {
@@ -2254,7 +2297,7 @@
             bookTargetIds: book.targetIds.slice(),
             keywords: keywords,
             alwaysActive: Boolean(alwaysActive),
-            matchType: alwaysActive ? "常驻现实规则" : (baseScore > 0 ? "关键词/上下文命中" : "高优先级命中"),
+            matchType: matchType,
             matchScore: score
           }));
         }

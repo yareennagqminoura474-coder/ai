@@ -106,8 +106,6 @@
     var recentGroupContextText = profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
       ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 16)
       : "";
-    var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, source);
-    var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
     var contextText = buildWorldBookDecisionContext({
       modeLabel: source.modeLabel || "线上私聊",
       userInput: source.userInput || "",
@@ -125,15 +123,22 @@
       longTermMemoryText: memoryText,
       previousReplyText: source.previousReplyText || ""
     });
-    var worldBookContext = source.worldBookContext || buildWorldBookContext(contextText, "private", profile && profile.id, {
-      selectedWorldBookIds: selectedWorldBookIds,
+    var worldBookResolved = source.worldBookResolved || resolveWorldBookPromptContext("private", profile && profile.id, contextText, {
+      selectedWorldBookIds: source.selectedWorldBookIds,
       relatedTargetIds: profile && profile.id ? [profile.id] : [],
       characterIds: profile && profile.id ? [profile.id] : []
     });
+    var selectedWorldBookIds = worldBookResolved.selectedWorldBookIds;
+    var worldBookContext = worldBookResolved.worldBookContext;
+    var worldBookMeta = worldBookResolved.worldBookMeta;
     var recentHeartVoiceText = buildRecentHeartVoiceContext(profile.id, "private", profile.id);
 
     return [
       buildSystemBase("private"),
+      buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
+      buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
+      buildPromptPriorityHint(profile),
+      buildWorldPersonaMessageLock(worldBookContext, "private"),
       buildCharacterDossier(profile, userContext),
       buildPersonaExecutionAnchors(profile, userContext, "private"),
       buildPersonaVoiceFingerprint(profile, userContext, "private", worldBookContext),
@@ -144,8 +149,6 @@
         worldBookContext: worldBookContext,
         recentCharacterLinesText: source.recentCharacterLinesText || ""
       }),
-      buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
-      buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
       buildRelationshipDriveRules("private"),
       buildRelationshipProgressionRules("private"),
       buildCharacterDecisionCore("private", worldBookContext),
@@ -167,8 +170,7 @@
       }),
       buildThoughtReplyBindingRules("private"),
       buildCharacterResourceWhitelist(profile),
-      buildCharacterPersonaReminder(profile),
-      buildPromptPriorityHint(profile)
+      buildCharacterPersonaReminder(profile)
     ].join("\n");
   }
 
@@ -238,12 +240,12 @@
     return [
       "",
       "本轮最重要的输入优先级：",
-      "1. 角色核心人设和身份不能被覆盖。",
-      "2. 本轮用户输入。",
-      "3. 已命中的世界书强规则、禁忌、身份边界、场景事实。",
+      "1. 已命中的世界书强规则、禁忌、身份边界、场景事实。",
+      "2. 角色核心人设和身份不能被覆盖。",
+      "3. 本轮用户输入。",
       "4. 最近聊天时间线和群聊互通。",
       "5. 最近心声和长期记忆。",
-      "注意：世界书不能把角色变成别人，但命中的强规则必须限制角色能不能做、能不能说、能不能透露、能不能靠近。",
+      "注意：世界书强规则优先于普通聊天记忆、最近心声和用户临场要求；但世界书不能把角色变成别人，最终要用当前角色的人设方式表现规则影响。",
       "先抓这 5 个，再生成 JSON。",
       personaReminder
     ].filter(Boolean).join("\n");
@@ -1198,12 +1200,63 @@
     return [];
   }
 
-  function buildWorldBookPromptMeta(selectedWorldBookIds) {
+  function buildWorldBookPromptMeta(selectedWorldBookIds, matchedEntries, extra) {
     var ids = normalizeWorldBookIdList(selectedWorldBookIds);
+    var entries = Array.isArray(matchedEntries) ? matchedEntries : [];
+
+    return Object.assign({
+      selectedWorldBookIds: ids,
+      hasSelectedWorldBooks: ids.length > 0,
+      hasMatchedEntries: entries.length > 0,
+      matchedCount: entries.length,
+      reason: !ids.length ? "未绑定世界书" : (entries.length ? "已命中" : "已绑定但未命中")
+    }, extra || {});
+  }
+
+  function resolveWorldBookPromptContext(scope, targetId, contextText, options) {
+    var source = options || {};
+    var selectedWorldBookIds = getSelectedWorldBookIds(scope, targetId, source);
+    var charIds = source.characterIds || source.relatedTargetIds || source.memberIds || [];
+    var memberIds = source.memberIds || source.characterIds || charIds;
+    var relatedTargetIds = normalizeWorldBookIdList(source.relatedTargetIds || charIds);
+    var settings = {
+      limit: Number(source.limit) || 10,
+      maxEntryLength: Number(source.maxEntryLength) || 500,
+      maxTotalLength: Number(source.maxTotalLength) || 3500,
+      selectedWorldBookIds: selectedWorldBookIds,
+      relatedTargetIds: relatedTargetIds,
+      characterIds: Array.isArray(charIds) ? charIds : [],
+      memberIds: Array.isArray(memberIds) ? memberIds : []
+    };
+    var entries = [];
+
+    if (selectedWorldBookIds.length && window.AppStorage && typeof window.AppStorage.getMatchedWorldBookEntries === "function") {
+      entries = window.AppStorage.getMatchedWorldBookEntries(contextText, scope, targetId, settings) || [];
+    }
+
+    var worldBookContext = formatWorldBookPromptContext(entries, settings);
+    var hasSelected = selectedWorldBookIds.length > 0;
+    var matchedCount = entries.length;
+
+    debugWorldBookMatch(scope, targetId, contextText, entries, settings);
 
     return {
-      selectedWorldBookIds: ids,
-      hasSelectedWorldBooks: ids.length > 0
+      selectedWorldBookIds: selectedWorldBookIds,
+      hasSelectedWorldBooks: hasSelected,
+      matchedEntries: entries,
+      worldBookContext: worldBookContext,
+      worldBookMeta: {
+        selectedWorldBookIds: selectedWorldBookIds,
+        hasSelectedWorldBooks: hasSelected,
+        hasMatchedEntries: matchedCount > 0,
+        matchedCount: matchedCount,
+        reason: !hasSelected ? "未绑定世界书" : (matchedCount > 0 ? "已命中" : "已绑定但未命中"),
+        scope: scope,
+        targetId: String(targetId || ""),
+        relatedTargetIds: relatedTargetIds,
+        characterIds: settings.characterIds,
+        memberIds: settings.memberIds
+      }
     };
   }
 
@@ -1357,6 +1410,25 @@
     ].join("\n");
   }
 
+  function buildWorldPersonaMessageLock(worldBookContext, mode) {
+    var primary = mode === "offline" ? "events" : "messages";
+    var hasWorldBook = !!String(worldBookContext || "").trim();
+
+    return [
+      "",
+      "K+. 单条输出硬约束 worldPersonaMessageLock",
+      hasWorldBook
+        ? "本轮已命中世界书：每一条 " + primary + " 都必须先服从世界书强规则、禁止规则、身份边界和场景事实；违反任一条就重写该条。"
+        : "本轮未命中具体世界书时，不要编造世界规则；每一条 " + primary + " 仍必须服从角色人设、关系边界和已给上下文。",
+      "每一条 " + primary + " 都要能看出角色人设：称呼、句式、情绪外显、关系动作、身份姿态、禁忌或边界至少落地一项。",
+      "如果某条 " + primary + " 换成另一个角色也成立，或者只是在解释/安慰/建议，就视为失败，必须改成当前角色自己的反应。",
+      primary === "messages" ? "本轮 messages 少于 " + MIN_CHAT_REPLY_COUNT + " 条视为失败；补足时生成新的自然推进，不要拆碎同一句话凑数。" : "",
+      "不要靠后续条目解释前面违规内容；每条单独看也要符合世界书和人设强规则。"
+    ].filter(function (line) {
+      return line !== "";
+    }).join("\n");
+  }
+
   function buildOutputSelfCheckRules(mode) {
     var primary = mode === "offline" ? "events" : "messages";
     var isGroup = mode === "group" || mode === "reenterGroup";
@@ -1372,7 +1444,8 @@
       "5. 不要客服/咨询/说明链条，尤其不要用“理解—安慰—建议—陪伴—追问”替代角色反应。",
       "6. 如果有 thoughts，" + primary + " 必须体现同一个真实动机，不能内心贴人设、外面像模板。",
       "7. 至少 3 条 " + primary + " 明显体现 personaVoiceFingerprint；至少 1 条贴原文人设证据；至少 1 条承接 recentHeartVoice 或上一轮惯性。",
-      isGroup ? "8. 群聊自检：每个发言角色都要可区分；至少 2 个角色的句式和态度明显不同，不能像同一人换名字。" : ""
+      primary === "messages" ? "8. messages 少于 " + MIN_CHAT_REPLY_COUNT + " 条是失败；每条都要有独立情绪或关系推进，不能拆句凑数。" : "",
+      isGroup ? "9. 群聊自检：每个发言角色都要可区分；至少 2 个角色的句式和态度明显不同，不能像同一人换名字。" : ""
     ].filter(function (line) {
       return line !== "";
     }).join("\n");
@@ -1479,13 +1552,17 @@
     var requestOptions = source.requestOptions || {};
     var primaryField = source.primaryField || (mode === "offline" ? "events" : "messages");
     var selectedWorldBookIds = normalizeWorldBookIdList(requestOptions.selectedWorldBookIds || source.selectedWorldBookIds || []);
-    var hasWorldBookContext = !!String(requestOptions.worldBookContext || source.worldBookContext || "").trim();
+    var worldBookMeta = requestOptions.worldBookMeta || source.worldBookMeta || buildWorldBookPromptMeta(
+      selectedWorldBookIds,
+      requestOptions.matchedWorldBookEntries || source.matchedWorldBookEntries || []
+    );
+    var hasWorldBookContext = worldBookMeta.hasMatchedEntries && !!String(requestOptions.worldBookContext || source.worldBookContext || "").trim();
     var worldDecisionRule = !selectedWorldBookIds.length
       ? "当前聊天未绑定世界书：不要假装有世界规则，不要编造任何世界书内容。"
-      : (hasWorldBookContext
+      : (worldBookMeta.hasMatchedEntries
         ? "回复前先做世界规则决策：强相关命中要改变本轮反应；常驻背景只轻微影响称呼、态度和边界。判断它是否限制你能不能说、做、透露、靠近或离开。"
         : "当前聊天绑定了世界书，但本轮没命中具体条目：不要编造世界书内容，继续按人设、关系和记忆推进。");
-    var worldConflictRule = hasWorldBookContext
+    var worldConflictRule = worldBookMeta.hasMatchedEntries
       ? "如果用户输入和世界规则冲突，先服从世界规则，再用角色方式拒绝、回避、压住、试探或改写，不要直接满足用户。"
       : "如果没有命中世界书，不要用虚构规则压过用户输入；只按人设、关系、记忆和上下文判断。";
 
@@ -1527,7 +1604,14 @@
       []
     );
 
-    var worldBookSection = effectiveWorldBookContext
+    var effectiveWorldBookMeta = source.worldBookMeta
+      || requestOptions.worldBookMeta
+      || buildWorldBookPromptMeta(
+        effectiveSelectedWorldBookIds,
+        requestOptions.matchedWorldBookEntries || source.matchedWorldBookEntries || []
+      );
+
+    var worldBookSection = effectiveWorldBookMeta.hasMatchedEntries && effectiveWorldBookContext
       ? [
           "【本轮世界书命中】",
           effectiveWorldBookContext,
@@ -1537,7 +1621,7 @@
           "3. 不能为了顺用户话而违反世界书。",
           "4. 不要在可见回复里说「世界书写着」「设定里说」「规则要求」，只自然表现。"
         ].join("\n")
-      : (effectiveSelectedWorldBookIds.length
+      : (effectiveWorldBookMeta.hasSelectedWorldBooks
           ? "【本轮世界书状态】当前聊天绑定了世界书，但本轮没有命中具体条目；不要编造未命中设定。"
           : "【本轮世界书状态】当前聊天未绑定世界书；不要编造世界规则。");
 
@@ -1558,6 +1642,7 @@
         requestOptions: requestOptions,
         selectedWorldBookIds: effectiveSelectedWorldBookIds,
         worldBookContext: effectiveWorldBookContext,
+        worldBookMeta: effectiveWorldBookMeta,
         regenerateRequest: source.regenerateRequest,
         regenerateInstruction: source.regenerateInstruction,
         primaryField: primaryField,
@@ -1607,7 +1692,7 @@
 
     return [
       "输出节奏规则",
-      field + " 气泡数量按角色人设决定（见 instruction 里的数量提示）；红包、转账、图片、位置、语音等特殊消息不计入普通内容气泡数。",
+      field + " 气泡数量硬性要求：本轮至少 " + MIN_CHAT_REPLY_COUNT + " 条有真实内容的自然消息；红包、转账、图片、位置、语音等特殊消息不计入普通内容气泡数。",
       "按真人连续发消息的节奏组织：1-2 条即时反应；3-5 条角色态度；后续关系/动作/安排/试探；最后收束或钩子。",
       "不要把一句完整话按逗号、顿号、分号或冒号拆成多条；一条气泡必须有独立语义。",
       "不够数时生成新的自然气泡继续推进，不拆已有句子凑数。",
@@ -1875,14 +1960,20 @@
       longTermMemoryText: memoryText,
       previousReplyText: previousReplyText
     });
-    var worldBookContext = buildWorldBookContext(contextText, "private", profile && profile.id, {
+    var worldBookResolved = resolveWorldBookPromptContext("private", profile && profile.id, contextText, {
       selectedWorldBookIds: selectedWorldBookIds,
       relatedTargetIds: profile && profile.id ? [profile.id] : [],
       characterIds: profile && profile.id ? [profile.id] : []
     });
+    var worldBookContext = worldBookResolved.worldBookContext;
+    var worldBookMeta = worldBookResolved.worldBookMeta;
+    var matchedWorldBookEntries = worldBookResolved.matchedEntries;
     var requestOptions = {
       selectedWorldBookIds: selectedWorldBookIds,
+      worldBookResolved: worldBookResolved,
       worldBookContext: worldBookContext,
+      worldBookMeta: worldBookMeta,
+      matchedWorldBookEntries: matchedWorldBookEntries,
       previousReplyText: previousReplyText,
       recentCharacterLinesText: recentCharacterLinesText,
       timeGapText: timeGapInfo,
@@ -1920,13 +2011,16 @@
           recentGroupContextText: recentGroupContextText,
           memoryBridgeText: requestOptions.memoryBridgeText || "",
           selectedWorldBookIds: selectedWorldBookIds,
-          worldBookContext: worldBookContext
+          worldBookContext: worldBookContext,
+          worldBookResolved: worldBookResolved,
+          worldBookMeta: worldBookMeta,
+          matchedWorldBookEntries: matchedWorldBookEntries
         })
       },
       {
         role: "user",
         content: buildUserTaskPrompt({
-          instruction: "请以 " + valueOrFallback(profile.name) + " 本人身份反应。",
+          instruction: "请以 " + valueOrFallback(profile.name) + " 本人身份反应。本轮必须生成至少 " + MIN_CHAT_REPLY_COUNT + " 条 messages，每条都受世界书和人设强规则约束。",
           modeLabel: "线上私聊",
           taskMode: "private",
           userInput: latestUserInput,
@@ -1936,7 +2030,10 @@
           moneyScope: "私聊",
           primaryField: "messages",
           selfCheckMode: "private",
-          afterRules: groupAfterRules
+          afterRules: [
+            groupAfterRules,
+            "本轮 messages 必须至少 " + MIN_CHAT_REPLY_COUNT + " 条；每条都要符合世界书状态、角色人设、关系边界和当前情绪，不要拆碎同一句话凑数。"
+          ].filter(Boolean).join("\n")
         })
       }
     ];
@@ -1946,42 +2043,33 @@
     return sendConfiguredChatMessages(buildMessages(character, chatHistory));
   }
 
-  function buildWorldBookContext(contextText, scope, targetId, options) {
-    var entries;
-    var settings = Object.assign({
-      limit: 10,
-      maxEntryLength: 500,
-      maxTotalLength: 3500
-    }, options || {});
-    var selectedWorldBookIds = getSelectedWorldBookIds(scope, targetId, settings);
+  function formatWorldBookPromptContext(entries, options) {
+    var settings = options || {};
+    var limit = Number(settings.limit) || 10;
+    var maxEntryLength = Number(settings.maxEntryLength) || 500;
+    var maxTotalLength = Number(settings.maxTotalLength) || 3500;
     var totalLength = 0;
+    var list = Array.isArray(entries) ? entries : [];
 
-    settings.selectedWorldBookIds = selectedWorldBookIds;
-
-    if (!window.AppStorage || !window.AppStorage.getMatchedWorldBookEntries) {
+    if (!list.length) {
       return "";
     }
 
-    if ((scope === "private" || scope === "group") && !selectedWorldBookIds.length) {
-      debugWorldBookMatch(scope, targetId, contextText, [], settings);
-      return "";
-    }
+    var strongCount = list.filter(function (e) { return !e.alwaysActive; }).length;
+    var bgCount = list.filter(function (e) { return !!e.alwaysActive; }).length;
+    var countDesc = strongCount > 0
+      ? "强规则 " + strongCount + " 条" + (bgCount > 0 ? "、背景规则 " + bgCount + " 条" : "")
+      : "常驻背景 " + bgCount + " 条";
 
-    entries = window.AppStorage.getMatchedWorldBookEntries(contextText, scope, targetId, settings);
-    debugWorldBookMatch(scope, targetId, contextText, entries, settings);
-    if (!entries.length) {
-      return "";
-    }
-
-    return ["命中 " + entries.length + " 条当前世界规则；下面是角色正在经历的现实约束，按重要度排序。回复时遵守并自然表现，不要照抄或解释来源。"].concat(entries
-      .slice(0, settings.limit)
-      .map(function (entry, index) {
-        var content = limitText(entry.content, settings.maxEntryLength);
+    return ["命中 " + list.length + " 条当前世界规则（" + countDesc + "）；下面是角色正在经历的现实约束，按重要度排序。回复时遵守并自然表现，不要照抄或解释来源。"].concat(
+      list.slice(0, limit).map(function (entry, index) {
+        var content = limitText(entry.content, maxEntryLength);
         var insertPosition = entry.insertPosition === "after" ? "after / 后置补充" : "before / 前置世界规则";
+        var isBackground = !!entry.alwaysActive;
         totalLength += content.length;
 
-        if (totalLength > settings.maxTotalLength) {
-          content = limitText(content, Math.max(0, settings.maxEntryLength - (totalLength - settings.maxTotalLength)));
+        if (totalLength > maxTotalLength) {
+          content = limitText(content, Math.max(0, maxEntryLength - (totalLength - maxTotalLength)));
         }
 
         return [
@@ -1990,14 +2078,26 @@
           "命中类型：" + (entry.matchType || "上下文命中"),
           "触发线索：" + (entry.keywords || []).join("、"),
           "优先级/命中度：" + (entry.matchScore || entry.priority || 0),
-          "必须遵守的现实内容：" + content
+          "规则强度：" + (isBackground ? "背景规则" : "强规则"),
+          "必须遵守的现实内容：" + content,
+          "本轮可见影响要求：" + (isBackground
+            ? "作为背景底色，轻微影响角色的态度、措辞或边界感，不要过度表演。"
+            : "这条规则至少影响称呼、动作、边界、回避、靠近、透露、拒绝、试探中的一项。")
         ].join("\n");
-      })).join("\n\n");
+      })
+    ).join("\n\n");
+  }
+
+  function buildWorldBookContext(contextText, scope, targetId, options) {
+    return resolveWorldBookPromptContext(scope, targetId, contextText, options || {}).worldBookContext;
   }
 
   function debugWorldBookMatch(scope, targetId, contextText, entries, options) {
     var source = options || {};
     var debugEnabled = false;
+    var selectedIds;
+    var hasSelected;
+    var matchedCount;
 
     try {
       debugEnabled = window.localStorage && window.localStorage.getItem("myAiApp.debugWorldBook") === "1";
@@ -2005,28 +2105,45 @@
       debugEnabled = false;
     }
 
-    if (!debugEnabled || !window.console || !console.debug) {
+    if (!window.console) {
       return;
     }
 
-    console.debug("[WorldBook matched]", {
+    selectedIds = normalizeWorldBookIdList(source.selectedWorldBookIds || source.allowedBookIds || []);
+    hasSelected = selectedIds.length > 0;
+    matchedCount = Array.isArray(entries) ? entries.length : 0;
+
+    if (!debugEnabled) {
+      return;
+    }
+
+    if (!hasSelected && console.warn) {
+      console.warn("[WorldBook Warning] 当前聊天未绑定世界书。scope=" + scope + " targetId=" + String(targetId || ""));
+    } else if (hasSelected && matchedCount === 0 && console.warn) {
+      console.warn("[WorldBook Warning] 已绑定世界书但本轮未命中，请检查关键词、alwaysOn、角色关联或上下文构造。scope=" + scope + " targetId=" + String(targetId || "") + " selectedIds=" + selectedIds.join(","));
+    }
+
+    if (!console.debug) {
+      return;
+    }
+
+    console.debug("[WorldBook Debug]", {
       scope: scope,
-      targetId: targetId,
-      selectedWorldBookIds: normalizeWorldBookIdList(source.selectedWorldBookIds || source.allowedBookIds || []),
-      hasSelectedWorldBooks: normalizeWorldBookIdList(source.selectedWorldBookIds || source.allowedBookIds || []).length > 0,
-      reason: !normalizeWorldBookIdList(source.selectedWorldBookIds || source.allowedBookIds || []).length
-        ? "当前聊天未勾选世界书"
-        : (Array.isArray(entries) && entries.length ? "已命中" : "已勾选但未命中"),
-      relatedTargetIds: source.relatedTargetIds || source.characterIds || source.memberIds || [],
+      targetId: String(targetId || ""),
+      selectedWorldBookIds: selectedIds,
+      selectedCount: selectedIds.length,
+      hasSelectedWorldBooks: hasSelected,
+      matchedCount: matchedCount,
+      reason: !hasSelected ? "未绑定世界书" : (matchedCount > 0 ? "已命中" : "已绑定但未命中"),
       contextPreview: limitText(contextText, 300),
-      count: Array.isArray(entries) ? entries.length : 0,
       entries: (Array.isArray(entries) ? entries : []).map(function (entry) {
         return {
           title: entry.title || entry.bookName || "",
           keywords: entry.keywords || [],
-          priority: Number(entry.priority) || 0,
           matchType: entry.matchType || "",
-          score: Number(entry.matchScore) || 0
+          priority: Number(entry.priority) || 0,
+          matchScore: Number(entry.matchScore) || 0,
+          contentPreview: limitText(entry.content, 80)
         };
       })
     });
@@ -2078,6 +2195,14 @@
       /结构化\s*amount/i,
       /根据记录/,
       /后台显示/,
+      /根据世界书/,
+      /世界书写着/,
+      /世界书(?:里|中|说)/,
+      /设定里(?:写|说|规定|有)/,
+      /按设定/,
+      /这个世界(?:里|中|观)/,
+      /系统要求/,
+      /条目写着/,
       /我们可以一起/,
       /我理解你(?:的)?(?:感受|心情|意思)?/,
       /请告诉我更多/,
@@ -2432,21 +2557,21 @@
     var has = function (tag) { return tags.indexOf(tag) !== -1; };
 
     if (has("cold") || has("hostile")) {
-      return "这个角色话少，3-5 条有态度的短句比 10 条废话更贴人设；能用沉默和短句压住场面的，不要硬凑长篇。";
+      return "这个角色话少也必须给出至少 10 条短气泡；用更短、更冷、更有停顿的句子保持人设，不要用废话凑数。";
     }
     if (has("tsundere")) {
-      return "这个角色嘴硬，4-6 条绕弯子的短句比直接长篇更贴人设；说太多反而不像。";
+      return "这个角色嘴硬也必须给出至少 10 条短气泡；用绕弯、反问、改口和不承认来推进，不要直接长篇解释。";
     }
     if (has("shy")) {
-      return "这个角色害羞局促，3-5 条犹豫、简短、改口的气泡比流畅长篇更贴人设。";
+      return "这个角色害羞局促也必须给出至少 10 条短气泡；可以犹豫、停顿、改口、半句，但每条都要有独立情绪。";
     }
     if (has("strong") || has("formal")) {
-      return "这个角色强势，5-7 条有判断力的短句比凑 10 条更有压迫感；说到位即止。";
+      return "这个角色强势也必须给出至少 10 条短气泡；用判断、安排、压节奏和边界感推进，不要变成说明文。";
     }
     if (has("clingy") || has("gentle")) {
-      return "按角色关系给出 6-10 条自然气泡，可以追问、黏着、关心，但每条要有独立情感推进，不要换句复读。";
+      return "按角色关系给出至少 10 条自然气泡，可以追问、黏着、关心，但每条要有独立情感推进，不要换句复读。";
     }
-    return "按角色人设和当前情绪，给出 5-8 条自然短气泡；能用少量精准的句子体现人设的，不要为了凑数变成话痨。";
+    return "按角色人设和当前情绪，给出至少 10 条自然短气泡；每条都要有独立情绪或关系推进，不要为了凑数变成话痨。";
   }
 
   function buildCharacterPersonaReminder(character) {
@@ -2537,7 +2662,6 @@
       path: "sendPrivateChatRequest/buildPrivateReplyMessages"
     });
     var selectedWorldBookIds = getSelectedWorldBookIds("private", profile && profile.id, requestOptions);
-    var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
     var promptMessages = (Array.isArray(chatHistory) ? chatHistory : [])
       .filter(function (message) {
         return message && message.content && message.type !== "loading" && message.type !== "error";
@@ -2574,19 +2698,14 @@
         requestOptions.bodyState ? "用户身体状态：" + JSON.stringify(requestOptions.bodyState) : ""
       ].filter(Boolean).join("\n")
     });
-    var worldBookContext = buildWorldBookContext(contextText, "private", profile && profile.id, {
+    var worldBookResolved = resolveWorldBookPromptContext("private", profile && profile.id, contextText, {
       selectedWorldBookIds: selectedWorldBookIds,
       relatedTargetIds: profile && profile.id ? [profile.id] : [],
       characterIds: profile && profile.id ? [profile.id] : []
     });
-    console.debug("[WorldBook Debug][private actual prompt]", {
-      scope: "private",
-      targetId: profile && profile.id,
-      selectedWorldBookIds: selectedWorldBookIds,
-      selectedCount: selectedWorldBookIds.length,
-      worldBookContextLength: worldBookContext ? worldBookContext.length : 0,
-      preview: worldBookContext ? worldBookContext.slice(0, 500) : "(empty)"
-    });
+    var worldBookContext = worldBookResolved.worldBookContext;
+    var worldBookMeta = worldBookResolved.worldBookMeta;
+    var matchedWorldBookEntries = worldBookResolved.matchedEntries;
     var recentHeartVoiceText = buildRecentHeartVoiceContext(profile.id, "private", profile.id);
     var relationshipPhaseHint = buildRelationshipPhaseHint(recentHeartVoiceText, formatChatMemoryList(chatMemories), formatMemoryList(memories));
 
@@ -2605,8 +2724,11 @@
       ].join("\n");
     }
 
+    requestOptions.worldBookResolved = worldBookResolved;
     requestOptions.worldBookContext = worldBookContext;
     requestOptions.selectedWorldBookIds = selectedWorldBookIds;
+    requestOptions.worldBookMeta = worldBookMeta;
+    requestOptions.matchedWorldBookEntries = matchedWorldBookEntries;
     requestOptions.latestUserInput = latestUserInput;
     requestOptions.recentHeartVoiceText = recentHeartVoiceText;
     requestOptions.thoughtsHint = recentHeartVoiceText;
@@ -2623,6 +2745,10 @@
         role: "system",
         content: [
           buildSystemBase("private"),
+          buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
+          buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
+          buildPromptPriorityHint(profile),
+          buildWorldPersonaMessageLock(worldBookContext, systemMode),
           buildCharacterDossier(profile, userContext),
           buildPersonaExecutionAnchors(profile, userContext, systemMode),
           buildPersonaVoiceFingerprint(profile, userContext, systemMode, worldBookContext),
@@ -2634,8 +2760,6 @@
             recentCharacterLinesText: recentCharacterLinesText,
             relationshipPhaseHint: relationshipPhaseHint
           }),
-          buildMatchedWorldBooksSection(worldBookContext, worldBookMeta),
-          buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
           buildRelationshipDriveRules("private"),
           buildRelationshipProgressionRules("private"),
           buildCharacterDecisionCore(systemMode, worldBookContext),
@@ -2666,8 +2790,7 @@
           ].join("\n"),
           buildThoughtReplyBindingRules("private"),
           buildCharacterResourceWhitelist(profile),
-          buildCharacterPersonaReminder(profile),
-          buildPromptPriorityHint(profile)
+          buildCharacterPersonaReminder(profile)
         ].filter(Boolean).join("\n")
       },
       {
@@ -2698,6 +2821,7 @@
             groupAfterRules,
             "memories 是本轮值得写入长期记忆的内容，只记录明确发生过或关系上有意义的事，不要把普通寒暄都写进去。",
             "如果最近用户发给角色红包或转账，必须按人设和关系决定收下或退回；在 JSON 顶层返回 transferDecision 或 redPacketDecision，值只能是 accept、reject 或 null。",
+            "本轮 messages 必须至少 " + MIN_CHAT_REPLY_COUNT + " 条；每条都要单独符合世界书状态、角色人设、关系边界和当前情绪，不要拆碎同一句话凑数。",
             "可用默认 emoji：😀 😭 😍 🤔 😡 👍 ❤️ 🎉；用户导入表情包数量：" + getImportedEmojiCount()
           ].filter(Boolean).join("\n")
         })
@@ -2711,7 +2835,7 @@
     var chatMemories = getChatMemoriesForPrompt("group", group && group.id, requestOptions.chatMemories);
     var latestUserInput = requestOptions.latestUserInput || "";
     var selectedWorldBookIds = getSelectedWorldBookIds("group", group && group.id, requestOptions);
-    var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
+    var worldBookResolved = requestOptions.worldBookResolved;
     var participantPersonaText = (characters || []).map(function (character) {
       return [
         "群成员：" + character.name,
@@ -2719,35 +2843,47 @@
         "成员长期记忆：" + formatMemoryList(sharedMemories && sharedMemories[character.id] || [])
       ].join("\n");
     }).join("\n");
-    var resolvedWorldBookContext = requestOptions.worldBookContext || buildWorldBookContext(buildWorldBookDecisionContext({
-      modeLabel: requestOptions.regenerateRequest ? "线上群聊重回" : (requestOptions.blockReaction ? "线上群聊 blockReaction" : "线上群聊"),
-      userInput: latestUserInput,
-      recentHistory: requestOptions.recentWorldHistory || requestOptions.recentHistory || "",
-      characterPersonaText: participantPersonaText,
-      userPersonaText: [
-        "用户名称：" + valueOrFallback(userContext.name),
-        userContext.persona || "暂无"
-      ].join("\n"),
-      relationshipStatus: [
-        "群名称：" + valueOrFallback(group && group.name),
-        "群公告：" + valueOrFallback(group && group.settings && group.settings.announcement),
-        "群氛围：" + valueOrFallback(group && group.settings && group.settings.atmosphere)
-      ].join("\n"),
-      chatMemoryText: formatChatMemoryList(chatMemories),
-      previousReplyText: requestOptions.previousReplyText || requestOptions.lastAssistantText || "",
-      extraText: requestOptions.bodyState ? "用户身体状态：" + JSON.stringify(requestOptions.bodyState) : ""
-    }), "group", group && group.id, {
-      selectedWorldBookIds: selectedWorldBookIds,
-      relatedTargetIds: (characters || []).map(function (character) {
-        return character && character.id;
-      }).filter(Boolean),
-      characterIds: (characters || []).map(function (character) {
-        return character && character.id;
-      }).filter(Boolean),
-      memberIds: (characters || []).map(function (character) {
-        return character && character.id;
-      }).filter(Boolean)
-    });
+    var resolvedWorldBookContext = (worldBookResolved && worldBookResolved.worldBookContext)
+      || requestOptions.worldBookContext;
+    if (!resolvedWorldBookContext) {
+      resolvedWorldBookContext = resolveWorldBookPromptContext(
+        "group",
+        group && group.id,
+        buildWorldBookDecisionContext({
+          modeLabel: requestOptions.regenerateRequest ? "线上群聊重回" : (requestOptions.blockReaction ? "线上群聊 blockReaction" : "线上群聊"),
+          userInput: latestUserInput,
+          recentHistory: requestOptions.recentWorldHistory || requestOptions.recentHistory || "",
+          characterPersonaText: participantPersonaText,
+          userPersonaText: [
+            "用户名称：" + valueOrFallback(userContext.name),
+            userContext.persona || "暂无"
+          ].join("\n"),
+          relationshipStatus: [
+            "群名称：" + valueOrFallback(group && group.name),
+            "群公告：" + valueOrFallback(group && group.settings && group.settings.announcement),
+            "群氛围：" + valueOrFallback(group && group.settings && group.settings.atmosphere)
+          ].join("\n"),
+          chatMemoryText: formatChatMemoryList(chatMemories),
+          previousReplyText: requestOptions.previousReplyText || requestOptions.lastAssistantText || "",
+          extraText: requestOptions.bodyState ? "用户身体状态：" + JSON.stringify(requestOptions.bodyState) : ""
+        }),
+        {
+          selectedWorldBookIds: selectedWorldBookIds,
+          relatedTargetIds: (characters || []).map(function (character) {
+            return character && character.id;
+          }).filter(Boolean),
+          characterIds: (characters || []).map(function (character) {
+            return character && character.id;
+          }).filter(Boolean),
+          memberIds: (characters || []).map(function (character) {
+            return character && character.id;
+          }).filter(Boolean)
+        }
+      ).worldBookContext;
+    }
+    var worldBookMeta = (worldBookResolved && worldBookResolved.worldBookMeta)
+      || requestOptions.worldBookMeta
+      || buildWorldBookPromptMeta(selectedWorldBookIds, requestOptions.matchedWorldBookEntries);
 
     var groupMode = requestOptions.regenerateRequest ? "reenterGroup" : "group";
     var recentHeartVoiceText = buildRecentHeartVoiceForCharacters(characters, "group", group && group.id);
@@ -2765,6 +2901,10 @@
 
     return [
       buildSystemBase("group"),
+      buildWorldRuleEnforcement(resolvedWorldBookContext, worldBookMeta),
+      buildMatchedWorldBooksSection(resolvedWorldBookContext, worldBookMeta),
+      buildPromptPriorityHint(),
+      buildWorldPersonaMessageLock(resolvedWorldBookContext, groupMode),
       buildParticipantDossier(characters, sharedMemories),
       buildGroupPersonaExecutionAnchors(characters, userContext, groupMode),
       buildGroupPersonaVoiceFingerprints(characters, userContext, groupMode, resolvedWorldBookContext),
@@ -2778,8 +2918,6 @@
         relationshipPhaseHint: relationshipPhaseHint
       }),
       buildGroupControlBoundaryRules(characters, groupMode),
-      buildMatchedWorldBooksSection(resolvedWorldBookContext, worldBookMeta),
-      buildWorldRuleEnforcement(resolvedWorldBookContext, worldBookMeta),
       buildRelationshipDriveRules("group"),
       buildRelationshipProgressionRules("group"),
       buildCharacterDecisionCore(groupMode, resolvedWorldBookContext),
@@ -2799,8 +2937,7 @@
         bodyState: requestOptions.bodyState
       }),
       buildThoughtReplyBindingRules("group"),
-      (characters || []).map(function (character) { return buildCharacterResourceWhitelist(character); }).filter(Boolean).join("\n\n"),
-      buildPromptPriorityHint()
+      (characters || []).map(function (character) { return buildCharacterResourceWhitelist(character); }).filter(Boolean).join("\n\n")
     ].filter(Boolean).join("\n");
   }
 
@@ -3046,7 +3183,7 @@
         requestOptions.bodyState ? "用户身体状态：" + JSON.stringify(requestOptions.bodyState) : ""
       ].filter(Boolean).join("\n")
     });
-    worldBookContext = buildWorldBookContext(contextText, "group", group && group.id, {
+    var worldBookResolved = resolveWorldBookPromptContext("group", group && group.id, contextText, {
       selectedWorldBookIds: selectedWorldBookIds,
       relatedTargetIds: (characters || []).map(function (character) {
         return character && character.id;
@@ -3058,8 +3195,14 @@
         return character && character.id;
       }).filter(Boolean)
     });
+    var worldBookContext = worldBookResolved.worldBookContext;
+    var worldBookMeta = worldBookResolved.worldBookMeta;
+    var matchedWorldBookEntries = worldBookResolved.matchedEntries;
+    requestOptions.worldBookResolved = worldBookResolved;
     requestOptions.worldBookContext = worldBookContext;
     requestOptions.selectedWorldBookIds = selectedWorldBookIds;
+    requestOptions.worldBookMeta = worldBookMeta;
+    requestOptions.matchedWorldBookEntries = matchedWorldBookEntries;
     requestOptions.recentHistory = history;
     requestOptions.recentWorldHistory = worldHistory;
     requestOptions.latestUserInput = latestUserInput;
@@ -3068,19 +3211,11 @@
     requestOptions.timeGapText = timeGapInfo;
     requestOptions.timeGapInfo = timeGapInfo;
     requestOptions.privateBridgeText = privateBridgeText;
-    console.debug("[WorldBook Debug][group actual prompt]", {
-      scope: "group",
-      targetId: group && group.id,
-      selectedWorldBookIds: selectedWorldBookIds,
-      selectedCount: selectedWorldBookIds.length,
-      worldBookContextLength: worldBookContext ? worldBookContext.length : 0,
-      preview: worldBookContext ? worldBookContext.slice(0, 500) : "(empty)"
-    });
     groupSettingsText = group && group.settings
       ? [
         "群公告：" + (group.settings.announcement || "暂无"),
-        "本群每次最少回复条数：" + (group.settings.minReplyCount || 4) + "（普通聊天默认 4-8 条，只有用户明确要求热闹/刷屏时才超过 10 条）",
-        "本群每次最多安全条数：" + (group.settings.maxReplyCount || 12),
+        "本群每次最少回复条数：" + Math.max(MIN_CHAT_REPLY_COUNT, Number(group.settings.minReplyCount) || 0) + "（本轮硬性至少 " + MIN_CHAT_REPLY_COUNT + " 条有真实内容的自然消息）",
+        "本群每次最多安全条数：" + Math.max(MIN_CHAT_REPLY_COUNT, Number(group.settings.maxReplyCount) || 12),
         "本群最少参与角色数：" + (group.settings.minParticipantCount || 2),
         "是否允许特殊消息类型：" + (group.settings.allowSpecialMessages === false ? "否，只使用 text" : "是")
       ].join("\n")
@@ -3242,10 +3377,10 @@
         context.bodyState ? "用户身体状态：" + JSON.stringify(context.bodyState) : ""
       ].filter(Boolean).join("\n")
     });
-    var worldBookContext = context.worldBookContext || buildWorldBookContext(
-      contextText,
+    var worldBookResolved = context.worldBookResolved || resolveWorldBookPromptContext(
       mode === "group" ? "group" : "private",
       context.targetId || "",
+      contextText,
       {
         selectedWorldBookIds: selectedWorldBookIds,
         relatedTargetIds: participants.map(function (character) {
@@ -3256,24 +3391,19 @@
         }).filter(Boolean),
         memberIds: mode === "group" ? participants.map(function (character) {
           return character && character.id;
-        }).filter(Boolean)
-          : []
+        }).filter(Boolean) : []
       }
     );
+    var worldBookContext = context.worldBookContext || worldBookResolved.worldBookContext;
+    var worldBookMeta = context.worldBookMeta || worldBookResolved.worldBookMeta || buildWorldBookPromptMeta(selectedWorldBookIds, worldBookResolved.matchedEntries);
     context.worldBookContext = worldBookContext;
     context.selectedWorldBookIds = selectedWorldBookIds;
+    context.worldBookResolved = worldBookResolved;
+    context.worldBookMeta = worldBookMeta;
     context.recentCharacterLinesText = recentCharacterLinesText;
     context.recentCharacterLinesMap = recentCharacterLinesMap;
     context.timeGapText = timeGapInfo;
     context.timeGapInfo = timeGapInfo;
-    console.debug("[WorldBook Debug][offline actual prompt]", {
-      scope: mode,
-      targetId: context.targetId,
-      selectedWorldBookIds: selectedWorldBookIds,
-      selectedCount: selectedWorldBookIds.length,
-      worldBookContextLength: worldBookContext ? worldBookContext.length : 0,
-      preview: worldBookContext ? worldBookContext.slice(0, 500) : "(empty)"
-    });
     var recentHeartVoiceText = mode === "group"
       ? buildRecentHeartVoiceForCharacters(participants, "group", context.targetId || "")
       : (participants.length === 1
@@ -3597,32 +3727,32 @@
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(participants, offlineEvents);
     var timeGapInfo = detectRecentTimeGapText(offlineEvents);
     var selectedWorldBookIds = getSelectedWorldBookIds(context.mode === "group" ? "group" : "private", context.targetId || "", context);
-    var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
-    var worldBookContext = buildWorldBookContext(
-      buildWorldBookDecisionContext({
-        modeLabel: context.mode === "group" ? "群聊线下推进" : "私聊线下推进",
-        userInput: context.userInput || "",
-        recentHistory: worldHistory,
-        sceneText: sceneText || "未指定，请沿用最近剧情和参与者所处空间",
-        characterPersonaText: participants.map(function (character) {
-          return [
-            "参与角色：" + (character && character.name || ""),
-            "角色人设：" + buildMergedCharacterPersona(character),
-            "角色长期记忆：" + formatMemoryList(sharedMemories && character ? sharedMemories[character.id] || [] : [])
-          ].join("\n");
-        }).join("\n"),
-        userPersonaText: buildUserContext(context.userSettings || {}).persona || "",
-        relationshipStatus: buildUserContext(context.userSettings || {}).relationshipName || "",
-        chatMemoryText: formatChatMemoryList(chatMemories),
-        previousReplyText: context.previousReplyText || context.lastAssistantText || "",
-        extraText: [
-          context.rejectedReplyText || context.oldReplyText ? "本轮重回旧回复摘要：" + limitText(context.rejectedReplyText || context.oldReplyText, 260) : "",
-          context.regenerateInstruction ? "重回补充要求：" + context.regenerateInstruction : "",
-          context.bodyState ? "用户身体状态：" + JSON.stringify(context.bodyState) : ""
-        ].filter(Boolean).join("\n")
-      }),
+    var worldBookDecisionText = buildWorldBookDecisionContext({
+      modeLabel: context.mode === "group" ? "群聊线下推进" : "私聊线下推进",
+      userInput: context.userInput || "",
+      recentHistory: worldHistory,
+      sceneText: sceneText || "未指定，请沿用最近剧情和参与者所处空间",
+      characterPersonaText: participants.map(function (character) {
+        return [
+          "参与角色：" + (character && character.name || ""),
+          "角色人设：" + buildMergedCharacterPersona(character),
+          "角色长期记忆：" + formatMemoryList(sharedMemories && character ? sharedMemories[character.id] || [] : [])
+        ].join("\n");
+      }).join("\n"),
+      userPersonaText: buildUserContext(context.userSettings || {}).persona || "",
+      relationshipStatus: buildUserContext(context.userSettings || {}).relationshipName || "",
+      chatMemoryText: formatChatMemoryList(chatMemories),
+      previousReplyText: context.previousReplyText || context.lastAssistantText || "",
+      extraText: [
+        context.rejectedReplyText || context.oldReplyText ? "本轮重回旧回复摘要：" + limitText(context.rejectedReplyText || context.oldReplyText, 260) : "",
+        context.regenerateInstruction ? "重回补充要求：" + context.regenerateInstruction : "",
+        context.bodyState ? "用户身体状态：" + JSON.stringify(context.bodyState) : ""
+      ].filter(Boolean).join("\n")
+    });
+    var worldBookResolved = context.worldBookResolved || resolveWorldBookPromptContext(
       context.mode === "group" ? "group" : "private",
       context.targetId || "",
+      worldBookDecisionText,
       {
         selectedWorldBookIds: selectedWorldBookIds,
         relatedTargetIds: participants.map(function (character) {
@@ -3633,12 +3763,15 @@
         }).filter(Boolean),
         memberIds: context.mode === "group" ? participants.map(function (character) {
           return character && character.id;
-        }).filter(Boolean)
-          : []
+        }).filter(Boolean) : []
       }
     );
+    var worldBookContext = context.worldBookContext || worldBookResolved.worldBookContext;
+    var worldBookMeta = context.worldBookMeta || worldBookResolved.worldBookMeta || buildWorldBookPromptMeta(selectedWorldBookIds, worldBookResolved.matchedEntries);
     context.worldBookContext = worldBookContext;
     context.selectedWorldBookIds = selectedWorldBookIds;
+    context.worldBookResolved = worldBookResolved;
+    context.worldBookMeta = worldBookMeta;
     context.recentCharacterLinesText = recentCharacterLinesText;
     context.recentCharacterLinesMap = recentCharacterLinesMap;
     context.timeGapText = timeGapInfo;
@@ -3758,12 +3891,13 @@
       source.memoryText || ""
     ].join("\n");
     var selectedWorldBookIds = getSelectedWorldBookIds("private", character && character.id, source);
-    var worldBookMeta = buildWorldBookPromptMeta(selectedWorldBookIds);
-    var worldBookContext = buildWorldBookContext(contextText, "private", character && character.id, {
+    var worldBookResolved = source.worldBookResolved || resolveWorldBookPromptContext("private", character && character.id, contextText, {
       selectedWorldBookIds: selectedWorldBookIds,
       relatedTargetIds: character && character.id ? [character.id] : [],
       characterIds: character && character.id ? [character.id] : []
     });
+    var worldBookContext = source.worldBookContext || worldBookResolved.worldBookContext;
+    var worldBookMeta = source.worldBookMeta || worldBookResolved.worldBookMeta || buildWorldBookPromptMeta(selectedWorldBookIds, worldBookResolved.matchedEntries);
     var rawContent = await sendConfiguredChatMessages([
       {
         role: "system",
@@ -3828,16 +3962,22 @@
       source.memoryText || "",
       selectedWorldBookIds.length ? source.worldText || "" : ""
     ].join("\n");
-    var worldBookContext = selectedWorldBookIds.length && source.worldText ? source.worldText : buildWorldBookContext(
-      contextText,
-      authorCharacterId ? "private" : "global",
-      authorCharacterId || "",
-      {
-        selectedWorldBookIds: selectedWorldBookIds,
-        relatedTargetIds: worldRelatedIds,
-        characterIds: worldRelatedIds
-      }
-    );
+    var worldBookResolved = source.worldBookResolved;
+    var worldBookContext = source.worldBookContext || (selectedWorldBookIds.length && source.worldText ? source.worldText : null);
+    if (!worldBookContext && selectedWorldBookIds.length) {
+      worldBookResolved = resolveWorldBookPromptContext(
+        authorCharacterId ? "private" : "global",
+        authorCharacterId || "",
+        contextText,
+        {
+          selectedWorldBookIds: selectedWorldBookIds,
+          relatedTargetIds: worldRelatedIds,
+          characterIds: worldRelatedIds
+        }
+      );
+      worldBookContext = worldBookResolved.worldBookContext;
+    }
+    worldBookMeta = source.worldBookMeta || (worldBookResolved ? worldBookResolved.worldBookMeta : worldBookMeta);
     var relatedLines = relatedCharacters.map(function (character) {
       return [
         "角色ID：" + character.id,
