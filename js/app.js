@@ -7116,6 +7116,118 @@
     }
   }
 
+  function summarizeMessageForMemorySource(message, participants) {
+    var source = message || {};
+    var role = String(source.role || "").toLowerCase();
+    var type = String(source.type || "").toLowerCase();
+    var name = "";
+
+    if (role === "user" || type === "user" || type === "offlineuseraction") {
+      name = "用户";
+    } else if (source.characterName) {
+      name = source.characterName;
+    } else if (source.characterId && participants && participants[source.characterId]) {
+      name = participants[source.characterId];
+    } else if (role === "character" || role === "assistant") {
+      name = "角色";
+    } else {
+      name = "系统";
+    }
+
+    if (type === "redPacket") {
+      return name + "：[红包] " + (source.content || source.note || "");
+    }
+    if (type === "transfer") {
+      return name + "：[转账] " + (source.amount ? "¥" + source.amount : "") + " " + (source.content || source.note || "");
+    }
+    if (type === "image") {
+      return name + "：[图片] " + ((source.image && (source.image.description || source.image.name)) || source.content || "");
+    }
+    if (type === "voice") {
+      return name + "：[语音] " + ((source.voice && source.voice.text) || source.content || "");
+    }
+    if (type === "location") {
+      return name + "：[位置] " + ((source.location && source.location.name) || source.content || "");
+    }
+    if (type === "offlineAction") {
+      return "旁白：" + (source.content || "");
+    }
+    if (type === "offlineSpeech") {
+      return name + "：" + (source.content || "");
+    }
+
+    return name + "：" + (source.content || "");
+  }
+
+  function buildMemorySummarySourceText(targetType, targetId, rounds) {
+    var limitRounds = Math.max(5, Math.min(50, Number(rounds) || 20));
+    var history = [];
+    var participants = {};
+    var result = [];
+    var userTurns = 0;
+    var index;
+    var group;
+    var characters;
+    var session;
+
+    if (targetType === "group" && window.AppStorage.getGroupChatHistory) {
+      history = window.AppStorage.getGroupChatHistory(targetId) || [];
+      if (window.AppStorage.getGroups && window.AppStorage.getCharacters) {
+        group = (window.AppStorage.getGroups() || []).find(function (item) {
+          return item && item.id === targetId;
+        });
+        characters = window.AppStorage.getCharacters() || [];
+        if (group && Array.isArray(group.memberIds)) {
+          group.memberIds.forEach(function (memberId) {
+            var c = characters.find(function (item) { return item && item.id === memberId; });
+            if (c) {
+              participants[memberId] = c.name || "角色";
+            }
+          });
+        }
+      }
+    } else if (targetType === "private" && window.AppStorage.getChatHistory) {
+      history = window.AppStorage.getChatHistory(targetId) || [];
+      if (window.AppStorage.getCharacters) {
+        var character = (window.AppStorage.getCharacters() || []).find(function (item) {
+          return item && item.id === targetId;
+        });
+        if (character) {
+          participants[targetId] = character.name || "角色";
+        }
+      }
+    } else if (targetType === "offline" && window.AppStorage.getOfflineSession) {
+      session = window.AppStorage.getOfflineSession(targetId);
+      history = session && Array.isArray(session.messages) ? session.messages : [];
+    }
+
+    history = history.filter(function (message) {
+      return message
+        && message.content
+        && message.type !== "loading"
+        && message.type !== "error"
+        && message.type !== "system"
+        && message.role !== "system";
+    });
+
+    for (index = history.length - 1; index >= 0; index -= 1) {
+      var message = history[index];
+      result.unshift(message);
+
+      var messageType = String(message.type || "").toLowerCase();
+      if (message.role === "user" || messageType === "user" || messageType === "offlineuseraction") {
+        userTurns += 1;
+        if (userTurns >= limitRounds) {
+          break;
+        }
+      }
+    }
+
+    return result.map(function (message, i) {
+      return (i + 1) + ". " + summarizeMessageForMemorySource(message, participants);
+    }).join("\n");
+  }
+
   function buildChatGenerationContext(targetType, targetId, extras) {
     var extraOptions = extras || {};
     var settings = window.AppStorage.getSettings ? window.AppStorage.getSettings() : {};
@@ -7124,6 +7236,8 @@
     var currentRound = window.AppStorage.getChatRoundCounter ? window.AppStorage.getChatRoundCounter(targetType, targetId) : 0;
     var nextRound = autoEnabled && !extraOptions.regenerateRequest ? currentRound + 1 : currentRound;
     var bodyEnabled = settings.bodyStateEnabled !== false;
+    var memorySummaryDue = autoEnabled && !extraOptions.regenerateRequest && nextRound >= interval;
+    var memorySummarySourceText = memorySummaryDue ? buildMemorySummarySourceText(targetType, targetId, interval) : "";
 
     return Object.assign({
       targetType: targetType,
@@ -7133,8 +7247,9 @@
       bodyStateEnabled: bodyEnabled,
       bodyState: bodyEnabled && window.AppStorage.getBodyState ? window.AppStorage.getBodyState(targetType, targetId) : null,
       autoMemorySummaryEnabled: autoEnabled,
-      memorySummaryDue: autoEnabled && !extraOptions.regenerateRequest && nextRound >= interval,
+      memorySummaryDue: memorySummaryDue,
       memorySummaryRounds: interval,
+      memorySummarySourceText: memorySummarySourceText,
       currentRound: nextRound
     }, extraOptions);
   }

@@ -751,7 +751,7 @@
     if (!message || !message.content || message.type === "loading" || message.type === "error") {
       return false;
     }
-    if (role === "user" || type === "user" || type === "offlineUserAction" || type === "offlineAction") {
+    if (role === "user" || type === "user" || type === "offlineuseraction" || type === "offlineaction") {
       return false;
     }
     if (targetId && messageCharacterId && messageCharacterId !== targetId) {
@@ -2580,11 +2580,18 @@
   }
 
   function normalizeAiMessageText(text, options) {
+    var source = options || {};
+    var role = String(source.role || source.sender || "").toLowerCase();
+    var type = String(source.type || "").toLowerCase();
     var value = String(text || "").replace(/\r\n/g, "\n").replace(/\r/g, "\n").trim();
     var paragraphs;
 
     if (!value) {
       return "";
+    }
+
+    if (role === "user" || type === "user" || type === "offlineuseraction") {
+      return value;
     }
 
     value = filterAiMessageText(value, options);
@@ -2751,11 +2758,20 @@
       return "";
     }
 
+    var sourceText = String(options.memorySummarySourceText || "").trim();
+
     return [
       "H. 自动记忆总结",
       "当前聊天已达到自动总结轮次：" + (options.memorySummaryRounds || 10) + " 轮。",
-      "请在本轮同一次 JSON 中返回 memorySummary，概括这段聊天里对关系、承诺、边界、习惯或重要事件有长期价值的内容。",
-      "不要流水账，不要把普通寒暄写进去。标题短一点，正文保留情绪和事实。"
+      sourceText
+        ? "下面是本次应总结的聊天范围，必须主要总结这些内容，而不是只总结最后一轮：\n" + sourceText
+        : "本次没有拿到完整总结范围，请根据最近上下文总结，但不要只写最后一轮。",
+      "总结目标：概括这 " + (options.memorySummaryRounds || 10) + " 轮里对关系、承诺、边界、习惯、冲突、重要事件、世界书影响、身体状态或金钱往来有长期价值的内容。",
+      "不要流水账，不要把普通寒暄写进去。",
+      "不要只总结最后一条消息。",
+      "如果这 " + (options.memorySummaryRounds || 10) + " 轮里发生了多个阶段，请按阶段压缩成 2-5 个要点。",
+      "标题短一点，正文保留情绪变化、事实和关系后果。",
+      "请在本轮同一次 JSON 中返回 memorySummary。"
     ].join("\n");
   }
 

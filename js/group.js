@@ -29,9 +29,20 @@
       .replace(/'/g, "&#039;");
   }
 
-  function normalizeDisplayText(text) {
+  function normalizeDisplayText(text, options) {
+    var source = options || {};
+    var role = String(source.role || source.sender || "").toLowerCase();
+    var type = String(source.type || "").toLowerCase();
+
+    if (role === "user" || type === "user" || type === "offlineuseraction") {
+      return String(text || "").trim();
+    }
+
     if (window.AIService && window.AIService.normalizeAiMessageText) {
-      return window.AIService.normalizeAiMessageText(text);
+      return window.AIService.normalizeAiMessageText(text, {
+        onlineMode: true,
+        mode: "group"
+      });
     }
 
     return String(text || "").trim();
@@ -93,15 +104,15 @@
     return (Array.isArray(replies) ? replies : []).map(function (reply) {
       var source = reply && typeof reply === "object" ? reply : { content: reply };
       return Object.assign({}, source, {
-        content: normalizeDisplayText(source.content || "")
+        content: normalizeDisplayText(source.content || "", source)
       });
     }).filter(function (reply) {
       return reply.content;
     });
   }
 
-  function getBubbleTextClass(text) {
-    var value = normalizeDisplayText(text);
+  function getBubbleTextClass(text, message) {
+    var value = normalizeDisplayText(text, message);
 
     return value.length > 0 && value.length <= 6 && value.indexOf("\n") === -1 ? " short-text" : "";
   }
@@ -762,7 +773,7 @@
           return [
             '<div class="message-row user message-action-target" data-message-id="' + messageId + '">',
             selectCheck,
-            '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + renderGroupMessageContent(message) + renderEditedMark(message) + "</div>",
+            '  <div class="message-bubble' + getBubbleTextClass(message.content, message) + '">' + renderGroupMessageContent(message) + renderEditedMark(message) + "</div>",
             userAvatar,
             "</div>"
           ].join("");
@@ -1020,7 +1031,7 @@
 
   function renderCharacterGroupMessage(message) {
     var character = getCharacterById(message.characterId);
-    var bubbleClass = "message-bubble" + getBubbleTextClass(message.content);
+    var bubbleClass = "message-bubble" + getBubbleTextClass(message.content, message);
     var messageId = escapeHtml(message.id || "");
     var selectCheck = renderGroupMessageSelectCheck(message);
 
@@ -1065,7 +1076,7 @@
     return [
       '<div class="message-row user offline-user-action-row message-action-target" data-message-id="' + escapeHtml(message.id || "") + '">',
       selectCheck,
-      '  <div class="message-bubble' + getBubbleTextClass(message.content) + '">' + escapeHtml(normalizeDisplayText(message.content)) + renderEditedMark(message) + "</div>",
+      '  <div class="message-bubble' + getBubbleTextClass(message.content, message) + '">' + escapeHtml(normalizeDisplayText(message.content, message)) + renderEditedMark(message) + "</div>",
       renderGroupUserMessageAvatar(group, settings),
       "</div>"
     ].join("");
@@ -1102,7 +1113,7 @@
   }
 
   function renderGroupMessageContent(message) {
-    return escapeHtml(normalizeDisplayText(message.content));
+    return escapeHtml(normalizeDisplayText(message.content, message));
   }
 
   function renderEditedMark(message) {
@@ -1226,7 +1237,7 @@
     var source = message || {};
     message = normalizeMoneyMessage(message);
     if (!message) {
-      return escapeHtml(normalizeDisplayText(source.content || source.note || ""));
+      return escapeHtml(normalizeDisplayText(source.content || source.note || "", source));
     }
 
     var canOperate = canOperateIncomingMoneyMessage(message);
@@ -1254,7 +1265,7 @@
     message = normalizeMoneyMessage(message);
     var amount = message ? message.amount : "";
     if (!amount) {
-      return escapeHtml(normalizeDisplayText(source.content || source.note || ""));
+      return escapeHtml(normalizeDisplayText(source.content || source.note || "", source));
     }
 
     var canOperate = canOperateIncomingMoneyMessage(message);
@@ -2684,7 +2695,7 @@
       }
     }
 
-    message.content = normalizeDisplayText(message.content || source.content || "");
+    message.content = normalizeDisplayText(message.content || source.content || "", source);
     message.generationId = message.generationId || extra.generationId || source.generationId || "";
     message.parentUserMessageId = message.parentUserMessageId || extra.parentUserMessageId || source.parentUserMessageId || "";
     message.generatedAt = message.generatedAt || extra.generatedAt || createdAt;

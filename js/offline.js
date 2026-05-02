@@ -26,9 +26,19 @@
       .replace(/'/g, "&#039;");
   }
 
-  function normalizeDisplayText(text) {
+  function normalizeDisplayText(text, options) {
+    var source = options || {};
+    var role = String(source.role || source.sender || "").toLowerCase();
+    var type = String(source.type || "").toLowerCase();
+
+    if (role === "user" || type === "user" || type === "offlineuseraction") {
+      return String(text || "").trim();
+    }
+
     if (window.AIService && window.AIService.normalizeAiMessageText) {
-      return window.AIService.normalizeAiMessageText(text);
+      return window.AIService.normalizeAiMessageText(text, {
+        mode: "offline"
+      });
     }
 
     return String(text || "").trim();
@@ -50,7 +60,7 @@
   function normalizeOfflineEventsForDisplay(events) {
     return (Array.isArray(events) ? events : []).map(function (event) {
       var source = event && typeof event === "object" ? event : { content: event };
-      var content = normalizeDisplayText(source.content || "");
+      var content = normalizeDisplayText(source.content || "", source);
       return Object.assign({}, source, {
         type: source.type === "speech" ? "speech" : "action",
         content: content
@@ -62,7 +72,7 @@
 
   function normalizeOfflineHistoryEventForRender(event) {
     var source = event && typeof event === "object" ? event : { content: event };
-    var content = normalizeDisplayText(source.content || "");
+    var content = normalizeDisplayText(source.content || "", source);
 
     if (source.role === "user" || source.type === "user") {
       return Object.assign({}, source, {
@@ -273,7 +283,7 @@
     if (event.role === "user" || event.type === "user") {
       return [
         '<div class="offline-user-row" data-event-id="' + escapeHtml(event.id) + '">',
-        '  <div class="offline-user-bubble">' + escapeHtml(normalizeDisplayText(event.content)) + "</div>",
+        '  <div class="offline-user-bubble">' + escapeHtml(normalizeDisplayText(event.content, event)) + "</div>",
         '  <span class="offline-time">' + formatTime(event.createdAt) + "</span>",
         "</div>"
       ].join("");
@@ -294,7 +304,7 @@
       renderAvatar(character, "offline-avatar"),
       '  <div class="offline-speech-main">',
       '    <span class="offline-name">' + escapeHtml(event.characterName || character.name || "角色") + "</span>",
-      '    <div class="offline-speech-bubble">' + escapeHtml(normalizeDisplayText(event.content)) + "</div>",
+      '    <div class="offline-speech-bubble">' + escapeHtml(normalizeDisplayText(event.content, event)) + "</div>",
       '    <span class="offline-time">' + formatTime(event.createdAt) + "</span>",
       "  </div>",
       "</div>"
@@ -306,7 +316,7 @@
 
     return [
       '<div class="offline-action-card' + cls + '" data-event-id="' + escapeHtml(event.id) + '">',
-      '  <span>' + escapeHtml(normalizeDisplayText(event.content)) + "</span>",
+      '  <span>' + escapeHtml(normalizeDisplayText(event.content, event)) + "</span>",
       '  <i aria-hidden="true">✦</i>',
       "</div>"
     ].join("");
@@ -793,7 +803,7 @@
       var label = isInlineUserEvent(event)
         ? "用户"
         : (event.type === "offlineSpeech" || event.type === "speech" ? (event.characterName || "角色") : "旁白");
-      var content = normalizeDisplayText(event.content || "");
+      var content = normalizeDisplayText(event.content || "", event);
       collectKeywordHits(content, timeKeywords, timeHints);
       collectKeywordHits(content, placeKeywords, placeHints);
       collectKeywordHits(content, positionKeywords, positionHints);
