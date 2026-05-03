@@ -562,78 +562,104 @@
   var outingDraft = { companion: null, selectedPlaceId: "", memorySource: { type: "auto", groupId: "" } };
 
   function createEmptyOutingFlowState() {
-    return { step: "home", companion: null, placeId: "", memorySource: { type: "auto", groupId: "" }, updatedAt: Date.now() };
-  }
-
-  function normalizeOutingFlowState(src) {
-    var s = (src && typeof src === "object") ? src : {};
-    var ms = (s.memorySource && typeof s.memorySource === "object") ? s.memorySource : { type: "auto", groupId: "" };
     return {
-      step: s.step || "home",
-      companion: s.companion || null,
-      placeId: String(s.placeId || s.selectedPlaceId || ""),
-      memorySource: { type: ms.type || "auto", groupId: String(ms.groupId || "") },
-      updatedAt: Number(s.updatedAt) || Date.now()
+      step: "home",
+      companion: null,
+      placeId: "",
+      memorySource: { type: "auto", groupId: "" },
+      updatedAt: 0
     };
   }
 
-  function loadOutingFlowState() {
-    // 始终合并内存对象和 localStorage，取最新的
-    var stored = null;
-    try { stored = JSON.parse(localStorage.getItem(OUTING_FLOW_STATE_KEY) || "null"); } catch (e) {}
-    var storedNorm = normalizeOutingFlowState(stored);
-    var memNorm = normalizeOutingFlowState(outingFlowState);
-    // 取 updatedAt 更新的那个作为主状态
-    outingFlowState = (storedNorm.updatedAt >= memNorm.updatedAt) ? storedNorm : memNorm;
-    return outingFlowState;
+  function normalizeOutingFlowState(src) {
+    var source = (src && typeof src === "object") ? src : {};
+    var ms = (source.memorySource && typeof source.memorySource === "object")
+      ? source.memorySource
+      : { type: "auto", groupId: "" };
+    return {
+      step: source.step || "home",
+      companion: source.companion || null,
+      placeId: String(source.placeId || source.selectedPlaceId || ""),
+      memorySource: {
+        type: ms.type || "auto",
+        groupId: String(ms.groupId || "")
+      },
+      updatedAt: Number(source.updatedAt) || 0
+    };
   }
 
-  function saveOutingFlowState(patch) {
-    var current = loadOutingFlowState();
-    var next = normalizeOutingFlowState(Object.assign({}, current, patch || {}, { updatedAt: Date.now() }));
+  function readStoredOutingFlowState() {
+    var raw;
+    try { raw = localStorage.getItem(OUTING_FLOW_STATE_KEY); } catch (e) { raw = ""; }
+    if (!raw) return null;
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (e2) { return null; }
+    if (!parsed || typeof parsed !== "object") return null;
+    return normalizeOutingFlowState(parsed);
+  }
+
+  function writeStoredOutingFlowState(flow) {
+    try { localStorage.setItem(OUTING_FLOW_STATE_KEY, JSON.stringify(flow)); } catch (e) {}
+  }
+
+  function applyOutingFlowState(flow) {
+    var next = normalizeOutingFlowState(flow);
     outingFlowState = next;
     outingStep = next.step;
     outingPendingCompanion = next.companion;
     outingSelectedPlaceId = next.placeId;
     outingPendingMemorySource = next.memorySource;
     outingDraft = { companion: next.companion, selectedPlaceId: next.placeId, memorySource: next.memorySource };
-    try { localStorage.setItem(OUTING_FLOW_STATE_KEY, JSON.stringify(next)); } catch (e) {}
     return next;
+  }
+
+  function loadOutingFlowState() {
+    // localStorage 有值就用 localStorage；没有则保留内存里的状态，绝不用空状态覆盖。
+    var stored = readStoredOutingFlowState();
+    if (stored) {
+      return applyOutingFlowState(stored);
+    }
+    if (outingFlowState && (outingFlowState.companion || outingFlowState.placeId || outingFlowState.step !== "home")) {
+      return applyOutingFlowState(outingFlowState);
+    }
+    return applyOutingFlowState(createEmptyOutingFlowState());
+  }
+
+  function saveOutingFlowState(patch) {
+    var stored = readStoredOutingFlowState();
+    var base = stored || outingFlowState || createEmptyOutingFlowState();
+    var next = normalizeOutingFlowState(Object.assign({}, base, patch || {}, { updatedAt: Date.now() }));
+    writeStoredOutingFlowState(next);
+    return applyOutingFlowState(next);
   }
 
   function clearOutingFlowState() {
     var empty = createEmptyOutingFlowState();
-    outingFlowState = empty;
-    outingStep = "home";
-    outingPendingCompanion = null;
-    outingSelectedPlaceId = "";
-    outingPendingMemorySource = { type: "auto", groupId: "" };
-    outingDraft = { companion: null, selectedPlaceId: "", memorySource: { type: "auto", groupId: "" } };
     try { localStorage.removeItem(OUTING_FLOW_STATE_KEY); } catch (e) {}
-    return empty;
+    return applyOutingFlowState(empty);
   }
 
-  function syncLegacyOutingVarsFromFlow() {
-    var flow = loadOutingFlowState();
-    outingStep = flow.step;
-    outingPendingCompanion = flow.companion;
-    outingSelectedPlaceId = flow.placeId;
-    outingPendingMemorySource = flow.memorySource;
-    return flow;
-  }
+  function syncLegacyOutingVarsFromFlow() { return loadOutingFlowState(); }
 
   // 旧函数名全部转到 outingFlowState
-  function syncOutingDraftFromLegacy() { return syncLegacyOutingVarsFromFlow(); }
-  function syncLegacyFromOutingDraft() { return syncLegacyOutingVarsFromFlow(); }
-  function syncLegacyFromStoredOutingDraft() { return syncLegacyOutingVarsFromFlow(); }
+  function syncOutingDraftFromLegacy() { return loadOutingFlowState(); }
+  function syncLegacyFromOutingDraft() { return loadOutingFlowState(); }
+  function syncLegacyFromStoredOutingDraft() { return loadOutingFlowState(); }
   function resetOutingDraftState() { return clearOutingFlowState(); }
 
   function debugOutingFlowState(label) {
     try {
       if (!localStorage.getItem("myAiApp.debugOuting")) return;
       console.debug("[OutingFlowDebug]", label, {
-        flow: loadOutingFlowState(),
-        localStorage: (function () { try { return JSON.parse(localStorage.getItem(OUTING_FLOW_STATE_KEY)); } catch (e) { return null; } }())
+        memory: outingFlowState,
+        storedRaw: (function () { try { return localStorage.getItem(OUTING_FLOW_STATE_KEY); } catch (e) { return null; } }()),
+        storedParsed: readStoredOutingFlowState(),
+        legacy: {
+          step: outingStep,
+          companion: outingPendingCompanion,
+          placeId: outingSelectedPlaceId,
+          memorySource: outingPendingMemorySource
+        }
       });
     } catch (e) {}
   }
@@ -643,22 +669,22 @@
     var outing = window.AppStorage.getCurrentOuting();
     var flow = loadOutingFlowState();
 
-    setActivePage("outingScreen");
-
     if (outing && outing.status === "active") {
       saveOutingFlowState({ step: "active" });
+      setActivePage("outingScreen");
       renderOutingActiveView(outing);
       return;
     }
 
-    // 如果正在选地点流程，恢复地点页，不要清状态
-    if (flow.step === "place-pick" && flow.companion) {
+    if (flow && flow.step === "place-pick" && flow.companion) {
+      saveOutingFlowState({ step: "place-pick" });
+      setActivePage("outingScreen");
       renderOutingPlacePickView();
       return;
     }
 
-    // 否则回首页并清状态
     clearOutingFlowState();
+    setActivePage("outingScreen");
     renderOutingHomeView();
   }
 
@@ -688,7 +714,6 @@
       renderOutingNpcSetupView();
       return;
     }
-    clearOutingFlowState();
     renderOutingHomeView();
   }
 
@@ -774,8 +799,13 @@
         var type = (getElement("outingNpcType") && getElement("outingNpcType").value) || "普通朋友";
         var persona = (getElement("outingNpcPersona") && getElement("outingNpcPersona").value.trim()) || "";
         var companion = { type: "npc", id: "npc_" + Date.now(), name: name, npcType: type, persona: persona };
-        saveOutingFlowState({ step: "place-pick", companion: companion, placeId: "", memorySource: { type: "auto", groupId: "" } });
+        var savedFlow = saveOutingFlowState({ step: "place-pick", companion: companion, placeId: "", memorySource: { type: "auto", groupId: "" } });
         debugOutingFlowState("npc-selected");
+        if (!savedFlow.companion) {
+          showToast("同行对象保存失败，请重试。");
+          renderOutingNpcSetupView();
+          return;
+        }
         renderOutingPlacePickView();
       });
     }
@@ -832,8 +862,13 @@
           persona: character.personality || character.persona || "",
           characterId: character.id
         };
-        saveOutingFlowState({ step: "place-pick", companion: companion, placeId: "", memorySource: { type: "auto", groupId: "" } });
+        var savedFlow = saveOutingFlowState({ step: "place-pick", companion: companion, placeId: "", memorySource: { type: "auto", groupId: "" } });
         debugOutingFlowState("character-selected");
+        if (!savedFlow.companion) {
+          showToast("同行对象保存失败，请重试。");
+          renderOutingCharacterPickView();
+          return;
+        }
         renderOutingPlacePickView();
       });
     });
@@ -859,9 +894,7 @@
 
     debugOutingFlowState("render-place-pick");
 
-    // companion 丢失：静默回首页，不弹 toast
     if (!companion) {
-      clearOutingFlowState();
       renderOutingHomeView();
       return;
     }
@@ -983,7 +1016,6 @@
         debugOutingFlowState("depart-clicked");
         if (!finalCompanion) {
           showToast("出行对象丢失，请重新选择同行对象。");
-          clearOutingFlowState();
           renderOutingHomeView();
           return;
         }
@@ -1050,7 +1082,6 @@
 
     if (!companion) {
       showToast("出行对象丢失，请重新选择同行对象。");
-      clearOutingFlowState();
       renderOutingHomeView();
       return;
     }
