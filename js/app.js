@@ -23,6 +23,7 @@
     "shopScreen",
     "worldBookScreen",
     "diaryScreen",
+    "diaryReaderScreen",
     "characterSpaceScreen",
     "thoughtsScreen",
     "watchListScreen",
@@ -35,6 +36,7 @@
   var emojiSendCallback = null;
   var imageSendCallback = null;
   var diaryTab = "character";
+  var currentDiaryReaderId = "";
   var shopTab = "food";
   var shopMallCategory = "all";
   var shopGenerating = false;
@@ -287,6 +289,10 @@
 
     if (pageId === "diaryScreen") {
       renderDiaryScreen();
+    }
+
+    if (pageId === "diaryReaderScreen") {
+      renderDiaryReaderScreen();
     }
 
     if (pageId === "characterSpaceScreen") {
@@ -4263,6 +4269,13 @@
     getElement("diaryBackBtn").addEventListener("click", function () {
       returnFromWechatChild();
     });
+    var diaryReaderBackBtn = getElement("diaryReaderBackBtn");
+    if (diaryReaderBackBtn) {
+      diaryReaderBackBtn.addEventListener("click", function () {
+        currentDiaryReaderId = "";
+        setActivePage("diaryScreen");
+      });
+    }
     getElement("characterSpaceBackBtn").addEventListener("click", goHome);
     getElement("themeBackBtn").addEventListener("click", goHome);
     getElement("photoBackBtn").addEventListener("click", goHome);
@@ -6687,37 +6700,52 @@
     bindDiaryActions(content);
   }
 
+  function sortDiariesByDateDesc(diaries) {
+    return (diaries || []).slice().sort(function (a, b) {
+      if (a.date === b.date) {
+        return (b.updatedAt || 0) - (a.updatedAt || 0);
+      }
+      return a.date > b.date ? -1 : 1;
+    });
+  }
+
+  function sortDiariesByTime(diaries) {
+    return (diaries || []).slice().sort(function (a, b) {
+      var at = Number(a.updatedAt || a.createdAt || 0);
+      var bt = Number(b.updatedAt || b.createdAt || 0);
+
+      if (bt !== at) {
+        return bt - at;
+      }
+
+      return String(b.date || "").localeCompare(String(a.date || ""));
+    });
+  }
+
   function renderCharacterDiaryPane(characters) {
-    var selected = getCharacterById(diaryCharacterId) || characters[0] || null;
-    var diaries = selected ? window.AppStorage.getDiariesByCharacter(selected.id) : [];
-    var autoCharacters = characters.filter(function (character) {
+    var diaries = sortDiariesByTime(window.AppStorage.getDiaries().filter(function (diary) {
+      return diary.type === "character";
+    }));
+    var autoCharacters = (characters || []).filter(function (character) {
       return getCharacterDiarySettings(character).autoDiaryEnabled;
     });
-    var selectedDiarySettings = getCharacterDiarySettings(selected);
-
-    if (selected && diaryCharacterId !== selected.id) {
-      diaryCharacterId = selected.id;
-    }
 
     return [
       '<section class="form-section diary-book-section">',
-      '  <div class="field-group">',
-      "    <label>选择角色</label>",
-      '    <select data-diary-field="characterId">' + characters.map(function (character) {
-        return '<option value="' + escapeHtml(character.id) + '"' + (selected && selected.id === character.id ? " selected" : "") + ">" + escapeHtml(character.name) + "</option>";
-      }).join("") + "</select>",
-      "  </div>",
-      selected ? '<div class="diary-auto-summary"><strong>' + (selectedDiarySettings.autoDiaryEnabled ? "已允许自动写日记" : "未开启自动写日记") + '</strong><span>当前允许自动写日记：' + escapeHtml(autoCharacters.map(function (character) { return character.name; }).join("、") || "暂无") + "</span></div>" : "",
-      '  <button class="full-button" type="button" data-diary-action="generate"' + (!selected ? " disabled" : "") + ">生成今日日记</button>",
-      "</section>",
-      selected ? renderDiaryList(diaries, "character") : '<div class="soft-empty">请先创建角色</div>'
+      '  <div class="diary-auto-summary">',
+      '    <strong>角色日记</strong>',
+      '    <span>已允许自动写日记：' + escapeHtml(autoCharacters.map(function (character) { return character.name; }).join("、") || "暂无") + '</span>',
+      '  </div>',
+      '  <button class="full-button" type="button" data-diary-action="generate-all"' + (!characters.length ? ' disabled' : '') + '>生成今日日记</button>',
+      '</section>',
+      renderDiaryList(diaries, "character")
     ].join("");
   }
 
   function renderMineDiaryPane() {
-    var diaries = window.AppStorage.getDiaries().filter(function (diary) {
+    var diaries = sortDiariesByTime(window.AppStorage.getDiaries().filter(function (diary) {
       return diary.type === "mine";
-    });
+    }));
 
     return [
       '<section class="form-section diary-book-section">',
@@ -6844,6 +6872,11 @@
         return;
       }
 
+      if (button.dataset.diaryAction === "generate-all") {
+        generateTodayDiariesForAllowedCharacters(button);
+        return;
+      }
+
       if (button.dataset.diaryAction === "save-mine") {
         saveMineDiary(content);
         return;
@@ -6864,7 +6897,7 @@
       }
 
       if (button.dataset.diaryAction === "detail" && diaryId) {
-        openDiaryDetail(diaryId);
+        openDiaryReader(diaryId);
         return;
       }
 
@@ -6880,79 +6913,118 @@
     };
   }
 
-  function openDiaryDetail(diaryId) {
-    var diary = window.AppStorage.getDiaries().find(function (item) {
-      return item.id === diaryId;
+  function formatDiaryDisplayDate(dateText, weather) {
+    var value = String(dateText || "").trim();
+    var date = new Date(value);
+    var readable;
+
+    if (!Number.isNaN(date.getTime())) {
+      readable = date.getFullYear() + "年" + (date.getMonth() + 1) + "月" + date.getDate() + "日";
+    } else {
+      readable = value || getLocalDateString();
+    }
+
+    return readable + (weather ? " " + weather : "");
+  }
+
+  function renderDiaryParagraphs(text) {
+    var raw = String(text || "").trim();
+
+    if (!raw) {
+      return "<p>暂无正文。</p>";
+    }
+
+    return raw
+      .split(/\n+/)
+      .map(function (paragraph) {
+        return paragraph.trim();
+      })
+      .filter(Boolean)
+      .map(function (paragraph) {
+        return "<p>" + escapeHtml(paragraph) + "</p>";
+      })
+      .join("");
+  }
+
+  function openDiaryReader(diaryId) {
+    currentDiaryReaderId = String(diaryId || "");
+    if (!currentDiaryReaderId) {
+      return;
+    }
+    setActivePage("diaryReaderScreen");
+
+    var readerContent = getElement("diaryReaderContent");
+    if (readerContent) {
+      readerContent.scrollTop = 0;
+    }
+  }
+
+  function renderDiaryReaderScreen() {
+    var content = getElement("diaryReaderContent");
+    var diaries = window.AppStorage.getDiaries ? window.AppStorage.getDiaries() : [];
+    var diary = diaries.find(function (item) {
+      return item && String(item.id) === String(currentDiaryReaderId);
     });
 
+    if (!content) {
+      return;
+    }
+
     if (!diary) {
+      content.innerHTML = renderSoftEmpty
+        ? renderSoftEmpty("日", "没有找到这篇日记", "可能已经被删除。")
+        : '<div class="soft-empty">没有找到这篇日记</div>';
       return;
     }
 
     var author = getDiaryAuthorInfo(diary);
 
-    showWeChatSheet([
-      '<div class="wechat-sheet-header">',
-      '  <span></span>',
-      "  <h3>日记详情</h3>",
-      '  <button type="button" data-close-sheet>关闭</button>',
-      "</div>",
-      '<article class="diary-detail-book diary-detail-card">',
-      '  <div class="diary-feed-top">',
-      '    <div class="diary-feed-avatar-wrap">' + renderDiaryAvatar(author) + '</div>',
-      '    <div class="diary-feed-info">',
-      '      <strong>' + escapeHtml(author.name) + '</strong>',
-      '      <div class="diary-feed-meta">' + escapeHtml(author.label) + ' · ' + escapeHtml(diary.date) + ' · ' + escapeHtml(diary.weather || '未记录') + '</div>',
+    content.innerHTML = [
+      '<article class="diary-reader-article">',
+      '  <header class="diary-reader-header">',
+      '    <div class="diary-reader-date">' + escapeHtml(formatDiaryDisplayDate(diary.date, diary.weather || "")) + '</div>',
+      '    <div class="diary-reader-author">' + escapeHtml(author.name || "") + '</div>',
+      '  </header>',
+      diary.title ? '  <h1 class="diary-reader-title">' + escapeHtml(diary.title) + '</h1>' : '',
+      '  <div class="diary-reader-body">',
+      renderDiaryParagraphs(diary.content || ""),
+      '  </div>',
+      '  <footer class="diary-reader-footer">',
+      diary.mood ? '    <div class="diary-reader-meta">心情：' + escapeHtml(diary.mood) + '</div>' : '',
+      diary.summary ? '    <div class="diary-reader-meta">小结：' + escapeHtml(diary.summary) + '</div>' : '',
+      '    <div class="diary-reader-actions">',
+      '      <button class="outline-button" type="button" data-diary-reader-action="memory">写入记忆</button>',
+      '      <button class="outline-button danger" type="button" data-diary-reader-action="delete">删除</button>',
       '    </div>',
-      '  </div>',
-      '  <label class="wechat-sheet-field"><span>标题</span><input data-diary-edit="title" type="text" value="' + escapeHtml(diary.title || '') + '"></label>',
-      '  <label class="wechat-sheet-field"><span>正文</span><textarea data-diary-edit="content">' + escapeHtml(diary.content || '') + '</textarea></label>',
-      '  <label class="wechat-sheet-field"><span>今日心情</span><input data-diary-edit="mood" type="text" value="' + escapeHtml(diary.mood || '') + '"></label>',
-      '  <label class="wechat-sheet-field"><span>一句话小结</span><input data-diary-edit="summary" type="text" value="' + escapeHtml(diary.summary || '') + '"></label>',
-      '  <div class="wechat-sheet-actions">',
-      '    <button class="outline-button" type="button" data-close-sheet>关闭</button>',
-      '    <button class="outline-button" type="button" data-diary-action="memory">写入记忆</button>',
-      '    <button class="outline-button danger" type="button" data-diary-action="delete-diary">删除</button>',
-      '    <button class="full-button" type="button" data-diary-action="save-diary">保存</button>',
-      '  </div>',
-      "</article>"
-    ].join(""), function (sheet) {
-      bindSheetCloseButtons(sheet);
+      '  </footer>',
+      '</article>'
+    ].join("");
 
-      var saveButton = sheet.querySelector('[data-diary-action="save-diary"]');
-      var memoryButton = sheet.querySelector('[data-diary-action="memory"]');
-      var deleteButton = sheet.querySelector('[data-diary-action="delete-diary"]');
+    bindDiaryReaderActions(content, diary.id);
+  }
 
-      if (saveButton) {
-        saveButton.addEventListener('click', function () {
-          window.AppStorage.updateDiary(diaryId, {
-            title: getScopedFieldValue(sheet, '[data-diary-edit="title"]'),
-            content: getScopedFieldValue(sheet, '[data-diary-edit="content"]'),
-            mood: getScopedFieldValue(sheet, '[data-diary-edit="mood"]'),
-            summary: getScopedFieldValue(sheet, '[data-diary-edit="summary"]')
-          });
+  function bindDiaryReaderActions(content, diaryId) {
+    content.onclick = function (event) {
+      var button = event.target.closest("[data-diary-reader-action]");
+
+      if (!button) {
+        return;
+      }
+
+      if (button.dataset.diaryReaderAction === "memory") {
+        writeDiaryToMemory(diaryId);
+        return;
+      }
+
+      if (button.dataset.diaryReaderAction === "delete") {
+        if (window.confirm("确定删除这篇日记吗？")) {
+          window.AppStorage.deleteDiary(diaryId);
+          currentDiaryReaderId = "";
           renderDiaryScreen();
-          closeWeChatSheet();
-        });
+          setActivePage("diaryScreen");
+        }
       }
-
-      if (memoryButton) {
-        memoryButton.addEventListener('click', function () {
-          writeDiaryToMemory(diaryId);
-          closeWeChatSheet();
-        });
-      }
-
-      if (deleteButton) {
-        deleteButton.addEventListener('click', function () {
-          if (window.confirm('确定删除这篇日记吗？')) {
-            window.AppStorage.deleteDiary(diaryId);
-            renderDiaryScreen();
-            closeWeChatSheet();
-          }
-        });
-      }
-    });
+    };
   }
 
   function writeDiaryToMemory(diaryId) {
@@ -7015,6 +7087,62 @@
         window.AppStorage.updateDiary(existing.id, diary);
       } else {
         window.AppStorage.addDiary(diary);
+      }
+    } catch (error) {
+      window.alert(error && error.message ? error.message : "日记生成失败");
+    } finally {
+      button.disabled = false;
+      button.textContent = "生成今日日记";
+      renderDiaryScreen();
+    }
+  }
+
+  async function generateTodayDiariesForAllowedCharacters(button) {
+    var characters = window.AppStorage.getCharacters().filter(function (character) {
+      return getCharacterDiarySettings(character).autoDiaryEnabled;
+    });
+    var today = getLocalDateString();
+    var generatedCount = 0;
+
+    if (!characters.length) {
+      window.alert("没有开启自动写日记的角色。");
+      return;
+    }
+
+    button.disabled = true;
+    button.textContent = "生成中";
+
+    try {
+      for (var i = 0; i < characters.length; i += 1) {
+        var character = characters[i];
+        var existing = window.AppStorage.getTodayDiary(character.id);
+        var diary = await window.AIService.generateCharacterDiary(character, collectCharacterDiaryContext(character, today));
+
+        if (!diary || !diary.content) {
+          continue;
+        }
+
+        diary = Object.assign({}, diary, {
+          type: "character",
+          characterId: character.id,
+          date: today,
+          createdAt: existing ? existing.createdAt : Date.now(),
+          updatedAt: Date.now()
+        });
+
+        if (existing) {
+          window.AppStorage.updateDiary(existing.id, diary);
+        } else {
+          window.AppStorage.addDiary(diary);
+        }
+
+        generatedCount += 1;
+      }
+
+      if (window.showToast) {
+        showToast("已生成 " + generatedCount + " 篇日记");
+      } else {
+        window.alert("已生成 " + generatedCount + " 篇日记");
       }
     } catch (error) {
       window.alert(error && error.message ? error.message : "日记生成失败");
