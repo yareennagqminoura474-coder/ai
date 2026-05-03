@@ -2173,8 +2173,7 @@
       return;
     }
 
-    if (isGroupJobRunning(group.id, ["chat", "regenerate"])) {
-      showGroupBusyNotice(group.id);
+    if (handleStuckGroupJobBeforeRetry(group.id, ["chat", "regenerate"])) {
       return;
     }
 
@@ -2784,8 +2783,7 @@
       return;
     }
 
-    if (isGroupJobRunning(group.id, ["chat", "regenerate"])) {
-      showGroupBusyNotice(group.id);
+    if (handleStuckGroupJobBeforeRetry(group.id, ["chat", "regenerate"])) {
       return;
     }
 
@@ -2899,6 +2897,46 @@
     if (groupId && activeGroupId === groupId && window.AppExtras && window.AppExtras.showToast) {
       window.AppExtras.showToast("正在生成中，请稍等。", true);
     }
+  }
+
+  function removeGroupLoadingMessages(groupId) {
+    var history = window.AppStorage.getGroupChatHistory(groupId) || [];
+    var next = history.filter(function (message) {
+      return !(message && message.type === "loading");
+    });
+
+    if (next.length !== history.length) {
+      window.AppStorage.saveGroupChatHistory(groupId, next);
+      scheduleGroupRender(groupId);
+      scheduleGroupListRender();
+    }
+  }
+
+  function handleStuckGroupJobBeforeRetry(groupId, modes) {
+    if (!window.AppApiJobs || !window.AppApiJobs.getActiveJobForTarget) {
+      return false;
+    }
+
+    var job = window.AppApiJobs.getActiveJobForTarget("group", groupId, modes);
+    if (!job) {
+      return false;
+    }
+
+    if (!window.AppApiJobs.isJobStuck(job)) {
+      showGroupBusyNotice(groupId);
+      return true;
+    }
+
+    window.AppApiJobs.abandonJobsForTarget("group", groupId, modes, "user-retry-stuck-group-generation");
+    removeGroupLoadingMessages(groupId);
+    isGroupReplying = false;
+    setGroupReplyState(false);
+
+    if (window.AppExtras && window.AppExtras.showToast) {
+      window.AppExtras.showToast("上一轮卡住了，已重新生成。");
+    }
+
+    return false;
   }
 
   function createGroupLoadingMessage(generationId, character) {
@@ -3042,6 +3080,11 @@
       window.AppStorage.getMemoriesForCharacters(group.memberIds),
       generationContext
     ));
+
+    if (window.AppApiJobs && window.AppApiJobs.isGenerationAbandoned && window.AppApiJobs.isGenerationAbandoned(job.generationId)) {
+      return { afterMessages: [] };
+    }
+
     replies = aiResult.replies || [];
 
     messages = removeGroupLoadingByGeneration(window.AppStorage.getGroupChatHistory(groupId), job.generationId);

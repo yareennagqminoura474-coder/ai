@@ -5800,7 +5800,66 @@
   };
 
   function getOutingPlaces() {
-    return DEFAULT_OUTING_PLACES;
+    return DEFAULT_OUTING_PLACES.concat(getCustomOutingPlaces());
+  }
+
+  function getCustomOutingPlaces() {
+    var store = getOutingStore();
+    var places = Array.isArray(store.customPlaces) ? store.customPlaces : [];
+    return places;
+  }
+
+  function saveCustomOutingPlaces(places) {
+    var store = getOutingStore();
+    store.customPlaces = Array.isArray(places) ? places : [];
+    saveOutingStore(store);
+  }
+
+  function addCustomOutingPlace(place) {
+    if (!place || !place.name || !place.description) {
+      return null;
+    }
+
+    var places = getCustomOutingPlaces();
+    var item = Object.assign({
+      id: "custom_place_" + Date.now(),
+      custom: true,
+      category: "custom",
+      openingHours: "自定义",
+      priceLevel: 1,
+      activities: [],
+      shops: []
+    }, place);
+
+    places.unshift(item);
+    saveCustomOutingPlaces(places);
+    return item;
+  }
+
+  function updateCustomOutingPlace(placeId, patch) {
+    var places = getCustomOutingPlaces();
+    var index = places.findIndex(function (place) {
+      return String(place.id) === String(placeId);
+    });
+    if (index === -1) {
+      return null;
+    }
+
+    places[index] = Object.assign({}, places[index], patch || {}, { id: places[index].id });
+    saveCustomOutingPlaces(places);
+    return places[index];
+  }
+
+  function deleteCustomOutingPlace(placeId) {
+    var places = getCustomOutingPlaces();
+    var nextPlaces = places.filter(function (place) {
+      return String(place.id) !== String(placeId);
+    });
+    if (nextPlaces.length === places.length) {
+      return false;
+    }
+    saveCustomOutingPlaces(nextPlaces);
+    return true;
   }
 
   function getOutingShops() {
@@ -5831,9 +5890,10 @@
     saveOutingStore(store);
   }
 
-  function startOuting(mode, companion, placeId) {
-    var places = DEFAULT_OUTING_PLACES;
+  function startOuting(mode, companion, placeId, options) {
+    var places = getOutingPlaces();
     var place = places.find(function (p) { return p.id === placeId; }) || null;
+    var memorySource = (options && options.memorySource) || { type: "auto", groupId: "" };
     var outing = {
       id: "outing_" + Date.now(),
       mode: mode,
@@ -5843,12 +5903,16 @@
       placeDescription: place ? place.description : "",
       placeActivities: place ? place.activities : [],
       placeShops: place ? place.shops : [],
+      placeCategory: place ? place.category : "",
+      placeOpeningHours: place ? place.openingHours : "",
+      placePriceLevel: place ? place.priceLevel : 1,
       startedAt: Date.now(),
       updatedAt: Date.now(),
       status: "active",
       spentTotal: 0,
       events: [],
       purchases: [],
+      memorySource: memorySource,
       memorySynced: false
     };
     setCurrentOuting(outing);
@@ -5887,6 +5951,416 @@
   function getOutingHistory() {
     var store = getOutingStore();
     return Array.isArray(store.history) ? store.history : [];
+  }
+
+  function findOutingInStore(outingId) {
+    var store = getOutingStore();
+    var id = String(outingId || "");
+    if (store.current && String(store.current.id) === id) {
+      return store.current;
+    }
+    return (Array.isArray(store.history) ? store.history.find(function (outing) {
+      return String(outing.id) === id;
+    }) : null) || null;
+  }
+
+  function saveOutingData(outing) {
+    if (!outing || !outing.id) {
+      return false;
+    }
+    var store = getOutingStore();
+    if (store.current && String(store.current.id) === String(outing.id)) {
+      store.current = outing;
+      saveOutingStore(store);
+      return true;
+    }
+    var index = Array.isArray(store.history) ? store.history.findIndex(function (item) {
+      return String(item.id) === String(outing.id);
+    }) : -1;
+    if (index !== -1) {
+      store.history[index] = outing;
+      saveOutingStore(store);
+      return true;
+    }
+    return false;
+  }
+
+  function updateOuting(outingId, patch) {
+    var outing = findOutingInStore(outingId);
+    if (!outing) {
+      return null;
+    }
+    var updated = Object.assign({}, outing, patch || {}, { updatedAt: Date.now() });
+    saveOutingData(updated);
+    return updated;
+  }
+
+  function updateOutingEvent(outingId, eventId, patch) {
+    var outing = findOutingInStore(outingId);
+    if (!outing || !Array.isArray(outing.events)) {
+      return null;
+    }
+    var index = outing.events.findIndex(function (event) {
+      return String(event.id) === String(eventId);
+    });
+    if (index === -1) {
+      return null;
+    }
+    outing.events[index] = Object.assign({}, outing.events[index], patch || {}, { id: eventId, updatedAt: Date.now() });
+    outing.updatedAt = Date.now();
+    saveOutingData(outing);
+    return outing.events[index];
+  }
+
+  function deleteOutingEvent(outingId, eventId) {
+    var outing = findOutingInStore(outingId);
+    if (!outing || !Array.isArray(outing.events)) {
+      return false;
+    }
+    var updatedEvents = outing.events.filter(function (event) {
+      return String(event.id) !== String(eventId);
+    });
+    if (updatedEvents.length === outing.events.length) {
+      return false;
+    }
+    outing.events = updatedEvents;
+    outing.updatedAt = Date.now();
+    saveOutingData(outing);
+    return true;
+  }
+
+  function updateOutingPurchase(purchaseId, patch) {
+    var outing = getCurrentOuting();
+    if (!outing || !Array.isArray(outing.purchases)) {
+      return null;
+    }
+    var index = outing.purchases.findIndex(function (purchase) {
+      return String(purchase.id) === String(purchaseId);
+    });
+    if (index === -1) {
+      return null;
+    }
+    var purchase = outing.purchases[index];
+    var oldPrice = Number(purchase.price) || 0;
+    var nextPurchase = Object.assign({}, purchase, patch || {}, { id: purchase.id, updatedAt: Date.now() });
+    var newPrice = Number(nextPurchase.price) || 0;
+    var priceDiff = roundAmount(newPrice - oldPrice);
+    var ledger = getWallet().ledger.find(function (record) {
+      return String(record.sourceType) === "outing" && String(record.sourceId) === String(outing.id) && String(record.purchaseId) === String(purchase.id);
+    });
+
+    if (priceDiff !== 0) {
+      if (priceDiff > 0) {
+        var balance = Number(getWallet().balance) || 0;
+        if (balance < priceDiff) {
+          return null;
+        }
+      }
+      if (ledger) {
+        updateWalletLedger(ledger.id, { amount: newPrice, note: nextPurchase.note || ledger.note });
+      } else {
+        addWalletLedger({
+          type: "outing",
+          direction: "expense",
+          amount: newPrice,
+          title: "出去玩消费",
+          note: outing.placeName + " - " + (nextPurchase.itemName || purchase.itemName || "消费"),
+          sourceType: "outing",
+          sourceId: outing.id,
+          purchaseId: purchase.id,
+          createdAt: Date.now()
+        });
+      }
+    }
+
+    outing.purchases[index] = nextPurchase;
+    outing.spentTotal = roundAmount((outing.spentTotal || 0) + priceDiff);
+    outing.updatedAt = Date.now();
+    saveOutingData(outing);
+    return nextPurchase;
+  }
+
+  function deleteOutingPurchase(purchaseId) {
+    var outing = getCurrentOuting();
+    if (!outing || !Array.isArray(outing.purchases)) {
+      return false;
+    }
+    var index = outing.purchases.findIndex(function (purchase) {
+      return String(purchase.id) === String(purchaseId);
+    });
+    if (index === -1) {
+      return false;
+    }
+    var purchase = outing.purchases[index];
+    var amount = Number(purchase.price) || 0;
+    outing.purchases.splice(index, 1);
+    outing.spentTotal = roundAmount(Math.max(0, (outing.spentTotal || 0) - amount));
+    outing.updatedAt = Date.now();
+    saveOutingData(outing);
+
+    addWalletLedger({
+      type: "outing_refund",
+      direction: "income",
+      amount: amount,
+      title: "出去玩退款",
+      note: outing.placeName + " - " + (purchase.itemName || "消费"),
+      sourceType: "outing-refund",
+      sourceId: outing.id,
+      purchaseId: purchase.id,
+      createdAt: Date.now()
+    }, { skipBalance: false });
+
+    addChatMemory("private", outing.companion && outing.companion.characterId || "", {
+      content: "你取消了【" + (purchase.itemName || "商品") + "】这笔消费，退回 ¥" + amount.toFixed(2) + "。",
+      targetType: "private",
+      targetId: outing.companion && outing.companion.characterId || "",
+      source: "outing",
+      createdAt: Date.now()
+    });
+
+    return true;
+  }
+
+  function deleteOutingHistoryItem(outingId) {
+    var store = getOutingStore();
+    var id = String(outingId || "");
+    var removed = false;
+
+    if (store.current && String(store.current.id) === id) {
+      store.current = null;
+      removed = true;
+    }
+
+    if (Array.isArray(store.history)) {
+      var nextHistory = store.history.filter(function (outing) {
+        if (String(outing.id) === id) {
+          removed = true;
+          return false;
+        }
+        return true;
+      });
+      store.history = nextHistory;
+    }
+
+    if (removed) {
+      saveOutingStore(store);
+    }
+
+    return removed;
+  }
+
+  function getOutingById(outingId) {
+    return findOutingInStore(outingId);
+  }
+
+  function deleteCharacterMemoryById(characterId, memoryId) {
+    if (!characterId || !memoryId) {
+      return false;
+    }
+    var memories = getCharacterMemory(characterId).filter(function (memory) {
+      return String(memory.id) !== String(memoryId);
+    });
+    saveCharacterMemory(characterId, memories);
+    return true;
+  }
+
+  function upsertChatMemory(targetType, targetId, memoryItem) {
+    if (!targetId || !memoryItem || !memoryItem.id || !memoryItem.content) {
+      return null;
+    }
+    var memories = getChatMemories(targetType, targetId);
+    var index = memories.findIndex(function (item) {
+      return String(item.id) === String(memoryItem.id);
+    });
+    var normalized = normalizeChatMemoryItem(Object.assign({}, memoryItem, { id: String(memoryItem.id) }));
+    normalized.updatedAt = Date.now();
+    if (index === -1) {
+      normalized.createdAt = normalized.createdAt || Date.now();
+      memories.unshift(normalized);
+    } else {
+      memories[index] = Object.assign({}, memories[index], normalized);
+    }
+    saveChatMemories(targetType, targetId, memories.slice(0, 200));
+    return normalized;
+  }
+
+  function upsertCharacterMemory(characterId, memoryItem) {
+    if (!characterId || !memoryItem || !memoryItem.id || !memoryItem.content) {
+      return null;
+    }
+    var memories = getCharacterMemory(characterId);
+    var index = memories.findIndex(function (item) {
+      return String(item.id) === String(memoryItem.id);
+    });
+    var next = Object.assign({}, memoryItem, {
+      id: String(memoryItem.id),
+      content: String(memoryItem.content),
+      updatedAt: Date.now(),
+      createdAt: Number(memoryItem.createdAt) || Date.now()
+    });
+    if (index === -1) {
+      memories.push(next);
+    } else {
+      memories[index] = Object.assign({}, memories[index], next);
+    }
+    if (memories.length > 120) {
+      memories = memories.slice(-120);
+    }
+    saveCharacterMemory(characterId, memories);
+    return next;
+  }
+
+  function removeSyncedOutingMemory(outingId) {
+    var outing = getOutingById(outingId);
+    if (!outing || outing.mode !== "character" || !outing.companion || !outing.companion.characterId) {
+      return false;
+    }
+    var characterId = outing.companion.characterId;
+    deleteChatMemory("private", characterId, "memory_outing_" + outing.id);
+    deleteCharacterMemoryById(characterId, "character_memory_outing_" + outing.id);
+
+    var groups = getGroups() || [];
+    groups.forEach(function (group) {
+      if (group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1) {
+        deleteChatMemory("group", group.id, "group_memory_outing_" + outing.id + "_" + group.id);
+      }
+    });
+
+    if (outing.memorySynced) {
+      outing.memorySynced = false;
+      outing.memorySyncedAt = 0;
+      saveOutingData(outing);
+    }
+    return true;
+  }
+
+  function resyncOutingMemoryIfNeeded(outingId) {
+    var outing = getOutingById(outingId);
+    if (!outing || outing.mode !== "character" || !outing.memorySynced) {
+      return false;
+    }
+    syncOutingMemoryToCharacter(outing);
+    return true;
+  }
+
+  function limitTextForOutingMemory(text, maxLength) {
+    var value = String(text || "").trim();
+    var limit = Math.max(200, Number(maxLength) || 1000);
+    return value.length > limit ? value.slice(0, limit) + "..." : value;
+  }
+
+  function formatOutingMemoryList(memories) {
+    var list = Array.isArray(memories) ? memories : [];
+    return list.slice(0, 20).map(function (item) {
+      if (!item || !item.content) return "";
+      return (item.title ? item.title + "\n" : "") + item.content;
+    }).filter(Boolean).join("\n\n");
+  }
+
+  function getOutingCompanionMemoryContext(outing, options) {
+    var source = outing || {};
+    var companion = source.companion || {};
+    var characterId = companion.characterId || companion.id || "";
+    var params = options || {};
+    var memorySource = params.memorySource || source.memorySource || { type: "auto", groupId: "" };
+    var result = {
+      privateChatMemoryText: "",
+      characterMemoryText: "",
+      groupMemoryText: "",
+      recentPrivateChatText: "",
+      sourceLabel: "自动"
+    };
+
+    if (!source || source.mode !== "character" || !characterId) {
+      return result;
+    }
+
+    try {
+      result.privateChatMemoryText = formatOutingMemoryList(getChatMemories("private", characterId));
+    } catch (e) {
+      result.privateChatMemoryText = "";
+    }
+
+    try {
+      result.characterMemoryText = formatOutingMemoryList(getCharacterMemory(characterId).slice(-20));
+    } catch (e) {
+      result.characterMemoryText = "";
+    }
+
+    try {
+      var privateHistory = getChatHistory(characterId).filter(function (message) {
+        return message && message.content && message.type !== "loading" && message.type !== "error";
+      }).slice(-24);
+
+      result.recentPrivateChatText = privateHistory.map(function (message) {
+        if (message.role === "user") {
+          return "用户：" + message.content;
+        }
+        return (message.characterName || companion.name || "角色") + "：" + message.content;
+      }).join("\n");
+    } catch (e) {
+      result.recentPrivateChatText = "";
+    }
+
+    try {
+      var groups = getGroups() || [];
+      var relatedGroups = groups.filter(function (group) {
+        return group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1;
+      });
+
+      if (memorySource.type === "group" && memorySource.groupId) {
+        relatedGroups = relatedGroups.filter(function (group) {
+          return String(group.id) === String(memorySource.groupId);
+        });
+        result.sourceLabel = "指定群聊";
+      } else if (memorySource.type === "private") {
+        relatedGroups = [];
+        result.sourceLabel = "私聊";
+      } else {
+        result.sourceLabel = "自动";
+      }
+
+      result.groupMemoryText = relatedGroups.map(function (group) {
+        var memoryText = "";
+        var recentText = "";
+
+        try {
+          memoryText = formatOutingMemoryList(getChatMemories("group", group.id));
+        } catch (e) {
+          memoryText = "";
+        }
+
+        try {
+          var history = getGroupChatHistory(group.id).filter(function (message) {
+            return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system";
+          }).slice(-18);
+
+          recentText = history.map(function (message) {
+            if (message.role === "user") {
+              return "用户：" + message.content;
+            }
+            return (message.characterName || companion.name || "角色") + "：" + message.content;
+          }).join("\n");
+        } catch (e) {
+          recentText = "";
+        }
+
+        return [
+          "群聊：" + (group.name || "群聊"),
+          memoryText ? "群聊记忆：\n" + memoryText : "",
+          recentText ? "最近群聊：\n" + recentText : ""
+        ].filter(Boolean).join("\n");
+      }).filter(Boolean).join("\n\n");
+    } catch (e) {
+      result.groupMemoryText = "";
+    }
+
+    result.privateChatMemoryText = limitTextForOutingMemory(result.privateChatMemoryText, 1200);
+    result.characterMemoryText = limitTextForOutingMemory(result.characterMemoryText, 1200);
+    result.groupMemoryText = limitTextForOutingMemory(result.groupMemoryText, 1800);
+    result.recentPrivateChatText = limitTextForOutingMemory(result.recentPrivateChatText, 1200);
+
+    return result;
   }
 
   function endOuting() {
@@ -5932,7 +6406,7 @@
     var characterId = outing.companion.characterId;
     var summary = buildOutingMemorySummary(outing);
 
-    addChatMemory("private", characterId, {
+    upsertChatMemory("private", characterId, {
       id: "memory_outing_" + outing.id,
       type: "outing",
       title: "一起去了" + outing.placeName,
@@ -5944,7 +6418,7 @@
       createdAt: Date.now()
     });
 
-    addCharacterMemory(characterId, {
+    upsertCharacterMemory(characterId, {
       id: "character_memory_outing_" + outing.id,
       type: "outing",
       title: "和用户出去玩",
@@ -5955,8 +6429,8 @@
 
     var groups = getGroups() || [];
     groups.forEach(function (group) {
-      if (group && group.memberIds && group.memberIds.indexOf(characterId) !== -1) {
-        addChatMemory("group", group.id, {
+      if (group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1) {
+        upsertChatMemory("group", group.id, {
           id: "group_memory_outing_" + outing.id + "_" + group.id,
           type: "outing",
           title: (outing.companion.name || "") + "和用户去了" + outing.placeName,
@@ -5969,6 +6443,10 @@
         });
       }
     });
+
+    outing.memorySynced = true;
+    outing.memorySyncedAt = Date.now();
+    saveOutingData(outing);
   }
 
   window.AppStorage = {
@@ -6161,16 +6639,31 @@
     settleOutgoingMoneyMessage: settleOutgoingMoneyMessage,
     applyMoneyDecision: applyMoneyDecision,
     getOutingPlaces: getOutingPlaces,
+    getCustomOutingPlaces: getCustomOutingPlaces,
+    saveCustomOutingPlaces: saveCustomOutingPlaces,
+    addCustomOutingPlace: addCustomOutingPlace,
+    updateCustomOutingPlace: updateCustomOutingPlace,
+    deleteCustomOutingPlace: deleteCustomOutingPlace,
     getOutingShops: getOutingShops,
     getCurrentOuting: getCurrentOuting,
     setCurrentOuting: setCurrentOuting,
     clearCurrentOuting: clearCurrentOuting,
     startOuting: startOuting,
+    updateOuting: updateOuting,
     endOuting: endOuting,
     addOutingEvent: addOutingEvent,
+    updateOutingEvent: updateOutingEvent,
+    deleteOutingEvent: deleteOutingEvent,
     addOutingPurchase: addOutingPurchase,
+    updateOutingPurchase: updateOutingPurchase,
+    deleteOutingPurchase: deleteOutingPurchase,
     getOutingHistory: getOutingHistory,
+    deleteOutingHistoryItem: deleteOutingHistoryItem,
+    getOutingById: getOutingById,
+    getOutingCompanionMemoryContext: getOutingCompanionMemoryContext,
     syncOutingMemoryToCharacter: syncOutingMemoryToCharacter,
+    resyncOutingMemoryIfNeeded: resyncOutingMemoryIfNeeded,
+    removeSyncedOutingMemory: removeSyncedOutingMemory,
     exportAllData: exportAllData,
     importAllData: importAllData,
     clearAllData: clearAllData

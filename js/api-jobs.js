@@ -3,6 +3,7 @@
 
   var STORAGE_KEY = "myAiApp.apiJobs";
   var STALE_RUNNING_MS = 10 * 60 * 1000;
+  var STUCK_RETRY_MS = 120 * 1000;
   var MAX_STORED_JOBS = 20;
   var MAX_ERROR_JOBS = 5;
   var MAX_DONE_JOBS = 5;
@@ -390,6 +391,87 @@
     })));
   }
 
+  function getActiveJobForTarget(targetType, targetId, modes) {
+    var type = normalizeTargetType(targetType);
+    var id = String(targetId || "");
+    var modeList = Array.isArray(modes) ? modes.map(String) : (modes ? [String(modes)] : []);
+    var jobs = getJobs();
+
+    if (!id) {
+      return null;
+    }
+
+    var matched = jobs.filter(function (job) {
+      var normalized = normalizeJob(job);
+      var statusActive = normalized.status === "pending" || normalized.status === "running";
+      var modeMatched = !modeList.length || modeList.indexOf(normalized.mode) !== -1;
+
+      return statusActive
+        && normalized.targetType === type
+        && normalized.targetId === id
+        && modeMatched;
+    }).sort(function (a, b) {
+      return normalizeJob(b).updatedAt - normalizeJob(a).updatedAt;
+    });
+
+    return matched.length ? normalizeJob(matched[0]) : null;
+  }
+
+  function isJobStuck(job, stuckMs) {
+    var source = normalizeJob(job);
+    var limit = Math.max(30 * 1000, Number(stuckMs) || STUCK_RETRY_MS);
+    var pivot = Number(source.updatedAt || source.createdAt) || 0;
+
+    return Boolean(source && (source.status === "pending" || source.status === "running") && Date.now() - pivot > limit);
+  }
+
+  function abandonJobsForTarget(targetType, targetId, modes, reason) {
+    var type = normalizeTargetType(targetType);
+    var id = String(targetId || "");
+    var modeList = Array.isArray(modes) ? modes.map(String) : (modes ? [String(modes)] : []);
+    var now = Date.now();
+    var changed = false;
+
+    if (!id) {
+      return [];
+    }
+
+    var abandoned = [];
+    var jobs = getJobs().map(function (job) {
+      var normalized = normalizeJob(job);
+      var statusActive = normalized.status === "pending" || normalized.status === "running";
+      var modeMatched = !modeList.length || modeList.indexOf(normalized.mode) !== -1;
+
+      if (statusActive && normalized.targetType === type && normalized.targetId === id && modeMatched) {
+        changed = true;
+        normalized.status = "abandoned";
+        normalized.error = reason || "user-abandoned-stuck-generation";
+        normalized.updatedAt = now;
+        abandoned.push(normalized);
+      }
+
+      return normalized;
+    });
+
+    if (changed) {
+      saveJobs(jobs);
+    }
+
+    return abandoned;
+  }
+
+  function isGenerationAbandoned(generationId) {
+    var id = String(generationId || "");
+    if (!id) {
+      return false;
+    }
+
+    return getJobs().some(function (job) {
+      var normalized = normalizeJob(job);
+      return normalized.generationId === id && normalized.status === "abandoned";
+    });
+  }
+
   function isTargetRunning(targetType, targetId, modes) {
     var type = normalizeTargetType(targetType);
     var id = String(targetId || "");
@@ -433,17 +515,29 @@
 
     try {
       result = await handler(job);
-      updateJob(job.id, {
-        status: "done",
-        afterMessages: [],
-        error: ""
+      var currentJob = getJobs().find(function (item) {
+        return normalizeJob(item).id === job.id;
       });
+      currentJob = currentJob ? normalizeJob(currentJob) : null;
+      if (!currentJob || currentJob.status !== "abandoned") {
+        updateJob(job.id, {
+          status: "done",
+          afterMessages: [],
+          error: ""
+        });
+      }
       return result;
     } catch (error) {
-      updateJob(job.id, {
-        status: "error",
-        error: error && error.message ? error.message : String(error || "Unknown error")
+      var currentJobError = getJobs().find(function (item) {
+        return normalizeJob(item).id === job.id;
       });
+      currentJobError = currentJobError ? normalizeJob(currentJobError) : null;
+      if (!currentJobError || currentJobError.status !== "abandoned") {
+        updateJob(job.id, {
+          status: "error",
+          error: error && error.message ? error.message : String(error || "Unknown error")
+        });
+      }
       throw error;
     } finally {
       delete runningJobs[job.id];
@@ -693,6 +787,11 @@
   window.AppApiJobs = {
     createGenerationId: createGenerationId,
     getJobs: getJobs,
+    getActiveJobForTarget: getActiveJobForTarget,
+    isJobStuck: isJobStuck,
+    abandonJobsForTarget: abandonJobsForTarget,
+    isGenerationAbandoned: isGenerationAbandoned,
+    STUCK_RETRY_MS: STUCK_RETRY_MS,
     runJob: runJob,
     registerHandler: registerHandler,
     hasHandler: hasHandler,

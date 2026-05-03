@@ -8491,6 +8491,16 @@
 
   function buildOutingContextPrompt(outing) {
     if (!outing || outing.status !== "active") return "";
+    var memoryContext = {
+      privateChatMemoryText: "",
+      characterMemoryText: "",
+      groupMemoryText: "",
+      recentPrivateChatText: "",
+      sourceLabel: "自动"
+    };
+    if (window.AppStorage && window.AppStorage.getOutingCompanionMemoryContext) {
+      memoryContext = window.AppStorage.getOutingCompanionMemoryContext(outing, { memorySource: outing.memorySource });
+    }
     return [
       "",
       "O. 当前出行情境 outingContext",
@@ -8502,6 +8512,11 @@
       "地点：" + (outing.placeName || ""),
       "地点描述：" + (outing.placeDescription || ""),
       "已花费：¥" + Number(outing.spentTotal || 0).toFixed(2),
+      "记忆来源：" + (memoryContext.sourceLabel || "自动"),
+      "私聊记忆：" + (memoryContext.privateChatMemoryText || "暂无"),
+      "角色记忆：" + (memoryContext.characterMemoryText || "暂无"),
+      "群聊记忆：" + (memoryContext.groupMemoryText || "暂无"),
+      "最近私聊对话：" + (memoryContext.recentPrivateChatText || "暂无"),
       "最近出行事件：",
       (outing.events || []).slice(-8).map(function (event, index) {
         return (index + 1) + ". " + (event.content || "");
@@ -8542,6 +8557,10 @@
     var userMessage = trigger
       ? "当前触发事件：" + trigger + "。请生成同行对象的现场反应和环境描写。"
       : "请根据当前出行情境，生成一段自然的现场互动。";
+    userMessage += " 当前输入类型：" + (context.latestUserInputMode === "action" ? "动作" : "说话") + "。";
+    if (context.memorySource && context.memorySource.type) {
+      userMessage += " 当前记忆来源：" + (context.memorySource.type === "group" ? "指定群聊" : context.memorySource.type === "private" ? "私聊" : "自动") + "。";
+    }
 
     var messages = [
       { role: "system", content: systemPrompt },

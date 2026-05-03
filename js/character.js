@@ -2593,8 +2593,7 @@
       return;
     }
 
-    if (isPrivateJobRunning(requestCharacterId, ["regenerate", "chat", "blockReaction"])) {
-      showPrivateBusyNotice(requestCharacterId);
+    if (handleStuckPrivateJobBeforeRetry(requestCharacterId, ["regenerate", "chat", "blockReaction"])) {
       return;
     }
 
@@ -3129,6 +3128,46 @@
     }
   }
 
+  function removePrivateLoadingMessages(characterId) {
+    var history = window.AppStorage.getChatHistory(characterId) || [];
+    var next = history.filter(function (message) {
+      return !(message && (message.type === "loading" || message.status === "loading"));
+    });
+
+    if (next.length !== history.length) {
+      window.AppStorage.saveChatHistory(characterId, next);
+      schedulePrivateRender(characterId);
+    }
+  }
+
+  function handleStuckPrivateJobBeforeRetry(characterId, modes) {
+    if (!window.AppApiJobs || !window.AppApiJobs.getActiveJobForTarget) {
+      return false;
+    }
+
+    var job = window.AppApiJobs.getActiveJobForTarget("private", characterId, modes);
+    if (!job) {
+      return false;
+    }
+
+    if (!window.AppApiJobs.isJobStuck(job)) {
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast("正在生成中，请稍等。", true);
+      }
+      return true;
+    }
+
+    window.AppApiJobs.abandonJobsForTarget("private", characterId, modes, "user-retry-stuck-private-generation");
+    removePrivateLoadingMessages(characterId);
+    isSending = false;
+
+    if (window.AppExtras && window.AppExtras.showToast) {
+      window.AppExtras.showToast("上一轮卡住了，已重新生成。");
+    }
+
+    return false;
+  }
+
   function createPrivateLoadingMessage(generationId, content) {
     var now = Date.now();
     return {
@@ -3288,6 +3327,10 @@
       });
     }
 
+    if (window.AppApiJobs && window.AppApiJobs.isGenerationAbandoned && window.AppApiJobs.isGenerationAbandoned(job.generationId)) {
+      return { afterMessages: [] };
+    }
+
     replies = aiResult.replies || [];
     messages = removeLoadingMessagesByGeneration(window.AppStorage.getChatHistory(characterId), job.generationId);
     window.AppStorage.saveChatHistory(characterId, messages);
@@ -3389,8 +3432,7 @@
       return;
     }
 
-    if (isPrivateJobRunning(requestCharacterId, ["chat", "regenerate", "blockReaction"])) {
-      showPrivateBusyNotice(requestCharacterId);
+    if (handleStuckPrivateJobBeforeRetry(requestCharacterId, ["chat", "regenerate", "blockReaction"])) {
       return;
     }
 
@@ -3617,8 +3659,7 @@
     var historyForRequest;
     var generationId;
 
-    if (!character || isPrivateJobRunning(characterId, ["blockReaction"])) {
-      showPrivateBusyNotice(characterId);
+    if (!character || handleStuckPrivateJobBeforeRetry(characterId, ["blockReaction"])) {
       return;
     }
 

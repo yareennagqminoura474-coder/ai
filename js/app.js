@@ -539,6 +539,9 @@
 
   var outingStep = "home"; // home | npc-setup | character-pick | place-pick | active | history
   var outingPendingCompanion = null;
+  var outingSelectedPlaceId = "";
+  var outingPendingMemorySource = { type: "auto", groupId: "" };
+  var outingInputMode = "speech";
 
   function openOutingScreen() {
     outingStep = "home";
@@ -717,28 +720,54 @@
   function renderOutingPlacePickView() {
     var content = getElement("outingContent");
     if (!content) return;
+    outingSelectedPlaceId = outingSelectedPlaceId || "";
+    outingPendingMemorySource = outingPendingMemorySource || { type: "auto", groupId: "" };
     var places = window.AppStorage.getOutingPlaces();
+    var groups = window.AppStorage.getGroups ? window.AppStorage.getGroups() : [];
     var priceSymbols = ["", "¥", "¥¥", "¥¥¥", "¥¥¥¥"];
     var companionName = outingPendingCompanion ? outingPendingCompanion.name : "";
+    var selectedPlace = places.find(function (p) { return p.id === outingSelectedPlaceId; }) || null;
 
     var placeCards = places.map(function (place) {
       var price = priceSymbols[place.priceLevel] || "¥";
+      var activeClass = selectedPlace && selectedPlace.id === place.id ? " active" : "";
       return [
-        '<button class="outing-place-card" data-outing-place-id="' + escapeHtml(place.id) + '">',
+        '<button class="outing-place-card' + activeClass + '" data-outing-place-id="' + escapeHtml(place.id) + '">',
         '  <span class="outing-place-name">' + escapeHtml(place.name) + '</span>',
-        '  <span class="outing-place-desc">' + escapeHtml(place.description.slice(0, 40)) + '</span>',
+        '  <span class="outing-place-desc">' + escapeHtml(String(place.description || "").slice(0, 40)) + '</span>',
         '  <span class="outing-place-meta">',
-        '    <span>' + escapeHtml(place.openingHours) + '</span>',
+        '    <span>' + escapeHtml(place.openingHours || "自定义") + '</span>',
         '    <span>' + price + '</span>',
         '  </span>',
         '</button>'
       ].join("");
     }).join("");
 
+    var memorySourceHtml = "";
+    if (outingPendingCompanion && outingPendingCompanion.type === "character") {
+      memorySourceHtml = [
+        '<div class="outing-memory-source">',
+        '  <div class="outing-field-label">记忆来源</div>',
+        '  <div class="outing-memory-options">',
+        '    <button type="button" class="outing-memory-btn' + (outingPendingMemorySource.type === "auto" ? " active" : "") + '" data-memory-source="auto">自动</button>',
+        '    <button type="button" class="outing-memory-btn' + (outingPendingMemorySource.type === "private" ? " active" : "") + '" data-memory-source="private">只读私聊</button>',
+        '    <button type="button" class="outing-memory-btn' + (outingPendingMemorySource.type === "group" ? " active" : "") + '" data-memory-source="group">指定群聊</button>',
+        '  </div>',
+        outingPendingMemorySource.type === "group" ? renderOutingMemoryGroupSelect(groups, outingPendingCompanion.characterId, outingPendingMemorySource.groupId) : "",
+        '</div>'
+      ].join("");
+    }
+
     content.innerHTML = [
       '<div class="outing-back-row"><button id="outingPlaceBack">← 返回</button></div>',
       '<p class="outing-section-title">和 ' + escapeHtml(companionName) + ' 去哪里？</p>',
-      '<div class="outing-place-list">' + placeCards + '</div>'
+      memorySourceHtml,
+      '<div class="outing-place-list">' + placeCards + '</div>',
+      selectedPlace ? renderSelectedPlaceDetail(selectedPlace) : '<div class="outing-place-detail-empty">请选择一个地点以查看详情。</div>',
+      '<div class="outing-place-confirm-row">',
+      '  <button class="outing-depart-btn" id="outingPlaceStartBtn">出发</button>',
+      '  <button class="outing-secondary-btn" id="outingCustomPlaceBtn">自定义地点</button>',
+      '</div>'
     ].join("");
 
     var backBtn = getElement("outingPlaceBack");
@@ -756,18 +785,93 @@
 
     Array.prototype.forEach.call(content.querySelectorAll("[data-outing-place-id]"), function (btn) {
       btn.addEventListener("click", function () {
-        var placeId = btn.dataset.outingPlaceId;
-        doStartOuting(placeId);
+        outingSelectedPlaceId = btn.dataset.outingPlaceId;
+        renderOutingPlacePickView();
       });
     });
+
+    Array.prototype.forEach.call(content.querySelectorAll("[data-memory-source]"), function (btn) {
+      btn.addEventListener("click", function () {
+        var type = btn.dataset.memorySource;
+        outingPendingMemorySource.type = type;
+        if (type !== "group") {
+          outingPendingMemorySource.groupId = "";
+        }
+        renderOutingPlacePickView();
+      });
+    });
+
+    var groupSelect = getElement("outingMemoryGroupSelect");
+    if (groupSelect) {
+      groupSelect.addEventListener("change", function () {
+        outingPendingMemorySource.groupId = groupSelect.value;
+      });
+    }
+
+    var customBtn = getElement("outingCustomPlaceBtn");
+    if (customBtn) {
+      customBtn.addEventListener("click", function () {
+        openOutingCustomPlaceModal();
+      });
+    }
+
+    var startBtn = getElement("outingPlaceStartBtn");
+    if (startBtn) {
+      startBtn.addEventListener("click", function () {
+        if (!outingSelectedPlaceId) {
+          showToast("先选一个地方。");
+          return;
+        }
+        doStartOuting(outingSelectedPlaceId);
+      });
+    }
+  }
+
+  function renderOutingMemoryGroupSelect(groups, characterId, selectedGroupId) {
+    var relatedGroups = (groups || []).filter(function (group) {
+      return group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1;
+    });
+    if (!relatedGroups.length) {
+      return '<div class="outing-memory-hint">该角色当前没有可用群聊。</div>';
+    }
+    return [
+      '<div class="outing-field">',
+      '  <label>指定群聊</label>',
+      '  <select id="outingMemoryGroupSelect">',
+      relatedGroups.map(function (group) {
+        return '<option value="' + escapeHtml(group.id) + '"' + (String(group.id) === String(selectedGroupId) ? ' selected' : '') + '>' + escapeHtml(group.name || group.id) + '</option>';
+      }).join(""),
+      '  </select>',
+      '</div>'
+    ].join("");
+  }
+
+  function renderSelectedPlaceDetail(place) {
+    if (!place) return "";
+    var priceSymbols = ["", "¥", "¥¥", "¥¥¥", "¥¥¥¥"];
+    return [
+      '<div class="outing-place-detail">',
+      '  <h4>' + escapeHtml(place.name) + '</h4>',
+      '  <p class="outing-place-detail-desc">' + escapeHtml(place.description || "") + '</p>',
+      '  <div class="outing-place-detail-meta">',
+      '    <span>营业时间：' + escapeHtml(place.openingHours || "自定义") + '</span>',
+      '    <span>消费等级：' + escapeHtml(priceSymbols[place.priceLevel] || "¥") + '</span>',
+      '  </div>',
+      '  <div class="outing-place-detail-activities">可做的事：' + escapeHtml((place.activities || []).join("、") || "无") + '</div>',
+      '</div>'
+    ].join("");
   }
 
   function doStartOuting(placeId) {
     if (!outingPendingCompanion) return;
     var mode = outingPendingCompanion.type === "character" ? "character" : "npc";
-    var outing = window.AppStorage.startOuting(mode, outingPendingCompanion, placeId);
+    var outing = window.AppStorage.startOuting(mode, outingPendingCompanion, placeId, {
+      memorySource: outingPendingMemorySource
+    });
     outingStep = "active";
     outingPendingCompanion = null;
+    outingSelectedPlaceId = "";
+    outingPendingMemorySource = { type: "auto", groupId: "" };
     window.AppStorage.addOutingEvent({
       type: "system",
       content: "你和" + outing.companion.name + "来到了" + outing.placeName + "。"
@@ -776,93 +880,447 @@
     triggerOutingAI("到达" + outing.placeName + "，刚进入");
   }
 
-  function renderOutingActiveView(outing) {
-    var content = getElement("outingContent");
-    if (!content) return;
-    if (!outing) { renderOutingHomeView(); return; }
-
-    var places = window.AppStorage.getOutingPlaces();
-    var place = places.find(function (p) { return p.id === outing.placeId; });
-    var shops = window.AppStorage.getOutingShops();
-    var availableShops = (outing.placeShops || []).filter(function (shopId) { return shops[shopId]; });
-
-    var avatarHtml = (outing.companion && outing.companion.avatar)
-      ? '<img src="' + escapeHtml(outing.companion.avatar) + '" alt="">'
-      : escapeHtml(((outing.companion && outing.companion.name) || "?").slice(0, 1));
-
-    var activityChips = (outing.placeActivities || (place ? place.activities : [])).map(function (act) {
-      return '<button class="outing-chip" data-outing-activity="' + escapeHtml(act) + '">' + escapeHtml(act) + '</button>';
-    }).join("");
-
-    var shopChips = availableShops.map(function (shopId) {
-      var shop = shops[shopId];
-      return '<button class="outing-chip shop-chip" data-outing-shop="' + escapeHtml(shopId) + '">🏪 ' + escapeHtml(shop.name) + '</button>';
-    }).join("");
-
-    var eventsHtml = (outing.events || []).slice(-20).map(function (evt) {
-      var typeClass = "type-" + (evt.type || "action");
-      var speakerHtml = evt.type === "speech" && evt.speakerName
-        ? '<div class="outing-event-speaker">' + escapeHtml(evt.speakerName) + '</div>'
-        : "";
-      return '<div class="outing-event-bubble ' + typeClass + '">' + speakerHtml + escapeHtml(evt.content || "") + '</div>';
-    }).join("");
-
-    content.innerHTML = [
-      '<div class="outing-active-header">',
-      '  <div class="outing-active-place">' + escapeHtml(outing.placeName) + '</div>',
-      '  <div class="outing-active-meta">',
-      '    <div class="outing-active-companion">',
-      '      <span class="companion-avatar">' + avatarHtml + '</span>',
-      '      <span>' + escapeHtml((outing.companion && outing.companion.name) || "") + '</span>',
-      '    </div>',
-      '    <span>¥' + Number(outing.spentTotal || 0).toFixed(2) + '</span>',
+  function openOutingCustomPlaceModal() {
+    var sheetHtml = [
+      '<div class="outing-custom-sheet">',
+      '  <h3>添加自定义地点</h3>',
+      '  <div class="outing-field">',
+      '    <label>地点名称</label>',
+      '    <input id="outingCustomPlaceName" type="text" placeholder="例如：湖边公园">',
       '  </div>',
-      '</div>',
-      '<div id="outingEventStream" class="outing-event-stream">',
-      eventsHtml,
-      '<div id="outingLoadingIndicator" class="outing-loading hidden">',
-      '  <span class="outing-loading-dot"></span>',
-      '  <span class="outing-loading-dot"></span>',
-      '  <span class="outing-loading-dot"></span>',
-      '</div>',
-      '</div>',
-      '<div class="outing-action-section">',
-      '  <h4>活动</h4>',
-      '  <div class="outing-chips">' + activityChips + '</div>',
-      '</div>',
-      availableShops.length ? [
-        '<div class="outing-action-section">',
-        '  <h4>店铺</h4>',
-        '  <div class="outing-chips">' + shopChips + '</div>',
-        '</div>'
-      ].join("") : "",
-      '<div class="outing-end-row">',
-      '  <button class="outing-end-btn" id="outingEndBtn">结束出行</button>',
+      '  <div class="outing-field">',
+      '    <label>描述</label>',
+      '    <textarea id="outingCustomPlaceDescription" placeholder="写一点地点特点"></textarea>',
+      '  </div>',
+      '  <div class="outing-field">',
+      '    <label>消费等级</label>',
+      '    <select id="outingCustomPlacePrice">',
+      '      <option value="1">¥</option>',
+      '      <option value="2">¥¥</option>',
+      '      <option value="3">¥¥¥</option>',
+      '      <option value="4">¥¥¥¥</option>',
+      '    </select>',
+      '  </div>',
+      '  <div class="outing-field">',
+      '    <label>可做的活动（逗号分隔）</label>',
+      '    <input id="outingCustomPlaceActivities" type="text" placeholder="例如：散步, 喝咖啡">',
+      '  </div>',
+      '  <div class="outing-action-row">',
+      '    <button type="button" id="outingCustomPlaceSaveBtn" class="outing-depart-btn">保存地点</button>',
+      '    <button type="button" id="outingCustomPlaceCancelBtn" class="outing-secondary-btn">取消</button>',
+      '  </div>',
       '</div>'
     ].join("");
 
-    var endBtn = getElement("outingEndBtn");
-    if (endBtn) {
-      endBtn.addEventListener("click", function () {
-        doEndOuting();
-      });
+    showWeChatSheet(sheetHtml, function (sheet) {
+      var saveBtn = sheet.querySelector("#outingCustomPlaceSaveBtn");
+      var cancelBtn = sheet.querySelector("#outingCustomPlaceCancelBtn");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", function () {
+          var name = (sheet.querySelector("#outingCustomPlaceName") || {}).value || "";
+          var description = (sheet.querySelector("#outingCustomPlaceDescription") || {}).value || "";
+          var price = Number((sheet.querySelector("#outingCustomPlacePrice") || {}).value) || 1;
+          var activities = ((sheet.querySelector("#outingCustomPlaceActivities") || {}).value || "").split(/[,，]/).map(function (item) {
+            return item.trim();
+          }).filter(Boolean);
+          if (!name.trim()) {
+            showToast("请填写地点名称");
+            return;
+          }
+          var place = window.AppStorage.addCustomOutingPlace({
+            name: name.trim(),
+            description: description.trim(),
+            priceLevel: price,
+            activities: activities,
+            openingHours: "自定义"
+          });
+          closeWeChatSheet();
+          outingSelectedPlaceId = place.id;
+          renderOutingPlacePickView();
+        });
+      }
+      if (cancelBtn) {
+        cancelBtn.addEventListener("click", function () {
+          closeWeChatSheet();
+        });
+      }
+    });
+  }
+
+  function openOutingCustomActivityModal() {
+    var sheetHtml = [
+      '<div class="outing-custom-sheet">',
+      '  <h3>添加自定义活动</h3>',
+      '  <div class="outing-field">',
+      '    <label>动作描述</label>',
+      '    <input id="outingCustomActivityName" type="text" placeholder="例如：一起看夜景">',
+      '  </div>',
+      '  <div class="outing-action-row">',
+      '    <button type="button" id="outingCustomActivitySaveBtn" class="outing-depart-btn">添加活动</button>',
+      '    <button type="button" id="outingCustomActivityCancelBtn" class="outing-secondary-btn">取消</button>',
+      '  </div>',
+      '</div>'
+    ].join("");
+
+    showWeChatSheet(sheetHtml, function (sheet) {
+      var saveBtn = sheet.querySelector("#outingCustomActivitySaveBtn");
+      var cancelBtn = sheet.querySelector("#outingCustomActivityCancelBtn");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", function () {
+          var activity = ((sheet.querySelector("#outingCustomActivityName") || {}).value || "").trim();
+          if (!activity) {
+            showToast("请输入活动内容");
+            return;
+          }
+          doOutingActivity(activity);
+          closeWeChatSheet();
+        });
+      }
+      if (cancelBtn) {
+        cancelBtn.addEventListener("click", function () {
+          closeWeChatSheet();
+        });
+      }
+    });
+  }
+
+  function openOutingCustomPurchaseModal() {
+    var sheetHtml = [
+      '<div class="outing-custom-sheet">',
+      '  <h3>记录自定义消费</h3>',
+      '  <div class="outing-field">',
+      '    <label>消费项目</label>',
+      '    <input id="outingCustomPurchaseName" type="text" placeholder="例如：棉花糖">',
+      '  </div>',
+      '  <div class="outing-field">',
+      '    <label>价格</label>',
+      '    <input id="outingCustomPurchasePrice" type="number" min="0" step="0.01" placeholder="0.00">',
+      '  </div>',
+      '  <div class="outing-action-row">',
+      '    <button type="button" id="outingCustomPurchaseSaveBtn" class="outing-depart-btn">记录消费</button>',
+      '    <button type="button" id="outingCustomPurchaseCancelBtn" class="outing-secondary-btn">取消</button>',
+      '  </div>',
+      '</div>'
+    ].join("");
+
+    showWeChatSheet(sheetHtml, function (sheet) {
+      var saveBtn = sheet.querySelector("#outingCustomPurchaseSaveBtn");
+      var cancelBtn = sheet.querySelector("#outingCustomPurchaseCancelBtn");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", function () {
+          var itemName = ((sheet.querySelector("#outingCustomPurchaseName") || {}).value || "").trim();
+          var price = Number((sheet.querySelector("#outingCustomPurchasePrice") || {}).value) || 0;
+          if (!itemName) {
+            showToast("请输入消费项目");
+            return;
+          }
+          if (price <= 0) {
+            showToast("请输入有效价格");
+            return;
+          }
+          var outing = window.AppStorage.getCurrentOuting();
+          if (!outing) {
+            showToast("当前没有出行");
+            return;
+          }
+          window.AppStorage.addWalletLedger({
+            type: "outing",
+            direction: "expense",
+            amount: price,
+            title: "自定义消费",
+            note: outing.placeName + " - " + itemName,
+            sourceType: "outing",
+            sourceId: outing.id,
+            createdAt: Date.now()
+          });
+          window.AppStorage.addOutingPurchase({
+            itemName: itemName,
+            price: price,
+            placeId: outing.placeId,
+            placeName: outing.placeName
+          });
+          window.AppStorage.addOutingEvent({
+            type: "purchase",
+            content: "你记录了消费：" + itemName + "，花了 ¥" + price.toFixed(2) + "。"
+          });
+          closeWeChatSheet();
+          renderOutingActiveView(window.AppStorage.getCurrentOuting());
+          triggerOutingAI("记录了消费" + itemName);
+        });
+      }
+      if (cancelBtn) {
+        cancelBtn.addEventListener("click", function () {
+          closeWeChatSheet();
+        });
+      }
+    });
+  }
+
+  function doOutingUserInput() {
+    var input = getElement("outingInput");
+    if (!input) return;
+    var value = (input.value || "").trim();
+    if (!value) {
+      showToast("请输入你想说的话或动作");
+      return;
+    }
+    var outing = window.AppStorage.getCurrentOuting();
+    if (!outing) return;
+    var eventType = outingInputMode === "action" ? "action" : "speech";
+    var content = value;
+    if (eventType === "action" && !/^[\(（].*[\)）]$/.test(value)) {
+      content = "（" + value + "）";
+    }
+    var evt = window.AppStorage.addOutingEvent({
+      type: eventType,
+      content: content
+    });
+    if (evt) appendOutingEvent(evt);
+    input.value = "";
+    triggerOutingAI(content, outingInputMode);
+  }
+
+  function doEditOuting(outingId) {
+    var outing = window.AppStorage.getOutingById(outingId);
+    if (!outing) return;
+    var sheetHtml = [
+      '<div class="outing-custom-sheet">',
+      '  <h3>编辑出行</h3>',
+      '  <p>地点：' + escapeHtml(outing.placeName || "") + '</p>',
+      '  <div class="outing-action-row">',
+      '    <button type="button" id="outingDeleteBtn" class="outing-secondary-btn">删除出行</button>',
+      '    <button type="button" id="outingCloseEditBtn" class="outing-depart-btn">关闭</button>',
+      '  </div>',
+      '</div>'
+    ].join("");
+    showWeChatSheet(sheetHtml, function (sheet) {
+      var deleteBtn = sheet.querySelector("#outingDeleteBtn");
+      var closeBtn = sheet.querySelector("#outingCloseEditBtn");
+      if (deleteBtn) {
+        deleteBtn.addEventListener("click", function () {
+          window.AppStorage.deleteOutingHistoryItem(outingId);
+          window.AppStorage.removeSyncedOutingMemory(outingId);
+          closeWeChatSheet();
+          outingStep = "home";
+          renderOutingHomeView();
+          showToast("已删除该出行记录");
+        });
+      }
+      if (closeBtn) {
+        closeBtn.addEventListener("click", function () {
+          closeWeChatSheet();
+        });
+      }
+    });
+  }
+
+  function doEditOutingEvent(outingId, eventId) {
+    var outing = window.AppStorage.getOutingById(outingId);
+    if (!outing) return;
+    var evt = (outing.events || []).find(function (item) { return String(item.id) === String(eventId); });
+    if (!evt) return;
+    var sheetHtml = [
+      '<div class="outing-custom-sheet">',
+      '  <h3>编辑事件</h3>',
+      '  <div class="outing-field">',
+      '    <textarea id="outingEditEventContent">' + escapeHtml(evt.content || "") + '</textarea>',
+      '  </div>',
+      '  <div class="outing-action-row">',
+      '    <button type="button" id="outingEditEventSaveBtn" class="outing-depart-btn">保存</button>',
+      '    <button type="button" id="outingEditEventDeleteBtn" class="outing-secondary-btn">删除事件</button>',
+      '  </div>',
+      '</div>'
+    ].join("");
+    showWeChatSheet(sheetHtml, function (sheet) {
+      var saveBtn = sheet.querySelector("#outingEditEventSaveBtn");
+      var deleteBtn = sheet.querySelector("#outingEditEventDeleteBtn");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", function () {
+          var content = ((sheet.querySelector("#outingEditEventContent") || {}).value || "").trim();
+          if (!content) {
+            showToast("请输入事件内容");
+            return;
+          }
+          window.AppStorage.updateOutingEvent(outingId, eventId, { content: content });
+          closeWeChatSheet();
+          renderOutingActiveView(window.AppStorage.getOutingById(outingId));
+        });
+      }
+      if (deleteBtn) {
+        deleteBtn.addEventListener("click", function () {
+          window.AppStorage.deleteOutingEvent(outingId, eventId);
+          window.AppStorage.resyncOutingMemoryIfNeeded(outingId);
+          closeWeChatSheet();
+          renderOutingActiveView(window.AppStorage.getOutingById(outingId));
+        });
+      }
+    });
+  }
+
+  function doEditOutingPurchase(purchaseId) {
+    var outing = window.AppStorage.getCurrentOuting();
+    if (!outing) return;
+    var purchase = (outing.purchases || []).find(function (item) { return String(item.id) === String(purchaseId); });
+    if (!purchase) return;
+    var sheetHtml = [
+      '<div class="outing-custom-sheet">',
+      '  <h3>编辑消费</h3>',
+      '  <div class="outing-field">',
+      '    <label>项目</label>',
+      '    <input id="outingEditPurchaseName" type="text" value="' + escapeHtml(purchase.itemName || "") + '">',
+      '  </div>',
+      '  <div class="outing-field">',
+      '    <label>价格</label>',
+      '    <input id="outingEditPurchasePrice" type="number" min="0" step="0.01" value="' + Number(purchase.price || 0).toFixed(2) + '">',
+      '  </div>',
+      '  <div class="outing-action-row">',
+      '    <button type="button" id="outingEditPurchaseSaveBtn" class="outing-depart-btn">保存</button>',
+      '    <button type="button" id="outingEditPurchaseDeleteBtn" class="outing-secondary-btn">删除消费</button>',
+      '  </div>',
+      '</div>'
+    ].join("");
+    showWeChatSheet(sheetHtml, function (sheet) {
+      var saveBtn = sheet.querySelector("#outingEditPurchaseSaveBtn");
+      var deleteBtn = sheet.querySelector("#outingEditPurchaseDeleteBtn");
+      if (saveBtn) {
+        saveBtn.addEventListener("click", function () {
+          var itemName = ((sheet.querySelector("#outingEditPurchaseName") || {}).value || "").trim();
+          var price = Number((sheet.querySelector("#outingEditPurchasePrice") || {}).value) || 0;
+          if (!itemName) {
+            showToast("请输入消费项目");
+            return;
+          }
+          if (price <= 0) {
+            showToast("请输入有效价格");
+            return;
+          }
+          window.AppStorage.updateOutingPurchase(purchaseId, {
+            itemName: itemName,
+            price: price
+          });
+          closeWeChatSheet();
+          renderOutingActiveView(window.AppStorage.getCurrentOuting());
+        });
+      }
+      if (deleteBtn) {
+        deleteBtn.addEventListener("click", function () {
+          window.AppStorage.deleteOutingPurchase(purchaseId);
+          window.AppStorage.resyncOutingMemoryIfNeeded(outing.id);
+          closeWeChatSheet();
+          renderOutingActiveView(window.AppStorage.getCurrentOuting());
+        });
+      }
+    });
+  }
+
+  var outingAiPending = false;
+  var outingAiPendingAt = 0;
+  var outingGenerationToken = "";
+  var OUTING_STUCK_RETRY_MS = 120 * 1000;
+
+  function triggerOutingAI(trigger, inputMode) {
+    if (outingAiPending) {
+      if (Date.now() - outingAiPendingAt < OUTING_STUCK_RETRY_MS) {
+        showToast("正在生成中，请稍等。");
+        return;
+      }
+      outingAiPending = false;
+      outingGenerationToken = "";
+      setOutingLoading(false);
+      showToast("上一轮卡住了，已重新生成。");
     }
 
-    Array.prototype.forEach.call(content.querySelectorAll("[data-outing-activity]"), function (btn) {
-      btn.addEventListener("click", function () {
-        var act = btn.dataset.outingActivity;
-        doOutingActivity(act);
-      });
-    });
+    var outing = window.AppStorage.getCurrentOuting();
+    if (!outing) return;
 
-    Array.prototype.forEach.call(content.querySelectorAll("[data-outing-shop]"), function (btn) {
-      btn.addEventListener("click", function () {
-        var shopId = btn.dataset.outingShop;
-        renderOutingShopModal(shopId);
-      });
-    });
+    outingAiPending = true;
+    outingAiPendingAt = Date.now();
+    setOutingLoading(true);
 
-    scrollOutingStreamToBottom();
+    if (!window.AIService || !window.AIService.sendOutingRequest) {
+      outingAiPending = false;
+      setOutingLoading(false);
+      return;
+    }
+
+    var memoryContext = window.AppStorage.getOutingCompanionMemoryContext
+      ? window.AppStorage.getOutingCompanionMemoryContext(outing, {
+          memorySource: outing.memorySource || { type: "auto", groupId: "" }
+        })
+      : {};
+
+    var token = "outing_" + Date.now() + "_" + Math.random().toString(36).slice(2);
+    outingGenerationToken = token;
+
+    var context = {
+      outing: outing,
+      trigger: trigger,
+      latestUserInput: trigger,
+      latestUserInputMode: inputMode || outingInputMode,
+      memorySource: outing.memorySource || { type: "auto", groupId: "" },
+      memoryContext: memoryContext
+    };
+
+    window.AIService.sendOutingRequest(context).then(function (result) {
+      if (token !== outingGenerationToken) {
+        return;
+      }
+
+      if (!result) {
+        return;
+      }
+
+      var currentOuting = window.AppStorage.getCurrentOuting();
+      if (!currentOuting) {
+        return;
+      }
+
+      var eventsToAdd = Array.isArray(result.events) ? result.events : [];
+      eventsToAdd.forEach(function (evt) {
+        if (!evt || !evt.content) {
+          return;
+        }
+
+        window.AppStorage.addOutingEvent({
+          type: evt.type || "action",
+          speakerId: evt.speakerId || "",
+          speakerName: evt.speakerName || "",
+          content: evt.content || ""
+        });
+      });
+
+      if (Array.isArray(result.memories) && result.memories.length) {
+        currentOuting = window.AppStorage.getCurrentOuting();
+        if (currentOuting) {
+          currentOuting.aiMemories = Array.isArray(currentOuting.aiMemories) ? currentOuting.aiMemories : [];
+          result.memories.forEach(function (mem) {
+            if (!mem || !mem.content) {
+              return;
+            }
+
+            currentOuting.aiMemories.push({
+              characterId: mem.characterId || (currentOuting.companion && currentOuting.companion.characterId) || "",
+              content: String(mem.content || ""),
+              createdAt: Date.now()
+            });
+          });
+          window.AppStorage.setCurrentOuting(currentOuting);
+        }
+      }
+
+      renderOutingActiveView(window.AppStorage.getCurrentOuting());
+    }).catch(function (err) {
+      if (token !== outingGenerationToken) {
+        return;
+      }
+      showToast(err && err.message ? String(err.message) : "出行 AI 生成失败，请重试。", true);
+    }).finally(function () {
+      if (token === outingGenerationToken) {
+        outingAiPending = false;
+        outingAiPendingAt = 0;
+        setOutingLoading(false);
+      }
+    });
   }
 
   function scrollOutingStreamToBottom() {
@@ -1027,67 +1485,6 @@
     }
 
     triggerOutingAI("买了" + item.name);
-  }
-
-  var outingAiPending = false;
-
-  function triggerOutingAI(trigger) {
-    if (outingAiPending) return;
-    var outing = window.AppStorage.getCurrentOuting();
-    if (!outing) return;
-
-    outingAiPending = true;
-    setOutingLoading(true);
-
-    if (!window.AIService || !window.AIService.sendOutingRequest) {
-      outingAiPending = false;
-      setOutingLoading(false);
-      return;
-    }
-
-    var context = {
-      outing: outing,
-      trigger: trigger
-    };
-
-    window.AIService.sendOutingRequest(context).then(function (result) {
-      outingAiPending = false;
-      setOutingLoading(false);
-      if (!result) return;
-
-      var currentOuting = window.AppStorage.getCurrentOuting();
-      if (!currentOuting) return;
-
-      var eventsToAdd = Array.isArray(result.events) ? result.events : [];
-      eventsToAdd.forEach(function (evt) {
-        var stored = window.AppStorage.addOutingEvent({
-          type: evt.type || "action",
-          speakerId: evt.speakerId || "",
-          speakerName: evt.speakerName || "",
-          content: evt.content || ""
-        });
-        if (stored) appendOutingEvent(stored);
-      });
-
-      if (result.memories && Array.isArray(result.memories) && result.memories.length) {
-        var latestOuting = window.AppStorage.getCurrentOuting();
-        if (latestOuting) {
-          latestOuting.aiMemories = Array.isArray(latestOuting.aiMemories) ? latestOuting.aiMemories : [];
-          result.memories.forEach(function (mem) {
-            if (!mem || !mem.content) return;
-            latestOuting.aiMemories.push({
-              characterId: mem.characterId || (latestOuting.companion && latestOuting.companion.characterId) || "",
-              content: String(mem.content),
-              createdAt: Date.now()
-            });
-          });
-          window.AppStorage.setCurrentOuting(latestOuting);
-        }
-      }
-    }).catch(function () {
-      outingAiPending = false;
-      setOutingLoading(false);
-    });
   }
 
   function doEndOuting() {

@@ -369,12 +369,14 @@
       return;
     }
 
-    if (isApiJobRunning("offline", session.id, ["offline", "chat", "regenerate"])) {
-      if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("正在生成中，请稍等。", true);
-      }
+    if (handleStuckApiJobBeforeRetry("offline", session.id, ["offline", "chat", "regenerate"])) {
       return;
     }
+
+    session.history = (session.history || []).filter(function (event) {
+      return !event || event.type !== "loading";
+    });
+    window.AppStorage.saveOfflineSession(session);
 
     isAdvancing = true;
     setAdvanceState(true);
@@ -491,6 +493,11 @@
       previousReplyText: generationContext.previousReplyText,
       rejectedReplyText: generationContext.rejectedReplyText
     });
+
+    if (window.AppApiJobs && window.AppApiJobs.isGenerationAbandoned && window.AppApiJobs.isGenerationAbandoned(job.generationId)) {
+      return { afterMessages: [] };
+    }
+
     events = normalizeOfflineEventsForDisplay(Array.isArray(aiResult) ? aiResult : (aiResult && aiResult.events || []));
     session = window.AppStorage.getOfflineSession(job.targetId);
     session.history = removeLoadingEventsByGeneration(session.history, job.generationId);
@@ -700,6 +707,62 @@
     return Boolean(window.AppApiJobs
       && window.AppApiJobs.isTargetRunning
       && window.AppApiJobs.isTargetRunning(targetType, targetId, modes));
+  }
+
+  function removeOfflineLoadingMessages(targetType, targetId) {
+    var history = [];
+    if (targetType === "offline") {
+      var session = window.AppStorage.getOfflineSession(targetId);
+      history = session ? session.history : [];
+    } else if (targetType === "private") {
+      history = window.AppStorage.getChatHistory(targetId) || [];
+    } else if (targetType === "group") {
+      history = window.AppStorage.getGroupChatHistory(targetId) || [];
+    }
+
+    var next = removeLoadingEventsByGeneration(history, "");
+    next = next.filter(function (event) {
+      return event && event.type !== "loading";
+    });
+
+    if (targetType === "offline") {
+      var session = window.AppStorage.getOfflineSession(targetId);
+      if (session) {
+        session.history = next;
+        window.AppStorage.saveOfflineSession(session);
+      }
+    } else if (targetType === "private") {
+      window.AppStorage.saveChatHistory(targetId, next);
+    } else if (targetType === "group") {
+      window.AppStorage.saveGroupChatHistory(targetId, next);
+    }
+  }
+
+  function handleStuckApiJobBeforeRetry(targetType, targetId, modes) {
+    if (!window.AppApiJobs || !window.AppApiJobs.getActiveJobForTarget) {
+      return false;
+    }
+
+    var job = window.AppApiJobs.getActiveJobForTarget(targetType, targetId, modes);
+    if (!job) {
+      return false;
+    }
+
+    if (!window.AppApiJobs.isJobStuck(job)) {
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast("正在生成中，请稍等。", true);
+      }
+      return true;
+    }
+
+    window.AppApiJobs.abandonJobsForTarget(targetType, targetId, modes, "user-retry-stuck-offline-generation");
+    removeOfflineLoadingMessages(targetType, targetId);
+
+    if (window.AppExtras && window.AppExtras.showToast) {
+      window.AppExtras.showToast("上一轮卡住了，已重新生成。");
+    }
+
+    return false;
   }
 
   function hasGeneratedOutput(targetType, targetId, generationId) {
@@ -1110,14 +1173,13 @@
       return false;
     }
 
-    if (isApiJobRunning(mode, targetId, ["inlineOffline", "regenerate"])) {
-      if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("正在生成中，请稍等。", true);
-      }
+    if (handleStuckApiJobBeforeRetry(mode, targetId, ["inlineOffline", "regenerate"])) {
       return true;
     }
 
-    messages = getInlineHistory(mode, targetId);
+    messages = getInlineHistory(mode, targetId).filter(function (event) {
+      return !event || event.type !== "loading";
+    });
     messageId = source.messageId || findLatestInlineRegenerateMessageId(mode, targetId);
     index = messages.findIndex(function (message) {
       return message && message.id === messageId && isInlineUserEvent(message);
@@ -1204,18 +1266,19 @@
       return;
     }
 
-    if (isApiJobRunning("private", character.id, ["inlineOffline"])) {
-      if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("正在生成中，请稍等。", true);
-      }
+    if (handleStuckApiJobBeforeRetry("private", character.id, ["inlineOffline"])) {
       return;
     }
+
+    messages = (window.AppStorage.getChatHistory(character.id) || []).filter(function (event) {
+      return !event || event.type !== "loading";
+    });
+    window.AppStorage.saveChatHistory(character.id, messages);
 
     isAdvancing = true;
     setInlineAdvanceState("private", true);
     now = Date.now();
     generationId = createGenerationId();
-    messages = window.AppStorage.getChatHistory(character.id);
     historyForRequest = messages.slice();
     messages.push(createInlineLoadingMessage(now, "正在输入中", generationId));
     window.AppStorage.saveChatHistory(character.id, messages);
@@ -1263,18 +1326,19 @@
       return;
     }
 
-    if (isApiJobRunning("group", group.id, ["inlineOffline"])) {
-      if (window.AppExtras && window.AppExtras.showToast) {
-        window.AppExtras.showToast("正在生成中，请稍等。", true);
-      }
+    if (handleStuckApiJobBeforeRetry("group", group.id, ["inlineOffline"])) {
       return;
     }
+
+    messages = (window.AppStorage.getGroupChatHistory(group.id) || []).filter(function (event) {
+      return !event || event.type !== "loading";
+    });
+    window.AppStorage.saveGroupChatHistory(group.id, messages);
 
     isAdvancing = true;
     setInlineAdvanceState("group", true);
     now = Date.now();
     generationId = createGenerationId();
-    messages = window.AppStorage.getGroupChatHistory(group.id);
     historyForRequest = messages.slice();
     messages.push(createInlineLoadingMessage(now, "正在输入中", generationId));
     window.AppStorage.saveGroupChatHistory(group.id, messages);
@@ -1366,6 +1430,11 @@
       previousReplyText: generationContext.previousReplyText,
       rejectedReplyText: generationContext.rejectedReplyText
     });
+
+    if (window.AppApiJobs && window.AppApiJobs.isGenerationAbandoned && window.AppApiJobs.isGenerationAbandoned(job.generationId)) {
+      return { afterMessages: [] };
+    }
+
     messages = removeLoadingEventsByGeneration(window.AppStorage.getChatHistory(character.id), job.generationId);
     window.AppStorage.saveChatHistory(character.id, messages);
     scheduleInlineRender("private", character.id);
@@ -1460,6 +1529,11 @@
       previousReplyText: generationContext.previousReplyText,
       rejectedReplyText: generationContext.rejectedReplyText
     });
+
+    if (window.AppApiJobs && window.AppApiJobs.isGenerationAbandoned && window.AppApiJobs.isGenerationAbandoned(job.generationId)) {
+      return { afterMessages: [] };
+    }
+
     messages = removeLoadingEventsByGeneration(window.AppStorage.getGroupChatHistory(group.id), job.generationId);
     window.AppStorage.saveGroupChatHistory(group.id, messages);
     scheduleInlineRender("group", group.id);
