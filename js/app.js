@@ -542,34 +542,83 @@
   var outingSelectedPlaceId = "";
   var outingPendingMemorySource = { type: "auto", groupId: "" };
   var outingInputMode = "speech";
+  var outingDraft = { companion: null, selectedPlaceId: "", memorySource: { type: "auto", groupId: "" } };
 
-  // 草稿对象：集中管理选择中途的状态，防止散变量丢失
-  var outingDraft = {
-    companion: null,
-    selectedPlaceId: "",
-    memorySource: { type: "auto", groupId: "" }
-  };
+  /* ---- 持久化草稿 ---- */
+  var OUTING_DRAFT_KEY = "myAiApp.outingDraft";
 
-  function syncOutingDraftFromLegacy() {
-    outingDraft = outingDraft || {};
-    if (outingPendingCompanion) outingDraft.companion = outingPendingCompanion;
-    if (outingSelectedPlaceId) outingDraft.selectedPlaceId = String(outingSelectedPlaceId);
-    if (outingPendingMemorySource) outingDraft.memorySource = outingPendingMemorySource;
+  function createEmptyOutingDraft() {
+    return { step: "home", companion: null, selectedPlaceId: "", memorySource: { type: "auto", groupId: "" }, updatedAt: Date.now() };
   }
 
-  function syncLegacyFromOutingDraft() {
-    outingPendingCompanion = (outingDraft && outingDraft.companion) || null;
-    outingSelectedPlaceId = String((outingDraft && outingDraft.selectedPlaceId) || "");
-    outingPendingMemorySource = (outingDraft && outingDraft.memorySource) || { type: "auto", groupId: "" };
+  function readOutingDraft() {
+    var raw, parsed, fb = createEmptyOutingDraft();
+    try {
+      raw = sessionStorage.getItem(OUTING_DRAFT_KEY) || localStorage.getItem(OUTING_DRAFT_KEY);
+      if (!raw) return fb;
+      parsed = JSON.parse(raw);
+    } catch (e) { return fb; }
+    if (!parsed || typeof parsed !== "object") return fb;
+    parsed.step = parsed.step || "home";
+    parsed.companion = parsed.companion || null;
+    parsed.selectedPlaceId = String(parsed.selectedPlaceId || "");
+    parsed.memorySource = parsed.memorySource || { type: "auto", groupId: "" };
+    parsed.memorySource.type = parsed.memorySource.type || "auto";
+    parsed.memorySource.groupId = String(parsed.memorySource.groupId || "");
+    parsed.updatedAt = Number(parsed.updatedAt) || Date.now();
+    return parsed;
   }
+
+  function saveOutingDraft(draft) {
+    var next = Object.assign(createEmptyOutingDraft(), draft || {}, { updatedAt: Date.now() });
+    next.selectedPlaceId = String(next.selectedPlaceId || "");
+    next.memorySource = next.memorySource || { type: "auto", groupId: "" };
+    try { sessionStorage.setItem(OUTING_DRAFT_KEY, JSON.stringify(next)); } catch (e) {}
+    try { localStorage.setItem(OUTING_DRAFT_KEY, JSON.stringify(next)); } catch (e) {}
+    return next;
+  }
+
+  function patchOutingDraft(patch) {
+    return saveOutingDraft(Object.assign({}, readOutingDraft(), patch || {}));
+  }
+
+  function clearOutingDraft() {
+    try { sessionStorage.removeItem(OUTING_DRAFT_KEY); } catch (e) {}
+    try { localStorage.removeItem(OUTING_DRAFT_KEY); } catch (e) {}
+    return createEmptyOutingDraft();
+  }
+
+  /* ---- 兼容旧调用 + 同步散变量 ---- */
+  function syncLegacyFromStoredOutingDraft() {
+    var draft = readOutingDraft();
+    outingPendingCompanion = draft.companion || null;
+    outingSelectedPlaceId = String(draft.selectedPlaceId || "");
+    outingPendingMemorySource = draft.memorySource || { type: "auto", groupId: "" };
+    outingDraft = { companion: outingPendingCompanion, selectedPlaceId: outingSelectedPlaceId, memorySource: outingPendingMemorySource };
+    return draft;
+  }
+
+  function saveCurrentOutingDraftToStorage(patch) {
+    var next = patchOutingDraft(Object.assign({
+      step: outingStep || "home",
+      companion: outingPendingCompanion || null,
+      selectedPlaceId: String(outingSelectedPlaceId || ""),
+      memorySource: outingPendingMemorySource || { type: "auto", groupId: "" }
+    }, patch || {}));
+    syncLegacyFromStoredOutingDraft();
+    return next;
+  }
+
+  // 保留旧函数名，内部改为走持久化
+  function syncOutingDraftFromLegacy() { return saveCurrentOutingDraftToStorage(); }
+  function syncLegacyFromOutingDraft() { return syncLegacyFromStoredOutingDraft(); }
 
   function resetOutingDraftState() {
-    outingDraft = {
-      companion: null,
-      selectedPlaceId: "",
-      memorySource: { type: "auto", groupId: "" }
-    };
-    syncLegacyFromOutingDraft();
+    clearOutingDraft();
+    outingDraft = { companion: null, selectedPlaceId: "", memorySource: { type: "auto", groupId: "" } };
+    outingPendingCompanion = null;
+    outingSelectedPlaceId = "";
+    outingPendingMemorySource = { type: "auto", groupId: "" };
   }
 
   function debugOutingDraft(label) {
@@ -577,10 +626,9 @@
       if (!localStorage.getItem("myAiApp.debugOuting")) return;
       console.debug("[OutingDraftDebug]", label, {
         step: outingStep,
-        draft: JSON.parse(JSON.stringify(outingDraft)),
+        storedDraft: readOutingDraft(),
         legacyCompanion: outingPendingCompanion,
-        legacyPlaceId: outingSelectedPlaceId,
-        legacyMemorySource: outingPendingMemorySource
+        legacyPlaceId: outingSelectedPlaceId
       });
     } catch (e) {}
   }
@@ -593,30 +641,42 @@
       renderOutingActiveView(outing);
       return;
     }
-    // 只有从首页入口打开时，回到首页并清草稿
-    outingStep = "home";
+    // 从首页入口打开：清草稿，回首页
     resetOutingDraftState();
+    outingStep = "home";
     setActivePage("outingScreen");
     renderOutingHomeView();
   }
 
   function renderOutingScreen() {
     var outing = window.AppStorage.getCurrentOuting();
+    var draft = readOutingDraft();
     if (outing && outing.status === "active") {
       outingStep = "active";
       renderOutingActiveView(outing);
-    } else if (outingStep === "history") {
-      renderOutingHistoryView();
-    } else if (outingStep === "place-pick" && outingPendingCompanion) {
-      renderOutingPlacePickView();
-    } else if (outingStep === "character-pick") {
-      renderOutingCharacterPickView();
-    } else if (outingStep === "npc-setup") {
-      renderOutingNpcSetupView();
-    } else {
-      outingStep = "home";
-      renderOutingHomeView();
+      return;
     }
+    if (outingStep === "history") {
+      renderOutingHistoryView();
+      return;
+    }
+    // 允许用持久化 draft 恢复地点选择流程
+    if ((outingStep === "place-pick" || draft.step === "place-pick") && draft.companion) {
+      outingStep = "place-pick";
+      syncLegacyFromStoredOutingDraft();
+      renderOutingPlacePickView();
+      return;
+    }
+    if (outingStep === "character-pick") {
+      renderOutingCharacterPickView();
+      return;
+    }
+    if (outingStep === "npc-setup") {
+      renderOutingNpcSetupView();
+      return;
+    }
+    outingStep = "home";
+    renderOutingHomeView();
   }
 
   function renderOutingHomeView() {
@@ -698,18 +758,14 @@
         var name = (getElement("outingNpcName") && getElement("outingNpcName").value.trim()) || "路人朋友";
         var type = (getElement("outingNpcType") && getElement("outingNpcType").value) || "普通朋友";
         var persona = (getElement("outingNpcPersona") && getElement("outingNpcPersona").value.trim()) || "";
-        outingDraft.companion = {
-          type: "npc",
-          id: "npc_" + Date.now(),
-          name: name,
-          npcType: type,
-          persona: persona
-        };
-        outingDraft.selectedPlaceId = "";
-        outingDraft.memorySource = { type: "auto", groupId: "" };
-        syncLegacyFromOutingDraft();
-        debugOutingDraft("npc-selected");
+        var companion = { type: "npc", id: "npc_" + Date.now(), name: name, npcType: type, persona: persona };
         outingStep = "place-pick";
+        outingPendingCompanion = companion;
+        outingSelectedPlaceId = "";
+        outingPendingMemorySource = { type: "auto", groupId: "" };
+        saveOutingDraft({ step: "place-pick", companion: companion, selectedPlaceId: "", memorySource: { type: "auto", groupId: "" } });
+        syncLegacyFromStoredOutingDraft();
+        debugOutingDraft("npc-selected");
         renderOutingPlacePickView();
       });
     }
@@ -757,7 +813,7 @@
         var charId = btn.dataset.outingCharId;
         var character = characters.find(function (c) { return String(c.id) === String(charId); });
         if (!character) return;
-        outingDraft.companion = {
+        var companion = {
           type: "character",
           id: character.id,
           name: character.name,
@@ -765,11 +821,13 @@
           persona: character.personality || character.persona || "",
           characterId: character.id
         };
-        outingDraft.selectedPlaceId = "";
-        outingDraft.memorySource = { type: "auto", groupId: "" };
-        syncLegacyFromOutingDraft();
-        debugOutingDraft("character-selected");
         outingStep = "place-pick";
+        outingPendingCompanion = companion;
+        outingSelectedPlaceId = "";
+        outingPendingMemorySource = { type: "auto", groupId: "" };
+        saveOutingDraft({ step: "place-pick", companion: companion, selectedPlaceId: "", memorySource: { type: "auto", groupId: "" } });
+        syncLegacyFromStoredOutingDraft();
+        debugOutingDraft("character-selected");
         renderOutingPlacePickView();
       });
     });
@@ -786,26 +844,24 @@
     var content = getElement("outingContent");
     if (!content) return;
 
-    // 优先从 draft 恢复状态，散变量作为兜底
-    syncOutingDraftFromLegacy();
-    var companion = (outingDraft && outingDraft.companion) || outingPendingCompanion || null;
-    var selectedPlaceId = String((outingDraft && outingDraft.selectedPlaceId) || outingSelectedPlaceId || "");
-    var memorySource = (outingDraft && outingDraft.memorySource) || outingPendingMemorySource || { type: "auto", groupId: "" };
+    // 从持久化草稿读取，散变量作备用
+    var draft = readOutingDraft();
+    var companion = draft.companion || outingPendingCompanion || null;
+    var selectedPlaceId = String(draft.selectedPlaceId || outingSelectedPlaceId || "");
+    var memorySource = draft.memorySource || outingPendingMemorySource || { type: "auto", groupId: "" };
 
-    // companion 丢失时兜底跳首页
+    // companion 丢失：静默回首页，不弹 toast（toast 只在出发时弹）
     if (!companion) {
-      showToast("出行对象丢失，请重新选择。");
       outingStep = "home";
       resetOutingDraftState();
       renderOutingHomeView();
       return;
     }
 
-    // 确保散变量和 draft 同步
-    outingDraft.companion = companion;
-    outingDraft.selectedPlaceId = selectedPlaceId;
-    outingDraft.memorySource = memorySource;
-    syncLegacyFromOutingDraft();
+    // 同步散变量，确保 doStartOuting 读到最新值
+    outingPendingCompanion = companion;
+    outingSelectedPlaceId = selectedPlaceId;
+    outingPendingMemorySource = memorySource;
 
     var places = window.AppStorage.getOutingPlaces();
     var groups = window.AppStorage.getGroups ? window.AppStorage.getGroups() : [];
@@ -864,9 +920,9 @@
     var backBtn = getElement("outingPlaceBack");
     if (backBtn) {
       backBtn.addEventListener("click", function () {
-        syncOutingDraftFromLegacy();
-        var currentCompanion = outingDraft.companion || outingPendingCompanion;
-        if (currentCompanion && currentCompanion.type === "npc") {
+        var d = readOutingDraft();
+        var c = d.companion || outingPendingCompanion;
+        if (c && c.type === "npc") {
           outingStep = "npc-setup";
           renderOutingNpcSetupView();
         } else {
@@ -878,9 +934,10 @@
 
     Array.prototype.forEach.call(content.querySelectorAll("[data-outing-place-id]"), function (btn) {
       btn.addEventListener("click", function () {
-        syncOutingDraftFromLegacy();
-        outingDraft.selectedPlaceId = String(btn.dataset.outingPlaceId || "");
-        syncLegacyFromOutingDraft();
+        var d = readOutingDraft();
+        var pid = String(btn.dataset.outingPlaceId || "");
+        saveOutingDraft(Object.assign({}, d, { step: "place-pick", selectedPlaceId: pid }));
+        syncLegacyFromStoredOutingDraft();
         debugOutingDraft("place-clicked");
         renderOutingPlacePickView();
       });
@@ -888,14 +945,12 @@
 
     Array.prototype.forEach.call(content.querySelectorAll("[data-memory-source]"), function (btn) {
       btn.addEventListener("click", function () {
-        syncOutingDraftFromLegacy();
-        var type = btn.dataset.memorySource;
-        outingDraft.memorySource = outingDraft.memorySource || { type: "auto", groupId: "" };
-        outingDraft.memorySource.type = type;
-        if (type !== "group") {
-          outingDraft.memorySource.groupId = "";
-        }
-        syncLegacyFromOutingDraft();
+        var d = readOutingDraft();
+        var ms = Object.assign({}, d.memorySource || { type: "auto", groupId: "" });
+        ms.type = btn.dataset.memorySource;
+        if (ms.type !== "group") ms.groupId = "";
+        saveOutingDraft(Object.assign({}, d, { step: "place-pick", memorySource: ms }));
+        syncLegacyFromStoredOutingDraft();
         debugOutingDraft("memory-source-changed");
         renderOutingPlacePickView();
       });
@@ -904,30 +959,28 @@
     var groupSelect = getElement("outingMemoryGroupSelect");
     if (groupSelect) {
       groupSelect.addEventListener("change", function () {
-        syncOutingDraftFromLegacy();
-        outingDraft.memorySource = outingDraft.memorySource || { type: "auto", groupId: "" };
-        outingDraft.memorySource.groupId = groupSelect.value;
-        syncLegacyFromOutingDraft();
+        var d = readOutingDraft();
+        var ms = Object.assign({}, d.memorySource || { type: "group", groupId: "" });
+        ms.type = "group";
+        ms.groupId = groupSelect.value;
+        saveOutingDraft(Object.assign({}, d, { step: "place-pick", memorySource: ms }));
+        syncLegacyFromStoredOutingDraft();
+        debugOutingDraft("memory-group-changed");
       });
     }
 
     var startBtn = getElement("outingPlaceStartBtn");
     if (startBtn) {
       startBtn.addEventListener("click", function () {
-        syncOutingDraftFromLegacy();
-        debugOutingDraft("depart-clicked");
-
-        var finalCompanion = (outingDraft && outingDraft.companion) || outingPendingCompanion || null;
-        var finalPlaceId = String((outingDraft && outingDraft.selectedPlaceId) || outingSelectedPlaceId || "");
-
-        // 兜底：从 DOM 激活卡片取 placeId
+        var d = readOutingDraft();
+        var finalCompanion = d.companion || outingPendingCompanion || null;
+        var finalPlaceId = String(d.selectedPlaceId || outingSelectedPlaceId || "");
+        // 兜底：从 DOM 激活卡片取
         if (!finalPlaceId) {
           var activeCard = content.querySelector(".outing-place-card.active");
-          if (activeCard) {
-            finalPlaceId = String(activeCard.dataset.outingPlaceId || "");
-          }
+          if (activeCard) finalPlaceId = String(activeCard.dataset.outingPlaceId || "");
         }
-
+        debugOutingDraft("depart-clicked");
         if (!finalCompanion) {
           showToast("出行对象丢失，请重新选择同行对象。");
           outingStep = "home";
@@ -935,17 +988,12 @@
           renderOutingHomeView();
           return;
         }
-
         if (!finalPlaceId) {
           showToast("先选一个地方。");
           return;
         }
-
-        outingDraft.companion = finalCompanion;
-        outingDraft.selectedPlaceId = finalPlaceId;
-        outingDraft.memorySource = outingDraft.memorySource || outingPendingMemorySource || { type: "auto", groupId: "" };
-        syncLegacyFromOutingDraft();
-
+        saveOutingDraft(Object.assign({}, d, { step: "place-pick", companion: finalCompanion, selectedPlaceId: finalPlaceId }));
+        syncLegacyFromStoredOutingDraft();
         doStartOuting(finalPlaceId);
       });
     }
@@ -994,12 +1042,12 @@
   }
 
   function doStartOuting(placeId) {
-    syncOutingDraftFromLegacy();
+    var draft = readOutingDraft();
     debugOutingDraft("doStartOuting-enter");
 
-    var companion = (outingDraft && outingDraft.companion) || outingPendingCompanion || null;
-    var finalPlaceId = String(placeId || (outingDraft && outingDraft.selectedPlaceId) || outingSelectedPlaceId || "");
-    var memorySource = (outingDraft && outingDraft.memorySource) || outingPendingMemorySource || { type: "auto", groupId: "" };
+    var companion = draft.companion || outingPendingCompanion || null;
+    var finalPlaceId = String(placeId || draft.selectedPlaceId || outingSelectedPlaceId || "");
+    var memorySource = draft.memorySource || outingPendingMemorySource || { type: "auto", groupId: "" };
 
     if (!companion) {
       showToast("出行对象丢失，请重新选择同行对象。");
@@ -1015,9 +1063,7 @@
     }
 
     var mode = companion.type === "character" ? "character" : "npc";
-    var outing = window.AppStorage.startOuting(mode, companion, finalPlaceId, {
-      memorySource: memorySource
-    });
+    var outing = window.AppStorage.startOuting(mode, companion, finalPlaceId, { memorySource: memorySource });
 
     if (!outing) {
       showToast("出发失败，请重新选择地点。");
@@ -1025,6 +1071,7 @@
     }
 
     outingStep = "active";
+    clearOutingDraft();
     resetOutingDraftState();
 
     window.AppStorage.addOutingEvent({
@@ -1089,10 +1136,10 @@
             activities: activities,
             openingHours: "自定义"
           });
+          var d = readOutingDraft();
+          saveOutingDraft(Object.assign({}, d, { step: "place-pick", selectedPlaceId: String(place.id) }));
+          syncLegacyFromStoredOutingDraft();
           closeWeChatSheet();
-          syncOutingDraftFromLegacy();
-          outingDraft.selectedPlaceId = String(place.id);
-          syncLegacyFromOutingDraft();
           debugOutingDraft("custom-place-saved");
           renderOutingPlacePickView();
         });
@@ -1718,6 +1765,13 @@
     var backBtn = getElement("outingHistoryBack");
     if (backBtn) {
       backBtn.addEventListener("click", function () {
+        var d = readOutingDraft();
+        if (d && d.step === "place-pick" && d.companion) {
+          outingStep = "place-pick";
+          syncLegacyFromStoredOutingDraft();
+          renderOutingPlacePickView();
+          return;
+        }
         outingStep = "home";
         renderOutingHomeView();
       });
