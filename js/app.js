@@ -1639,7 +1639,8 @@
             itemName: itemName,
             price: price,
             placeId: outing.placeId,
-            placeName: outing.placeName
+            placeName: outing.placeName,
+            paidBy: "user"
           });
           window.AppStorage.addOutingEvent({
             type: "purchase",
@@ -2072,7 +2073,8 @@
       shopName: shop.name,
       price: item.price,
       placeId: outing.placeId,
-      placeName: outing.placeName
+      placeName: outing.placeName,
+      paidBy: "user"
     });
 
     var buyEvt = window.AppStorage.addOutingEvent({
@@ -8005,6 +8007,7 @@
       renderBillFilterButton("all", "全部"),
       renderBillFilterButton("income", "收入"),
       renderBillFilterButton("expense", "支出"),
+      renderBillFilterButton("neutral", "中性"),
       '  <button type="button" class="bill-clear-button" data-bill-action="clear">清空账单</button>',
       '  <button type="button" class="bill-dedupe-button" data-bill-action="dedupe">修复重复账单</button>',
       "</section>",
@@ -8142,12 +8145,14 @@
 
   function renderLedgerRecord(record) {
     var income = record.direction === "income";
+    var neutral = record.direction === "neutral";
     var sourceName = getLedgerSourceName(record);
+    var amountPrefix = income ? "+" : neutral ? "" : "-";
     return [
-      '<article class="bill-record ' + (income ? "income" : "expense") + '" data-ledger-id="' + escapeHtml(record.id) + '">',
+      '<article class="bill-record ' + (income ? "income" : neutral ? "neutral" : "expense") + '" data-ledger-id="' + escapeHtml(record.id) + '">',
       '  <span class="bill-icon">' + escapeHtml(getLedgerTypeIcon(record.type)) + "</span>",
       '  <div class="bill-main"><strong>' + escapeHtml(getLedgerTypeName(record.type)) + "</strong><em>" + escapeHtml(sourceName) + (record.note ? " · " + escapeHtml(record.note) : "") + "</em><small>" + escapeHtml(formatDateTime(record.createdAt)) + "</small></div>",
-      '  <b>' + (income ? "+" : "-") + "¥" + escapeHtml(formatMoney(record.amount)) + "</b>",
+      '  <b>' + amountPrefix + "¥" + escapeHtml(formatMoney(record.amount)) + "</b>",
       '  <div class="bill-actions">',
       '    <button type="button" class="bill-edit-btn" data-ledger-action="edit" data-ledger-id="' + escapeHtml(record.id) + '">编辑</button>',
       '    <button type="button" class="bill-delete-btn" data-ledger-action="delete" data-ledger-id="' + escapeHtml(record.id) + '">删除</button>',

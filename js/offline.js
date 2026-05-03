@@ -1848,18 +1848,73 @@
   }
 
   function recordOfflineMoneyEvent(event, mode, chatId, character, meta) {
-    var money = event && event.money && typeof event.money === "object" ? event.money : null;
-    if (!money) return;
+    if (!event || typeof event !== "object") return;
+    var money = event.money && typeof event.money === "object" ? event.money : null;
+    var content = String(event.content || "");
     var extra = meta || {};
-    var normalizedAmount = window.AppStorage && window.AppStorage.normalizeMoneyAmount
-      ? window.AppStorage.normalizeMoneyAmount(money.amount)
-      : "";
-    var amount = normalizedAmount ? Number(normalizedAmount) : 0;
-    var direction = money.direction === "expense" ? "expense" : (money.direction === "income" ? "income" : "");
-    var kind = money.moneyType || money.type;
-    var recordType;
 
-    if (!window.AppStorage.addWalletLedger || !amount || amount < 0.01 || !direction) {
+    function extractAmountFromText(text) {
+      var match = text.match(/(?:¥|￥)?\s*([0-9]+(?:\.[0-9]{1,2})?)\s*(?:元|块|红包)?/);
+      return match ? window.AppStorage.normalizeMoneyAmount(match[1]) : "";
+    }
+
+    function inferType(text) {
+      if (/红包/.test(text)) return "redPacket";
+      if (/转账|微信转账|转给/.test(text)) return "transfer";
+      if (/报销/.test(text)) return "reimburse";
+      if (/买单|结账|请客|代付|付款/.test(text)) return "outingPay";
+      if (/现金|给钱|塞给|付现金/.test(text)) return "cash";
+      return "cash";
+    }
+
+    function inferDirection(text) {
+      var selfPay = /(?:我|用户|你).*?(?:给|发|转|买单|付款|付了|支付|还款)/.test(text);
+      var receive = /(?:角色|他|她|他们|她们).*?(?:给你|转给你|发红包给你|还你|报销|补偿你)/.test(text);
+      var neutralPay = /(?:角色|他|她|他们|她们).*?(?:买单|请客|结账|代付|替你付|向商家付款|替你付款)/.test(text);
+      if (neutralPay) return "neutral";
+      if (receive) return "income";
+      if (selfPay) return "expense";
+      if (/给你|转给你|还你|发红包给你/.test(text)) return "income";
+      if (/(?:我|用户|你).*?(?:给|发|转|付|买单|付款)/.test(text)) return "expense";
+      if (/(?:角色|他|她|他们|她们).*?(?:给|发|转|还|报销)/.test(text)) return "income";
+      return "";
+    }
+
+    function inferRoles(text, directionValue) {
+      if (directionValue === "expense") {
+        return { payerRole: "user", receiverRole: /商家|店|餐厅|咖啡店/.test(text) ? "merchant" : "character" };
+      }
+      if (directionValue === "income") {
+        return { payerRole: "character", receiverRole: "user" };
+      }
+      return { payerRole: "character", receiverRole: "merchant" };
+    }
+
+    var amount = money && money.amount ? window.AppStorage.normalizeMoneyAmount(money.amount) : "";
+    if (!amount) {
+      amount = extractAmountFromText(content);
+    }
+
+    var kind = money && (money.type || money.moneyType) ? (money.type || money.moneyType) : inferType(content);
+    var direction = money && money.direction ? money.direction : inferDirection(content);
+    var payerRole = money && money.payerRole ? money.payerRole : "";
+    var receiverRole = money && money.receiverRole ? money.receiverRole : "";
+
+    if (!amount && content && /(红包|转账|报销|买单|请客|结账|付款|现金|给钱|代付)/.test(content)) {
+      amount = guessMoneyAmountByPersona(character, content, kind);
+    }
+
+    if (!direction && content) {
+      direction = inferDirection(content);
+    }
+
+    if (!payerRole || !receiverRole) {
+      var roles = inferRoles(content, direction);
+      payerRole = payerRole || roles.payerRole;
+      receiverRole = receiverRole || roles.receiverRole;
+    }
+
+    if (!amount || !direction) {
       return;
     }
 
@@ -1867,30 +1922,28 @@
       return;
     }
 
-    if (kind === "redPacket" || kind === "redpacket") {
-      recordType = direction === "income" ? "redpacket_in" : "redpacket_out";
-    } else if (kind === "transfer") {
-      recordType = direction === "income" ? "transfer_in" : "transfer_out";
-    } else {
-      recordType = kind || "system";
-    }
+    var type = kind;
+    if (type === "redpacket") type = "redPacket";
+    if (type === "transfer") type = "transfer";
 
-    var evtId = String(event.id || event.eventId || "");
-    var genId = extra.generationId || event.generationId || money.generationId || "";
     var record = window.AppStorage.addWalletLedger({
-      type: recordType,
+      id: money.id || event.id || "ledger_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6),
+      type: type,
       amount: amount,
       direction: direction,
       sourceType: "offline",
-      sourceId: chatId,
-      characterId: character ? character.id : (money.characterId || ""),
+      sourceId: chatId || event.chatId || "",
+      characterId: character ? character.id : (money && money.characterId ? money.characterId : ""),
       groupId: mode === "group" ? chatId : "",
-      sourceEventId: evtId,
-      eventId: evtId,
-      generationId: genId,
-      sourceGenerationId: extra.generationId || money.sourceGenerationId || event.sourceGenerationId || genId,
-      action: direction === "income" ? "receive" : "send",
-      note: money.note || event.content || "线下模式金额事件",
+      sourceEventId: extra.sourceEventId || event.id || "",
+      eventId: String(event.id || event.eventId || ""),
+      generationId: money && money.generationId ? money.generationId : (event.generationId || ""),
+      sourceGenerationId: extra.generationId || (money && money.sourceGenerationId) || event.sourceGenerationId || event.generationId || "",
+      action: direction === "income" ? "receive" : direction === "expense" ? "send" : "neutral",
+      note: (money && money.note) || content || "线下模式金额事件",
+      payerRole: payerRole,
+      receiverRole: receiverRole,
+      uniqueKey: extra.uniqueKey || event.uniqueKey || (money && money.uniqueKey) || (type + "|" + String(event.id || event.eventId || "") + "|" + (extra.generationId || event.generationId || "")),
       createdAt: Date.now()
     });
 
@@ -1898,6 +1951,56 @@
       event.walletRecorded = true;
       event.walletLedgerId = record.id;
     }
+  }
+
+  function guessMoneyAmountByPersona(character, content, moneyType) {
+    var text = String(content || "").toLowerCase();
+    var personaText = String((character && (character.persona || character.personality || character.identity || character.relationship)) || "").toLowerCase();
+    var baseRange = [30, 180];
+    if (moneyType === "redPacket") {
+      baseRange = [30, 180];
+    } else if (moneyType === "transfer") {
+      baseRange = [50, 320];
+    } else if (moneyType === "reimburse") {
+      baseRange = [40, 220];
+    } else if (moneyType === "outingPay") {
+      baseRange = [80, 420];
+    } else if (moneyType === "cash") {
+      baseRange = [20, 150];
+    }
+
+    var wealthFactor = 1;
+    if (/富|豪|总裁|老板|上司|贵/.test(personaText)) {
+      wealthFactor = 1.5;
+    } else if (/学生|穷|打工|兼职|普通|刚毕业|没钱/.test(personaText)) {
+      wealthFactor = 0.8;
+    }
+
+    var relationFactor = 1;
+    if (/闺蜜|好朋友|恋人|情侣|老公|老婆|兄弟|姐弟|亲/.test(personaText)) {
+      relationFactor = 1.1;
+    }
+
+    var sceneFactor = 1;
+    if (/火锅|餐厅|电影|影院|商场|礼物|购物/.test(text)) {
+      sceneFactor = 1.2;
+    } else if (/街边|小吃|早餐|便利店|快餐/.test(text)) {
+      sceneFactor = 0.9;
+    }
+
+    var seed = 0;
+    var idText = String(character && character.id || "");
+    for (var i = 0; i < idText.length; i += 1) {
+      seed += idText.charCodeAt(i);
+    }
+    seed += text.length * 7;
+    seed = (seed * 9301 + 49297) % 233280;
+    seed = seed / 233280;
+
+    var amount = baseRange[0] + seed * (baseRange[1] - baseRange[0]);
+    amount = amount * wealthFactor * relationFactor * sceneFactor;
+    amount = Math.max(baseRange[0], Math.min(baseRange[1] * 1.5, amount));
+    return window.AppStorage.normalizeMoneyAmount(amount.toFixed(2));
   }
 
   function writeInlineEventMemory(mode, chatId, participants, speechCharacter, content, createdAt, meta) {

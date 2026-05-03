@@ -5079,7 +5079,12 @@
 
   function normalizeLedgerRecord(record, index) {
     var source = record && typeof record === "object" ? record : {};
-    var direction = source.direction === "expense" ? "expense" : "income";
+    var rawDirection = String(source.direction || "").toLowerCase();
+    var direction = rawDirection === "expense"
+      ? "expense"
+      : rawDirection === "neutral"
+        ? "neutral"
+        : "income";
     var type = String(source.type || "system");
     var uniqueKey = String(source.uniqueKey || "");
 
@@ -5119,6 +5124,8 @@
       wallet.balance = roundAmount(wallet.balance + amount);
     } else if (record.direction === "expense") {
       wallet.balance = roundAmount(wallet.balance - amount);
+    } else {
+      return wallet;
     }
     return wallet;
   }
@@ -5130,6 +5137,8 @@
       wallet.balance = roundAmount(wallet.balance - amount);
     } else if (record.direction === "expense") {
       wallet.balance = roundAmount(wallet.balance + amount);
+    } else {
+      return wallet;
     }
     return wallet;
   }
@@ -5936,15 +5945,50 @@
   function addOutingPurchase(purchase) {
     var outing = getCurrentOuting();
     if (!outing) return null;
+    var paidBy = purchase.paidBy === "character" ? "character" : purchase.paidBy === "user" ? "user" : "unknown";
     var item = Object.assign({}, purchase, {
       id: purchase.id || ("outing_purchase_" + Date.now() + "_" + Math.random().toString(36).slice(2, 6)),
-      createdAt: purchase.createdAt || Date.now()
+      createdAt: purchase.createdAt || Date.now(),
+      paidBy: paidBy
     });
     outing.purchases = outing.purchases || [];
     outing.purchases.push(item);
-    outing.spentTotal = roundAmount((outing.spentTotal || 0) + (Number(item.price) || 0));
-    outing.updatedAt = Date.now();
+    var price = Number(item.price) || 0;
+    outing.spentTotal = roundAmount((outing.spentTotal || 0) + price);
     setCurrentOuting(outing);
+
+    if (price >= 0.01) {
+      if (paidBy === "user") {
+        window.AppStorage.addWalletLedger({
+          type: "outing",
+          direction: "expense",
+          amount: price,
+          title: "出去玩消费",
+          note: outing.placeName + " - " + (item.itemName || item.name || "消费"),
+          sourceType: "outing",
+          sourceId: outing.id,
+          purchaseId: item.id,
+          payerRole: "user",
+          receiverRole: "merchant",
+          createdAt: Date.now()
+        });
+      } else if (paidBy === "character") {
+        window.AppStorage.addWalletLedger({
+          type: "outing",
+          direction: "neutral",
+          amount: price,
+          title: "出去玩消费",
+          note: outing.placeName + " - " + (item.itemName || item.name || "消费"),
+          sourceType: "outing",
+          sourceId: outing.id,
+          purchaseId: item.id,
+          payerRole: "character",
+          receiverRole: "merchant",
+          createdAt: Date.now()
+        });
+      }
+    }
+
     return item;
   }
 
@@ -6042,24 +6086,48 @@
     }
     var purchase = outing.purchases[index];
     var oldPrice = Number(purchase.price) || 0;
+    var oldPaidBy = purchase.paidBy || "unknown";
     var nextPurchase = Object.assign({}, purchase, patch || {}, { id: purchase.id, updatedAt: Date.now() });
     var newPrice = Number(nextPurchase.price) || 0;
+    var nextPaidBy = nextPurchase.paidBy === "character" ? "character" : nextPurchase.paidBy === "user" ? "user" : "unknown";
+    nextPurchase.paidBy = nextPaidBy;
     var priceDiff = roundAmount(newPrice - oldPrice);
     var ledger = getWallet().ledger.find(function (record) {
       return String(record.sourceType) === "outing" && String(record.sourceId) === String(outing.id) && String(record.purchaseId) === String(purchase.id);
     });
 
-    if (priceDiff !== 0) {
-      if (priceDiff > 0) {
-        var balance = Number(getWallet().balance) || 0;
-        if (balance < priceDiff) {
-          return null;
+    if (ledger) {
+      if (nextPaidBy === "user") {
+        updateWalletLedger(ledger.id, {
+          direction: "expense",
+          amount: newPrice,
+          note: nextPurchase.note || ledger.note,
+          payerRole: "user",
+          receiverRole: "merchant"
+        });
+      } else if (nextPaidBy === "character") {
+        window.AppStorage.deleteWalletLedger(ledger.id);
+        if (newPrice >= 0.01) {
+          window.AppStorage.addWalletLedger({
+            type: "outing",
+            direction: "neutral",
+            amount: newPrice,
+            title: "出去玩消费",
+            note: outing.placeName + " - " + (nextPurchase.itemName || purchase.itemName || "消费"),
+            sourceType: "outing",
+            sourceId: outing.id,
+            purchaseId: purchase.id,
+            payerRole: "character",
+            receiverRole: "merchant",
+            createdAt: Date.now()
+          });
         }
-      }
-      if (ledger) {
-        updateWalletLedger(ledger.id, { amount: newPrice, note: nextPurchase.note || ledger.note });
       } else {
-        addWalletLedger({
+        window.AppStorage.deleteWalletLedger(ledger.id);
+      }
+    } else {
+      if (nextPaidBy === "user" && newPrice >= 0.01) {
+        window.AppStorage.addWalletLedger({
           type: "outing",
           direction: "expense",
           amount: newPrice,
@@ -6068,13 +6136,31 @@
           sourceType: "outing",
           sourceId: outing.id,
           purchaseId: purchase.id,
+          payerRole: "user",
+          receiverRole: "merchant",
+          createdAt: Date.now()
+        });
+      } else if (nextPaidBy === "character" && newPrice >= 0.01) {
+        window.AppStorage.addWalletLedger({
+          type: "outing",
+          direction: "neutral",
+          amount: newPrice,
+          title: "出去玩消费",
+          note: outing.placeName + " - " + (nextPurchase.itemName || purchase.itemName || "消费"),
+          sourceType: "outing",
+          sourceId: outing.id,
+          purchaseId: purchase.id,
+          payerRole: "character",
+          receiverRole: "merchant",
           createdAt: Date.now()
         });
       }
     }
 
+    if (priceDiff !== 0) {
+      outing.spentTotal = roundAmount((outing.spentTotal || 0) + priceDiff);
+    }
     outing.purchases[index] = nextPurchase;
-    outing.spentTotal = roundAmount((outing.spentTotal || 0) + priceDiff);
     outing.updatedAt = Date.now();
     saveOutingData(outing);
     return nextPurchase;
@@ -6093,22 +6179,17 @@
     }
     var purchase = outing.purchases[index];
     var amount = Number(purchase.price) || 0;
+    var ledger = getWallet().ledger.find(function (record) {
+      return String(record.sourceType) === "outing" && String(record.sourceId) === String(outing.id) && String(record.purchaseId) === String(purchase.id);
+    });
+    if (ledger) {
+      window.AppStorage.deleteWalletLedger(ledger.id);
+    }
+
     outing.purchases.splice(index, 1);
     outing.spentTotal = roundAmount(Math.max(0, (outing.spentTotal || 0) - amount));
     outing.updatedAt = Date.now();
     saveOutingData(outing);
-
-    addWalletLedger({
-      type: "outing_refund",
-      direction: "income",
-      amount: amount,
-      title: "出去玩退款",
-      note: outing.placeName + " - " + (purchase.itemName || "消费"),
-      sourceType: "outing-refund",
-      sourceId: outing.id,
-      purchaseId: purchase.id,
-      createdAt: Date.now()
-    }, { skipBalance: false });
 
     addChatMemory("private", outing.companion && outing.companion.characterId || "", {
       content: "你取消了【" + (purchase.itemName || "商品") + "】这笔消费，退回 ¥" + amount.toFixed(2) + "。",

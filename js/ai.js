@@ -4524,7 +4524,7 @@
             "action 描写要连贯且不要重复同一动作细节，避免使用简单套话式动作。",
             buildOfflineCurrentInputPriorityRules(context.userInput),
             buildOfflineSceneContinuityRules(recentSceneHint),
-            "如果线下剧情里出现补偿、购物花费、红包、转账等模拟金额事件，可在对应 event 上附加 money：{\"type\":\"transfer|redPacket\",\"amount\":\"12.66\",\"direction\":\"income|expense\",\"note\":\"备注\"}。",
+            "如果线下剧情里出现现金、红包、转账、给钱、还钱、报销、买单、请客、结账、付款、代付等金钱行为，必须在对应 event 上附加 money：{\"type\":\"cash\"|\"redPacket\"|\"transfer\"|\"outingPay\"|\"reimburse\",\"direction\":\"income\"|\"expense\"|\"neutral\",\"amount\":\"388.00\",\"payerRole\":\"user\"|\"character\",\"receiverRole\":\"user\"|\"character\"|\"merchant\",\"note\":\"备注\"}。如果文本没有明确金额，必须根据角色人设、关系、场景和经济能力生成合理金额；不能固定 20，也不能所有角色一样。",
             "memories 是长期记忆，不要为了凑数额外生成。",
             "",
             "【线下反模板规则——每轮必读】",
@@ -8668,8 +8668,9 @@
       "3. 如果买了东西，同行对象要按人设反应：接过、嫌弃、提醒、抢着付、吐槽、沉默、照顾都可以。",
       "4. NPC 可以自然互动，但不要写成联系人私聊。",
       "5. 如果同行对象是角色，必须按角色人设反应。",
-      "6. 不要写旅游攻略，要写正在现场发生的互动。",
-      "7. 返回 JSON，格式：",
+      "6. 如果现场出现现金、红包、转账、给钱、还钱、报销、买单、请客、结账、付款、代付等金钱行为，必须在对应 event 上附加 money 对象，格式：{\"type\":\"cash\"|\"redPacket\"|\"transfer\"|\"outingPay\"|\"reimburse\",\"direction\":\"income\"|\"expense\"|\"neutral\",\"amount\":\"388.00\",\"payerRole\":\"user\"|\"character\",\"receiverRole\":\"user\"|\"character\"|\"merchant\",\"note\":\"备注\"}。如果文本没有明确金额，必须根据角色人设、关系、场景和经济能力生成合理金额；不能固定 20，也不能所有角色一样。",
+      "7. 不要写旅游攻略，要写正在现场发生的互动。",
+      "8. 返回 JSON，格式：",
       '{"events":[{"type":"action","content":"..."},{"type":"speech","speakerName":"...","content":"..."}],"memories":[{"characterId":"...","content":"..."}]}'
     ].join("\n");
   }
