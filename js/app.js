@@ -1344,6 +1344,135 @@
     triggerOutingAI("到达" + outing.placeName + "，刚进入");
   }
 
+  function buildOutingEventHtml(evt, avatarHtml, fallbackTime) {
+    var source = evt || {};
+    var text = escapeHtml(source.content || "");
+    var createdAt = source.createdAt ? new Date(source.createdAt) : null;
+    var timeText = createdAt && !isNaN(createdAt.getTime())
+      ? createdAt.toLocaleTimeString("zh-CN", { hour: "2-digit", minute: "2-digit" })
+      : (fallbackTime || "");
+
+    if (source.type === "system") {
+      return [
+        '<div class="outing-center-block">',
+        timeText ? '  <div class="outing-time-pill">' + escapeHtml(timeText) + '</div>' : '',
+        '  <div class="outing-system-note">' + text + '</div>',
+        '</div>'
+      ].join("");
+    }
+
+    return [
+      '<div class="outing-chat-row">',
+      '  <div class="outing-chat-avatar">' + avatarHtml + '</div>',
+      '  <div class="outing-chat-bubble">' + text + '</div>',
+      '</div>'
+    ].join("");
+  }
+
+  function renderOutingActiveView(outing) {
+    var content = getElement("outingContent");
+    if (!content) return;
+    if (!outing) {
+      renderOutingHomeView();
+      return;
+    }
+
+    outingStep = "active";
+    outingInputMode = "speech";
+
+    var companion = outing.companion || {};
+    var avatarHtml = companion.avatar
+      ? '<img src="' + escapeHtml(companion.avatar) + '" alt="">'
+      : escapeHtml((companion.name || "?").slice(0, 1));
+
+    var placeName = escapeHtml(outing.placeName || "未知地点");
+    var companionName = escapeHtml(companion.name || "伙伴");
+    var spentTotal = Number(outing.spentTotal || 0).toFixed(2);
+
+    var startedDate = outing.startedAt ? new Date(outing.startedAt) : new Date();
+    var startedAt = startedDate.toLocaleString("zh-CN");
+    var startedTime = startedDate.toLocaleTimeString("zh-CN", {
+      hour: "2-digit",
+      minute: "2-digit"
+    });
+
+    var sceneIcon = "🛍️";
+    var placeTextRaw = String(outing.placeName || "");
+    if (placeTextRaw.indexOf("咖啡") !== -1) sceneIcon = "☕";
+    if (placeTextRaw.indexOf("图书馆") !== -1) sceneIcon = "📚";
+    if (placeTextRaw.indexOf("公园") !== -1) sceneIcon = "🌿";
+    if (placeTextRaw.indexOf("电影院") !== -1) sceneIcon = "🎬";
+    if (placeTextRaw.indexOf("餐厅") !== -1 || placeTextRaw.indexOf("饭") !== -1) sceneIcon = "🍽️";
+
+    var events = Array.isArray(outing.events) ? outing.events : [];
+    var eventsHtml = events.map(function (evt) {
+      return buildOutingEventHtml(evt, avatarHtml, startedTime);
+    }).join("");
+
+    if (!eventsHtml) {
+      eventsHtml = [
+        '<div class="outing-center-block">',
+        '  <div class="outing-time-pill">' + escapeHtml(startedTime) + '</div>',
+        '  <div class="outing-system-note">你和' + companionName + '来到了' + placeName + '。</div>',
+        '</div>'
+      ].join("");
+    }
+
+    content.innerHTML = [
+      '<div class="outing-active-page">',
+
+      '  <div class="outing-scene-card">',
+      '    <div class="outing-scene-info">',
+      '      <div class="outing-scene-icon">' + sceneIcon + '</div>',
+      '      <div class="outing-scene-title">' + placeName + '</div>',
+      '      <div class="outing-scene-row">与 <em>' + companionName + '</em> 一起</div>',
+      '      <div class="outing-scene-row">已消费 ¥' + spentTotal + '</div>',
+      '      <div class="outing-scene-divider"></div>',
+      '      <div class="outing-scene-row">' + escapeHtml(startedAt) + '</div>',
+      '    </div>',
+      '    <div class="outing-scene-illustration"></div>',
+      '  </div>',
+
+      '  <div class="outing-event-stream" id="outingEventStream">',
+      eventsHtml,
+      '    <div id="outingLoadingIndicator" class="outing-system-note hidden">AI 思考中...</div>',
+      '  </div>',
+
+      '  <div class="outing-end-row">',
+      '    <button type="button" id="outingEndBtn" class="outing-end-btn">结束出行</button>',
+      '  </div>',
+
+      '  <div class="outing-input-row">',
+      '    <input id="outingInput" type="text" placeholder="请输入你想说的话">',
+      '    <button type="button" id="outingSendBtn">发送</button>',
+      '  </div>',
+
+      '</div>'
+    ].join("");
+
+    var sendBtn = getElement("outingSendBtn");
+    if (sendBtn) {
+      sendBtn.addEventListener("click", doOutingUserInput);
+    }
+
+    var input = getElement("outingInput");
+    if (input) {
+      input.addEventListener("keydown", function (e) {
+        if (e.key === "Enter") {
+          e.preventDefault();
+          doOutingUserInput();
+        }
+      });
+    }
+
+    var endBtn = getElement("outingEndBtn");
+    if (endBtn) {
+      endBtn.addEventListener("click", doEndOuting);
+    }
+
+    scrollOutingStreamToBottom();
+  }
+
   function openOutingCustomPlaceModal() {
     var sheetHtml = [
       '<div class="outing-custom-sheet">',
@@ -1391,6 +1520,9 @@
             showToast("请填写地点名称");
             return;
           }
+          if (!description.trim()) {
+            description = name.trim();
+          }
           var place = window.AppStorage.addCustomOutingPlace({
             name: name.trim(),
             description: description.trim(),
@@ -1398,6 +1530,10 @@
             activities: activities,
             openingHours: "自定义"
           });
+          if (!place) {
+            showToast("保存地点失败，请补全信息。", true);
+            return;
+          }
           var f = loadOutingFlowState();
           saveOutingFlowState({ step: "place-pick", companionRef: f.companionRef, placeId: String(place.id), memorySource: f.memorySource });
           closeWeChatSheet();
@@ -1525,25 +1661,27 @@
   function doOutingUserInput() {
     var input = getElement("outingInput");
     if (!input) return;
+
     var value = (input.value || "").trim();
     if (!value) {
-      showToast("请输入你想说的话或动作");
+      showToast("请输入你想说的话");
       return;
     }
+
     var outing = window.AppStorage.getCurrentOuting();
     if (!outing) return;
-    var eventType = outingInputMode === "action" ? "action" : "speech";
-    var content = value;
-    if (eventType === "action" && !/^[\(（].*[\)）]$/.test(value)) {
-      content = "（" + value + "）";
-    }
+
     var evt = window.AppStorage.addOutingEvent({
-      type: eventType,
-      content: content
+      type: "speech",
+      content: value
     });
-    if (evt) appendOutingEvent(evt);
+
+    if (evt) {
+      appendOutingEvent(evt);
+    }
+
     input.value = "";
-    triggerOutingAI(content, outingInputMode);
+    triggerOutingAI(value, "speech");
   }
 
   function doEditOuting(outingId) {
@@ -1803,23 +1941,23 @@
   function appendOutingEvent(evt) {
     var stream = getElement("outingEventStream");
     if (!stream) return;
+
     var loading = getElement("outingLoadingIndicator");
-    var bubble = document.createElement("div");
-    var typeClass = "type-" + (evt.type || "action");
-    bubble.className = "outing-event-bubble " + typeClass;
-    if (evt.type === "speech" && evt.speakerName) {
-      var speaker = document.createElement("div");
-      speaker.className = "outing-event-speaker";
-      speaker.textContent = evt.speakerName;
-      bubble.appendChild(speaker);
-    }
-    var text = document.createTextNode(evt.content || "");
-    bubble.appendChild(text);
+    var outing = window.AppStorage.getCurrentOuting() || {};
+    var companion = outing.companion || {};
+
+    var avatarHtml = companion.avatar
+      ? '<img src="' + escapeHtml(companion.avatar) + '" alt="">'
+      : escapeHtml((companion.name || "?").slice(0, 1));
+
+    var html = buildOutingEventHtml(evt, avatarHtml, "");
+
     if (loading) {
-      stream.insertBefore(bubble, loading);
+      loading.insertAdjacentHTML("beforebegin", html);
     } else {
-      stream.appendChild(bubble);
+      stream.insertAdjacentHTML("beforeend", html);
     }
+
     scrollOutingStreamToBottom();
   }
 
