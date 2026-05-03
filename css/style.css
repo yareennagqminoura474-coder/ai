@@ -8832,6 +8832,75 @@ textarea::placeholder {
   padding: 16px 16px 8px;
 }
 
+/* 记忆来源模块 */
+.outing-memory-source {
+  margin: 4px 16px 8px;
+  background: var(--color-surface);
+  border-radius: 14px;
+  padding: 12px 14px;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+
+.outing-field-label {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--color-muted);
+  margin-bottom: 10px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+}
+
+.outing-memory-options {
+  display: flex;
+  gap: 8px;
+}
+
+.outing-memory-btn {
+  flex: 1;
+  padding: 8px 6px;
+  border: 1.5px solid rgba(0,0,0,0.1);
+  border-radius: 10px;
+  background: var(--color-bg);
+  color: var(--color-muted);
+  font-size: 13px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: border-color 0.15s, background 0.15s, color 0.15s, box-shadow 0.15s;
+  text-align: center;
+}
+
+.outing-memory-btn:active {
+  transform: scale(0.96);
+  opacity: 0.85;
+}
+
+.outing-memory-btn.active {
+  border-color: var(--color-green, #4caf7d);
+  background: rgba(76, 175, 80, 0.1);
+  color: var(--color-green, #4caf7d);
+  font-weight: 700;
+  box-shadow: 0 2px 8px rgba(76, 175, 80, 0.18);
+}
+
+.outing-memory-hint {
+  font-size: 12px;
+  color: var(--color-muted);
+  padding: 6px 0 0;
+}
+
+#outingMemoryGroupSelect {
+  width: 100%;
+  margin-top: 10px;
+  padding: 9px 12px;
+  border: 1.5px solid rgba(0,0,0,0.1);
+  border-radius: 10px;
+  background: var(--color-bg);
+  color: var(--color-text);
+  font-size: 14px;
+  appearance: none;
+  cursor: pointer;
+}
+
 /* 出行 AI 输入框 */
 .outing-input-row {
   padding: 12px 16px;

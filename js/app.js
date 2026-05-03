@@ -544,9 +544,22 @@
   var outingInputMode = "speech";
 
   function openOutingScreen() {
-    outingStep = "home";
+    var outing = window.AppStorage.getCurrentOuting();
     outingPendingCompanion = null;
+    outingSelectedPlaceId = "";
+    outingPendingMemorySource = { type: "auto", groupId: "" };
+    if (outing && outing.status === "active") {
+      outingStep = "active";
+    } else {
+      outingStep = "home";
+    }
     setActivePage("outingScreen");
+    // 直接渲染，不依赖 setActivePage 内部的 if-block 时序
+    if (outingStep === "active") {
+      renderOutingActiveView(outing);
+    } else {
+      renderOutingHomeView();
+    }
   }
 
   function renderOutingScreen() {
@@ -556,6 +569,12 @@
       renderOutingActiveView(outing);
     } else if (outingStep === "history") {
       renderOutingHistoryView();
+    } else if (outingStep === "place-pick" && outingPendingCompanion) {
+      renderOutingPlacePickView();
+    } else if (outingStep === "character-pick") {
+      renderOutingCharacterPickView();
+    } else if (outingStep === "npc-setup") {
+      renderOutingNpcSetupView();
     } else {
       outingStep = "home";
       renderOutingHomeView();
@@ -720,23 +739,24 @@
   function renderOutingPlacePickView() {
     var content = getElement("outingContent");
     if (!content) return;
-    outingSelectedPlaceId = outingSelectedPlaceId || "";
+    outingSelectedPlaceId = String(outingSelectedPlaceId || "");
     outingPendingMemorySource = outingPendingMemorySource || { type: "auto", groupId: "" };
     var places = window.AppStorage.getOutingPlaces();
     var groups = window.AppStorage.getGroups ? window.AppStorage.getGroups() : [];
     var priceSymbols = ["", "¥", "¥¥", "¥¥¥", "¥¥¥¥"];
     var companionName = outingPendingCompanion ? outingPendingCompanion.name : "";
-    var selectedPlace = places.find(function (p) { return p.id === outingSelectedPlaceId; }) || null;
+    // 统一 string 比较，防止类型不一致导致选不中
+    var selectedPlace = places.find(function (p) { return String(p.id) === outingSelectedPlaceId; }) || null;
     var startBtnClass = outingSelectedPlaceId ? "outing-depart-btn ready" : "outing-depart-btn";
 
     var placeCards = places.map(function (place) {
       var price = priceSymbols[place.priceLevel] || "¥";
-      var isSelected = selectedPlace && selectedPlace.id === place.id;
+      var isSelected = selectedPlace && String(selectedPlace.id) === String(place.id);
       var activeClass = isSelected ? " active" : "";
       var badge = isSelected ? '<span class="outing-place-selected-badge">✓ 已选</span>' : "";
       var activitiesText = (place.activities || []).slice(0, 3).join("、");
       return [
-        '<button type="button" class="outing-place-card' + activeClass + '" data-outing-place-id="' + escapeHtml(place.id) + '">',
+        '<button type="button" class="outing-place-card' + activeClass + '" data-outing-place-id="' + escapeHtml(String(place.id)) + '">',
         '  <div class="outing-place-card-header">',
         '    <span class="outing-place-name">' + escapeHtml(place.name) + '</span>',
         badge,
@@ -792,7 +812,7 @@
 
     Array.prototype.forEach.call(content.querySelectorAll("[data-outing-place-id]"), function (btn) {
       btn.addEventListener("click", function () {
-        outingSelectedPlaceId = btn.dataset.outingPlaceId;
+        outingSelectedPlaceId = String(btn.dataset.outingPlaceId || "");
         renderOutingPlacePickView();
       });
     });
@@ -804,6 +824,7 @@
         if (type !== "group") {
           outingPendingMemorySource.groupId = "";
         }
+        // 切换记忆来源时保留已选地点
         renderOutingPlacePickView();
       });
     });
@@ -818,11 +839,20 @@
     var startBtn = getElement("outingPlaceStartBtn");
     if (startBtn) {
       startBtn.addEventListener("click", function () {
-        if (!outingSelectedPlaceId) {
+        var placeId = String(outingSelectedPlaceId || "");
+        // 兜底：从当前激活卡片取
+        if (!placeId) {
+          var activeCard = content.querySelector(".outing-place-card.active");
+          if (activeCard) {
+            placeId = String(activeCard.dataset.outingPlaceId || "");
+          }
+        }
+        if (!placeId) {
           showToast("先选一个地方。");
           return;
         }
-        doStartOuting(outingSelectedPlaceId);
+        outingSelectedPlaceId = placeId;
+        doStartOuting(placeId);
       });
     }
 
@@ -3392,6 +3422,7 @@
     getElement("watchListBackBtn").addEventListener("click", goHome);
     getElement("outingBackBtn").addEventListener("click", goHome);
     getElement("outingHistoryBtn").addEventListener("click", function () {
+      outingStep = "history";
       renderOutingHistoryView();
     });
   }
