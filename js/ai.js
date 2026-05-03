@@ -146,6 +146,7 @@
     return [
       buildSystemBase("private"),
       buildLivingCharacterImmersionRules("private"),
+      buildAntiEitherOrQuestionRules("private"),
       buildWorldBookAssimilationRules(worldBookContext, worldBookMeta, "private"),
       buildAntiExplanationRules("private"),
       buildWorldRuleEnforcement(worldBookContext, worldBookMeta),
@@ -265,6 +266,26 @@
         : "私聊里要有两个人之间的熟悉感、旧账、偏心、别扭或距离；不要每轮像第一次见。",
       primary + " 的目标不是数量，而是让人感觉这是活人在连续说话。"
     ].join("\n");
+  }
+
+  function buildAntiEitherOrQuestionRules(mode) {
+    return [
+      "",
+      "Q+. 禁止二选一追问模板 antiEitherOrQuestion",
+      "禁止频繁使用「是打算……还是……」、「你是想……还是……」、「你到底是要……还是……」这类二选一追问。",
+      "这种句式不是活人反应，而是 AI 套话。除非本轮用户明确要求角色让 TA 做选择，否则不要使用。",
+      "不要用二选一问题代替角色的真实反应。",
+      "如果角色不确定用户意图，可以用沉默、动作、短句、追问具体细节、转移、冷处理、直接判断来承接。",
+      "同一轮最多允许 1 条二选一问句；连续两轮禁止用同类句式收尾。",
+      "不要每条都以问号结尾。真人不会每次都把话变成选择题。",
+      "替代方式：",
+      "1. 冷淡：你自己说。 / 别绕。 / 说重点。",
+      "2. 强势：把话说清楚。 / 别让我猜。 / 先回答刚才那句。",
+      "3. 温柔：慢慢说，我听着。 / 先告诉我你现在怎么想。",
+      "4. 嘴硬：算了，你自己说。 / 别让我猜，麻烦。",
+      "5. 调侃：行，那我听你自己编。 / 继续啊，别说一半。",
+      mode === "outing" ? "出去玩场景里不要反复用「是打算去 A 还是去 B」。角色可以直接提一个具体动作、停下来等用户、看向某个店、问一句短的「走不走/排不排/还逛吗」，不要每次列两个选项。" : ""
+    ].filter(Boolean).join("\n");
   }
 
   function buildWorldBookAssimilationRules(worldBookContext, meta, mode) {
@@ -3623,6 +3644,7 @@
     return [
       buildSystemBase("group"),
       buildLivingCharacterImmersionRules("group"),
+      buildAntiEitherOrQuestionRules("group"),
       buildWorldBookAssimilationRules(resolvedWorldBookContext, worldBookMeta, "group"),
       buildAntiExplanationRules("group"),
       buildWorldRuleEnforcement(resolvedWorldBookContext, worldBookMeta),
@@ -4859,6 +4881,7 @@
           buildRelationshipDriveRules(context.mode === "group" ? "group" : "private"),
           buildRelationshipProgressionRules("offline"),
           buildCharacterDecisionCore("offline", worldBookContext),
+          buildAntiEitherOrQuestionRules("offline"),
           buildOfflineSceneContinuityRules(recentSceneHint),
           recentHeartVoiceText,
           buildLongRangeMemoryContextSection(context),
@@ -6808,8 +6831,29 @@
     return true;
   }
 
-  function replaceGenericTemplateReplies(replies) {
-    return Array.isArray(replies) ? replies : [];
+  function replaceGenericTemplateReplies(replies, settings) {
+    var list = Array.isArray(replies) ? replies : [];
+    var options = settings || {};
+    var profiles = getFallbackProfiles ? getFallbackProfiles(options) : [];
+    var defaultProfile = (profiles && profiles[0]) || options.fallbackProfile || options.textureProfile || {};
+
+    return list.map(function (reply, index) {
+      var source = reply && typeof reply === "object" ? reply : { content: String(reply || "") };
+      var content = String(source.content || source.text || source.message || "").trim();
+      var profile = (source.characterId && profiles && profiles.length)
+        ? (profiles.find(function (item) { return item && String(item.id) === String(source.characterId); }) || defaultProfile)
+        : defaultProfile;
+
+      if (isEitherOrQuestionTemplateText(content)) {
+        return rewriteEitherOrQuestionTemplate(source, profile);
+      }
+
+      if (isGenericAiTemplateText(content)) {
+        return rewriteReplyWithPersonaTexture(source, profile, options, index);
+      }
+
+      return source;
+    });
   }
 
   function replaceTemplateWithPersonaLine(reply) {
@@ -6819,6 +6863,73 @@
   function isTemplateRewriteType(type) {
     var value = String(type || "text");
     return value === "text" || value === "speech";
+  }
+
+  function isEitherOrQuestionTemplateText(text) {
+    var value = String(text || "").trim();
+    if (!value) return false;
+    return /(?:是)?(?:打算|准备|想|要|到底|这是|这是要|这是想)[^。！？\n]{0,28}还是[^。！？\n]{0,36}[？?]?/.test(value)
+      || /你(?:是|到底)?(?:打算|准备|想|要)[^。！？\n]{0,28}还是[^。！？\n]{0,36}[？?]?/.test(value)
+      || /(?:让我|要我|想让我)[^。！？\n]{0,24}还是[^。！？\n]{0,36}[？?]?/.test(value)
+      || /(?:选|挑|决定)[^。！？\n]{0,24}还是[^。！？\n]{0,36}[？?]?/.test(value);
+  }
+
+  function rewriteEitherOrQuestionTemplate(reply, profile) {
+    var source = reply && typeof reply === "object" ? reply : { content: String(reply || "") };
+    var voiceTags = (profile && (profile.voiceTags || (profile.voiceProfile && profile.voiceProfile.tags))) || [];
+    var isCold = voiceTags.indexOf("cold") !== -1;
+    var isStrong = voiceTags.indexOf("strong") !== -1 || voiceTags.indexOf("formal") !== -1;
+    var isGentle = voiceTags.indexOf("gentle") !== -1;
+    var isPlayful = voiceTags.indexOf("playful") !== -1;
+    var isTsundere = voiceTags.indexOf("tsundere") !== -1;
+    var alternatives;
+    if (isCold) {
+      alternatives = [
+        "他看了你一眼，没接着逼问，只把话压低了些：先说重点。",
+        "他沉默了半秒，像是懒得替你列选项：你自己说。",
+        "他指尖顿了一下，语气淡下来：别绕。"
+      ];
+    } else if (isStrong) {
+      alternatives = [
+        "他没有给你选项，只把声音压稳：把话说清楚。",
+        "他抬眼看住你：别让我替你猜。",
+        "他把节奏压下来：先回答刚才那句。"
+      ];
+    } else if (isGentle) {
+      alternatives = [
+        "他没急着追问，只放轻了声音：慢慢说，我听着。",
+        "他看着你停了一会儿：你不用急着选，先告诉我你现在怎么想。",
+        "他把语气放缓：别卡在那里，接着说就好。"
+      ];
+    } else if (isPlayful) {
+      alternatives = [
+        "他轻笑了一声，没有顺着逼问：行，那我听你自己编。",
+        "他偏头看你：继续啊，别说一半。",
+        "他像是被你逗到了：这话你自己圆。"
+      ];
+    } else if (isTsundere) {
+      alternatives = [
+        "他别开眼，语气硬了一点：谁让你现在装没事的。",
+        "他顿了一下，像是想问又忍住：算了，你自己说。",
+        "他皱了皱眉：别让我猜，麻烦。"
+      ];
+    } else {
+      alternatives = [
+        "他停了一下，没有继续替你列选项：你自己说。",
+        "他看着你，语气压低：别绕开。",
+        "他没有追着问，只把话递回去：接着说。"
+      ];
+    }
+    var picked = alternatives[Math.floor(Math.random() * alternatives.length)];
+    var result = Object.assign({}, source);
+    if (result.content !== undefined) {
+      result.content = picked;
+    } else if (result.text !== undefined) {
+      result.text = picked;
+    } else {
+      result.message = picked;
+    }
+    return result;
   }
 
   function isGenericAiTemplateText(text) {
@@ -6832,11 +6943,29 @@
       return false;
     }
 
-    return /我理解你|如果你需要|慢慢来|我会陪着你|你并不孤单|请告诉我更多|我们可以一起|你的感受是合理的|你的感受很合理|没关系的|辛苦了|当然可以|作为\s*AI|根据你提供的信息|很抱歉听到|听起来你|你的感受很重要|我在这里陪你|(^|[。！？!?\s])好的([。！？!?\s]|$)/.test(value);
+    return isEitherOrQuestionTemplateText(value)
+      || /我理解你|如果你需要|慢慢来|我会陪着你|你并不孤单|请告诉我更多|我们可以一起|你的感受是合理的|你的感受很合理|没关系的|辛苦了|当然可以|作为\s*AI|根据你提供的信息|很抱歉听到|听起来你|你的感受很重要|我在这里陪你|(^|[。！？!?\s])好的([。！？!?\s]|$)/.test(value);
   }
 
-  function maybeRewriteReplyTextureList(replies) {
-    return Array.isArray(replies) ? replies : [];
+  function maybeRewriteReplyTextureList(replies, settings) {
+    var list = Array.isArray(replies) ? replies : [];
+    var options = settings || {};
+    var profiles = getFallbackProfiles ? getFallbackProfiles(options) : [];
+    var defaultProfile = (profiles && profiles[0]) || options.fallbackProfile || options.textureProfile || {};
+
+    return list.map(function (reply, index) {
+      var source = reply && typeof reply === "object" ? reply : { content: String(reply || "") };
+      var content = String(source.content || source.text || source.message || "").trim();
+      var profile = (source.characterId && profiles && profiles.length)
+        ? (profiles.find(function (item) { return item && String(item.id) === String(source.characterId); }) || defaultProfile)
+        : defaultProfile;
+
+      if (isEitherOrQuestionTemplateText(content)) {
+        return rewriteEitherOrQuestionTemplate(source, profile);
+      }
+
+      return maybeRewriteReplyTexture(source, profile, options, index);
+    });
   }
 
   function maybeRewriteReplyTexture(reply, profile, settings, index) {
@@ -6867,7 +6996,8 @@
       ? Number(options.textureCustomerQuestionRun)
       : Number(options.textureQuestionRun);
     var tooExplanatory = isExplanatoryToneText(text) || /你可以|建议你/.test(text);
-    var tooGeneric = /我理解你|我能感受到|如果你需要|你可以告诉我|我会陪着你|慢慢来|你的感受是合理的|我们可以一起/.test(text);
+    var eitherOrTemplate = isEitherOrQuestionTemplateText(text);
+    var tooGeneric = eitherOrTemplate || /我理解你|我能感受到|如果你需要|你可以告诉我|我会陪着你|慢慢来|你的感受是合理的|我们可以一起/.test(text);
     var tooAssistantLike = hasBannedAssistantTone(text) || /作为\s*AI|语言模型|机器人|助手|系统默认|后台显示|金额字段|结构化\s*amount/.test(text);
     var tooQuestionLike = !roleQuestion
       && !hasCharacterAttitude
@@ -6927,6 +7057,8 @@
 
     if (tooAssistantLike) {
       reason = "assistant-like";
+    } else if (eitherOrTemplate) {
+      reason = "either-or-template";
     } else if (tooGeneric) {
       reason = "generic";
     } else if (tooExplanatory) {
@@ -6992,6 +7124,10 @@
 
     if (!texture.shouldRewrite) {
       return source;
+    }
+
+    if (texture.reason === "either-or-template") {
+      return rewriteEitherOrQuestionTemplate(source, profile);
     }
 
     return replaceReplyWithFallbackTexture(source, profile, Object.assign({}, options, {
@@ -8525,6 +8661,7 @@
       (outing.purchases || []).slice(-5).map(function (item, index) {
         return (index + 1) + ". " + item.itemName + " / ¥" + Number(item.price || 0).toFixed(2);
       }).join("\n") || "暂无",
+      buildAntiEitherOrQuestionRules("outing"),
       "输出要求：",
       "1. 像现实生活一样写现场反应，有环境、人流、声音、距离、付款、排队、手里拿着的东西。",
       "2. 不要说系统、账单、记录、模块。",
