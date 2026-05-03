@@ -548,6 +548,7 @@
   var outingFlowState = {
     step: "home",
     companionRef: null,
+    companionRefs: [],
     placeId: "",
     memorySource: { type: "auto", groupId: "" },
     updatedAt: 0
@@ -659,9 +660,55 @@
     return null;
   }
 
+  function resolveOutingCompanionRef(ref, legacyCompanion) {
+    return normalizeOutingCompanionRef(ref, legacyCompanion);
+  }
+
+  function normalizeOutingCompanionRefs(refs) {
+    var list = Array.isArray(refs) ? refs : [];
+    return list.map(function (item) {
+      return normalizeOutingCompanionRef(item);
+    }).filter(Boolean);
+  }
+
+  function resolveOutingCompanions(flow) {
+    var state = flow || outingFlowState;
+    var refs = normalizeOutingCompanionRefs(state.companionRefs || []);
+    if (!refs.length && state.companionRef) {
+      refs = [normalizeOutingCompanionRef(state.companionRef)];
+    }
+    return refs.map(function (ref) {
+      return resolveOutingCompanion({ companionRef: ref });
+    }).filter(Boolean);
+  }
+
+  function getOutingCompanions(outing) {
+    var source = outing || {};
+    if (Array.isArray(source.companions) && source.companions.length) {
+      return source.companions;
+    }
+    if (source.companion) {
+      return [source.companion];
+    }
+    return [];
+  }
+
+  function getOutingCompanionNames(outing) {
+    var companions = getOutingCompanions(outing);
+    if (!companions.length) return "";
+    var names = companions.map(function (item) {
+      return String(item && item.name || "").trim();
+    }).filter(Boolean);
+    if (!names.length) return "";
+    if (names.length <= 2) {
+      return names.join("、");
+    }
+    return names.slice(0, 2).join("、") + "等 " + names.length + " 人";
+  }
+
   /* ---- flow state functions ---- */
   function createEmptyOutingFlowState() {
-    return { step: "home", companionRef: null, placeId: "", memorySource: { type: "auto", groupId: "" }, updatedAt: 0 };
+    return { step: "home", companionRef: null, companionRefs: [], placeId: "", memorySource: { type: "auto", groupId: "" }, updatedAt: 0 };
   }
 
   function normalizeOutingFlowState(src) {
@@ -669,9 +716,15 @@
     var ms = (source.memorySource && typeof source.memorySource === "object")
       ? source.memorySource
       : { type: "auto", groupId: "" };
+    var companionRefs = normalizeOutingCompanionRefs(source.companionRefs || source.companions || []);
+    var companionRef = normalizeOutingCompanionRef(source.companionRef, source.companion);
+    if (!companionRef && companionRefs.length) {
+      companionRef = companionRefs[0];
+    }
     return {
       step: source.step || "home",
-      companionRef: normalizeOutingCompanionRef(source.companionRef, source.companion),
+      companionRef: companionRef,
+      companionRefs: companionRefs,
       placeId: String(source.placeId || source.selectedPlaceId || ""),
       memorySource: { type: ms.type || "auto", groupId: String(ms.groupId || "") },
       updatedAt: Number(source.updatedAt) || 0
@@ -789,6 +842,12 @@
     var safePatch = Object.assign({}, patch || {});
     if (safePatch.companion && !safePatch.companionRef) {
       safePatch.companionRef = makeOutingCompanionRef(safePatch.companion);
+    }
+    if (safePatch.companionRefs) {
+      safePatch.companionRefs = normalizeOutingCompanionRefs(safePatch.companionRefs);
+      if (!safePatch.companionRef && safePatch.companionRefs.length) {
+        safePatch.companionRef = safePatch.companionRefs[0];
+      }
     }
     delete safePatch.companion;
     if (safePatch.companionRef) {
@@ -1013,16 +1072,22 @@
     var content = getElement("outingContent");
     if (!content) return;
     var characters = window.AppStorage.getCharacters();
+    var flow = loadOutingFlowState();
+    var selectedRefs = normalizeOutingCompanionRefs(flow.companionRefs || []);
+    var selectedIds = selectedRefs.map(function (ref) { return String(ref.characterId || ref.id || ""); });
+    var selectedCount = selectedIds.length;
 
     var listHtml = characters.length === 0
       ? renderSoftEmpty("👤", "还没有角色", "先创建一个角色再来出去玩吧", "创建角色", 'data-empty-action="create-character"')
       : characters.map(function (c) {
+          var isSelected = selectedIds.indexOf(String(c.id)) !== -1;
           var avatarHtml = c.avatar
             ? '<img src="' + escapeHtml(c.avatar) + '" alt="">'
             : escapeHtml((c.name || "?").slice(0, 1));
           var persona = String(c.personality || c.persona || "").slice(0, 30);
           return [
-            '<button type="button" class="outing-character-item" data-outing-char-id="' + escapeHtml(c.id) + '" data-outing-char-name="' + escapeHtml(c.name || "未命名角色") + '" data-outing-char-persona="' + escapeHtml(String(c.personality || c.persona || "").slice(0, 500)) + '">',
+            '<button type="button" class="outing-character-item' + (isSelected ? ' selected' : '') + '" data-outing-char-id="' + escapeHtml(c.id) + '" data-outing-char-name="' + escapeHtml(c.name || "未命名角色") + '" data-outing-char-persona="' + escapeHtml(String(c.personality || c.persona || "").slice(0, 500)) + '">',
+            '  <span class="outing-character-check">' + (isSelected ? '✓' : '') + '</span>',
             '  <span class="outing-character-avatar">' + avatarHtml + '</span>',
             '  <span class="outing-character-info">',
             '    <span class="outing-character-name">' + escapeHtml(c.name || "未命名") + '</span>',
@@ -1035,13 +1100,17 @@
     content.innerHTML = [
       '<div class="outing-back-row"><button id="outingCharBack">← 返回</button></div>',
       '<p class="outing-section-title">选择同行角色</p>',
-      '<div class="outing-character-list">' + listHtml + '</div>'
+      selectedCount ? '<div class="outing-selected-companion-bar">已选择 ' + selectedCount + ' 名角色</div>' : '',
+      '<div class="outing-character-list">' + listHtml + '</div>',
+      '<div class="outing-place-confirm-row">',
+      '  <button type="button" id="outingCharNextBtn" class="outing-depart-btn' + (selectedCount ? ' ready' : '') + '"' + (selectedCount ? '' : ' disabled') + '>下一步：选择地点</button>',
+      '</div>'
     ].join("");
 
     var backBtn = getElement("outingCharBack");
     if (backBtn) {
       backBtn.addEventListener("click", function () {
-        saveOutingFlowState({ step: "home", companionRef: null, placeId: "", memorySource: { type: "auto", groupId: "" } });
+        saveOutingFlowState({ step: "home", companionRef: null, companionRefs: [], placeId: "", memorySource: { type: "auto", groupId: "" } });
         renderOutingHomeView();
       });
     }
@@ -1051,29 +1120,42 @@
         var charId = String(btn.dataset.outingCharId || "");
         var charName = String(btn.dataset.outingCharName || "").trim();
         var charPersona = String(btn.dataset.outingCharPersona || "").trim();
-        var character = characters.find(function (c) { return String(c.id) === String(charId); });
-        if (!character && !charId) return;
-        var companionRef = {
-          type: "character",
-          characterId: charId,
-          name: charName || (character && character.name) || "未命名角色",
-          persona: (character && (character.personality || character.persona)) || charPersona || ""
-        };
-        companionRef = normalizeOutingCompanionRef(companionRef);
-        if (!companionRef) {
-          showToast("同行对象保存失败，请重试。", true);
-          return;
+        if (!charId) return;
+        var index = selectedIds.indexOf(charId);
+        var nextRefs = selectedRefs.slice();
+        if (index !== -1) {
+          nextRefs.splice(index, 1);
+        } else {
+          if (selectedRefs.length >= 6) {
+            showToast("最多选择 6 个同行角色。", true);
+            return;
+          }
+          nextRefs.push(normalizeOutingCompanionRef({
+            type: "character",
+            characterId: charId,
+            name: charName || "未命名角色",
+            persona: charPersona || ""
+          }));
         }
-        var savedFlow = saveOutingFlowState({
-          step: "place-pick",
-          companionRef: companionRef,
-          placeId: "",
-          memorySource: { type: "auto", groupId: "" }
-        });
-        debugOutingFlowState("character-selected");
-        renderOutingPlacePickView();
+        nextRefs = normalizeOutingCompanionRefs(nextRefs);
+        saveOutingFlowState({ companionRefs: nextRefs, companionRef: nextRefs[0] || null });
+        renderOutingCharacterPickView();
       });
     });
+
+    var nextBtn = getElement("outingCharNextBtn");
+    if (nextBtn) {
+      nextBtn.addEventListener("click", function () {
+        var flow = loadOutingFlowState();
+        var finalRefs = normalizeOutingCompanionRefs(flow.companionRefs || []);
+        if (!finalRefs.length) {
+          showToast("请选择至少一个同行角色。", true);
+          return;
+        }
+        saveOutingFlowState({ step: "place-pick", companionRefs: finalRefs, companionRef: finalRefs[0], placeId: "", memorySource: { type: "auto", groupId: "" } });
+        renderOutingPlacePickView();
+      });
+    }
 
     var emptyAction = content.querySelector("[data-empty-action='create-character']");
     if (emptyAction) {
@@ -1089,7 +1171,8 @@
     if (!content) return;
 
     var flow = loadOutingFlowState();
-    var companion = resolveOutingCompanion(flow);
+    var companions = resolveOutingCompanions(flow);
+    var companion = companions[0] || null;
     if (!companion && flow.companionRef && flow.companionRef.type === "character" && flow.companionRef.name) {
       companion = {
         type: "character",
@@ -1099,7 +1182,9 @@
         avatar: "",
         persona: flow.companionRef.persona || ""
       };
+      companions = [companion];
     }
+    var companionLabel = companions.length ? getOutingCompanionNames({ companions: companions }) : (companion ? companion.name : "伙伴");
     var selectedPlaceId = String(flow.placeId || "");
     var memorySource = flow.memorySource || { type: "auto", groupId: "" };
 
@@ -1156,7 +1241,7 @@
 
     content.innerHTML = [
       '<div class="outing-back-row"><button type="button" id="outingPlaceBack">← 返回</button></div>',
-      '<p class="outing-section-title">和 ' + escapeHtml(companion.name) + ' 去哪里？</p>',
+      '<p class="outing-section-title">和 ' + escapeHtml(companionLabel) + ' 去哪里？</p>',
       memorySourceHtml,
       '<div class="outing-place-list">' + placeCards + '</div>',
       '<div class="outing-place-confirm-row">',
@@ -1295,22 +1380,15 @@
     var flow = loadOutingFlowState();
     debugOutingFlowState("doStartOuting-enter");
 
-    var companion = resolveOutingCompanion(flow);
-    if (!companion && flow.companionRef && flow.companionRef.type === "character" && flow.companionRef.name) {
-      companion = {
-        type: "character",
-        id: flow.companionRef.characterId || "snapshot_character",
-        characterId: flow.companionRef.characterId || "",
-        name: flow.companionRef.name || "未命名角色",
-        avatar: "",
-        persona: flow.companionRef.persona || ""
-      };
+    var companions = resolveOutingCompanions(flow);
+    if (!companions.length && flow.companionRef && flow.companionRef.type === "character" && flow.companionRef.name) {
+      companions = [resolveOutingCompanion(flow)];
     }
     var finalPlaceId = String(flow.placeId || "");
     var memorySource = flow.memorySource || { type: "auto", groupId: "" };
 
-    if (!companion) {
-      showToast("同行对象丢失，请重新选择。", true);
+    if (!companions.length) {
+      showToast("请选择至少一个同行角色。", true);
       renderOutingHomeView();
       return;
     }
@@ -1320,13 +1398,17 @@
       return;
     }
 
-    if (companion.type === "character") {
-      companion.characterId = companion.characterId || companion.id || "";
-      companion.id = companion.id || companion.characterId || "snapshot_character";
-    }
+    companions = companions.map(function (companion) {
+      if (companion.type === "character") {
+        companion.characterId = companion.characterId || companion.id || "";
+        companion.id = companion.id || companion.characterId || "snapshot_character";
+      }
+      return companion;
+    });
 
-    var mode = companion.type === "character" ? "character" : "npc";
-    var outing = window.AppStorage.startOuting(mode, companion, finalPlaceId, { memorySource: memorySource });
+    var companion = companions[0];
+    var mode = companions.length > 1 ? "multi-character" : (companion.type === "character" ? "character" : "npc");
+    var outing = window.AppStorage.startOuting(mode, companion, finalPlaceId, { memorySource: memorySource, companions: companions });
 
     if (!outing) {
       showToast("出发失败，请重新选择地点。");
@@ -1338,7 +1420,7 @@
 
     window.AppStorage.addOutingEvent({
       type: "system",
-      content: "你和" + outing.companion.name + "来到了" + outing.placeName + "。"
+      content: "你和" + getOutingCompanionNames(outing) + "来到了" + outing.placeName + "。"
     });
     renderOutingActiveView(window.AppStorage.getCurrentOuting());
     triggerOutingAI("到达" + outing.placeName + "，刚进入");
@@ -1380,13 +1462,11 @@
     outingStep = "active";
     outingInputMode = "speech";
 
-    var companion = outing.companion || {};
-    var avatarHtml = companion.avatar
-      ? '<img src="' + escapeHtml(companion.avatar) + '" alt="">'
-      : escapeHtml((companion.name || "?").slice(0, 1));
-
+    var companions = (window.AppStorage && window.AppStorage.getOutingCompanions) ? window.AppStorage.getOutingCompanions(outing) : (outing.companions || (outing.companion ? [outing.companion] : []));
+    var companion = companions[0] || {};
+    var companionLabel = getOutingCompanionNames({ companions: companions });
     var placeName = escapeHtml(outing.placeName || "未知地点");
-    var companionName = escapeHtml(companion.name || "伙伴");
+    var companionName = escapeHtml(companionLabel || companion.name || "伙伴");
     var spentTotal = Number(outing.spentTotal || 0).toFixed(2);
 
     var startedDate = outing.startedAt ? new Date(outing.startedAt) : new Date();
@@ -1404,9 +1484,12 @@
     if (placeTextRaw.indexOf("电影院") !== -1) sceneIcon = "🎬";
     if (placeTextRaw.indexOf("餐厅") !== -1 || placeTextRaw.indexOf("饭") !== -1) sceneIcon = "🍽️";
 
+    var defaultAvatarHtml = companion.avatar
+      ? '<img src="' + escapeHtml(companion.avatar) + '" alt="">'
+      : escapeHtml((companion.name || "?").slice(0, 1));
     var events = Array.isArray(outing.events) ? outing.events : [];
     var eventsHtml = events.map(function (evt) {
-      return buildOutingEventHtml(evt, avatarHtml, startedTime);
+      return buildOutingEventHtml(evt, getOutingEventAvatarHtml(outing, evt, defaultAvatarHtml), startedTime);
     }).join("");
 
     if (!eventsHtml) {
@@ -1425,6 +1508,7 @@
       '    <div class="outing-scene-info">',
       '      <div class="outing-scene-icon">' + sceneIcon + '</div>',
       '      <div class="outing-scene-title">' + placeName + '</div>',
+      '      <div class="outing-companion-avatar-stack">' + buildOutingCompanionAvatarStackHtml(companions) + '</div>',
       '      <div class="outing-scene-row">与 <em>' + companionName + '</em> 一起</div>',
       '      <div class="outing-scene-row">已消费 ¥' + spentTotal + '</div>',
       '      <div class="outing-scene-divider"></div>',
@@ -1886,12 +1970,24 @@
           return;
         }
 
-        window.AppStorage.addOutingEvent({
+        var addedEvent = window.AppStorage.addOutingEvent({
           type: evt.type || "action",
           speakerId: evt.speakerId || "",
           speakerName: evt.speakerName || "",
-          content: evt.content || ""
+          content: evt.content || "",
+          money: evt.money ? {
+            type: evt.money.type || "cash",
+            direction: evt.money.direction || "neutral",
+            amount: String(evt.money.amount || "0"),
+            payerRole: evt.money.payerRole || "user",
+            receiverRole: evt.money.receiverRole || "merchant",
+            note: evt.money.note || ""
+          } : undefined
         });
+
+        if (addedEvent && evt.money) {
+          applyOutingMoneyLedger(addedEvent, evt.money, currentOuting);
+        }
       });
 
       if (Array.isArray(result.memories) && result.memories.length) {
@@ -1904,7 +2000,7 @@
             }
 
             currentOuting.aiMemories.push({
-              characterId: mem.characterId || (currentOuting.companion && currentOuting.companion.characterId) || "",
+              characterId: mem.characterId || (currentOuting.companions && currentOuting.companions[0] && currentOuting.companions[0].characterId) || (currentOuting.companion && currentOuting.companion.characterId) || "",
               content: String(mem.content || ""),
               createdAt: Date.now()
             });
@@ -1914,6 +2010,7 @@
       }
 
       renderOutingActiveView(window.AppStorage.getCurrentOuting());
+      runCharacterAutoTasks({ reason: "outing" });
     }).catch(function (err) {
       if (token !== outingGenerationToken) {
         return;
@@ -1925,6 +2022,33 @@
         outingAiPendingAt = 0;
         setOutingLoading(false);
       }
+    });
+  }
+
+  function applyOutingMoneyLedger(event, money, outing) {
+    if (!event || !money || !outing || !event.id) {
+      return;
+    }
+    var amount = Number(money.amount || 0);
+    if (isNaN(amount) || amount <= 0) {
+      return;
+    }
+    var direction = money.direction === "income" ? "income" : money.direction === "expense" ? "expense" : "neutral";
+    window.AppStorage.addWalletLedger({
+      id: "outing_money_" + event.id,
+      type: "outing",
+      direction: direction,
+      amount: amount,
+      title: "出行金钱变动",
+      note: String(money.note || event.content || "出行金额记录").slice(0, 120),
+      sourceType: "outing",
+      sourceId: outing.id,
+      eventId: event.id,
+      payerRole: money.payerRole === "character" ? "character" : money.payerRole === "user" ? "user" : "merchant",
+      receiverRole: money.receiverRole === "character" ? "character" : money.receiverRole === "user" ? "user" : "merchant",
+      createdAt: Date.now()
+    }, {
+      allowDuplicate: false
     });
   }
 
@@ -1945,11 +2069,7 @@
 
     var loading = getElement("outingLoadingIndicator");
     var outing = window.AppStorage.getCurrentOuting() || {};
-    var companion = outing.companion || {};
-
-    var avatarHtml = companion.avatar
-      ? '<img src="' + escapeHtml(companion.avatar) + '" alt="">'
-      : escapeHtml((companion.name || "?").slice(0, 1));
+    var avatarHtml = getOutingEventAvatarHtml(outing, evt, "");
 
     var html = buildOutingEventHtml(evt, avatarHtml, "");
 
@@ -1960,6 +2080,46 @@
     }
 
     scrollOutingStreamToBottom();
+  }
+
+  function getOutingEventAvatarHtml(outing, evt, fallbackAvatarHtml) {
+    var companions = typeof getOutingCompanions === "function" ? getOutingCompanions(outing) : (outing.companions || (outing.companion ? [outing.companion] : []));
+    var chosen = null;
+    var speakerId = evt && String(evt.speakerId || "").trim();
+    var speakerName = evt && String(evt.speakerName || "").trim();
+    if (speakerId) {
+      chosen = companions.find(function (item) {
+        return item && String(item.characterId || item.id || "") === speakerId;
+      });
+    }
+    if (!chosen && speakerName) {
+      chosen = companions.find(function (item) {
+        return item && String(item.name || "") === speakerName;
+      });
+    }
+    if (!chosen) {
+      chosen = companions[0] || null;
+    }
+    if (chosen && chosen.avatar) {
+      return '<img src="' + escapeHtml(chosen.avatar) + '" alt="">';
+    }
+    if (chosen && chosen.name) {
+      return escapeHtml((chosen.name || "?").slice(0, 1));
+    }
+    return fallbackAvatarHtml || "?";
+  }
+
+  function buildOutingCompanionAvatarStackHtml(companions) {
+    companions = Array.isArray(companions) ? companions : [];
+    if (!companions.length) return "";
+    var stack = companions.slice(0, 3).map(function (companion) {
+      var avatar = companion.avatar ? '<img src="' + escapeHtml(companion.avatar) + '" alt="">' : escapeHtml((companion.name || "?").slice(0, 1));
+      return '<span class="outing-companion-avatar" title="' + escapeHtml(companion.name || "") + '">' + avatar + '</span>';
+    }).join("");
+    if (companions.length > 3) {
+      stack += '<span class="outing-companion-avatar outing-companion-avatar-more">+' + (companions.length - 3) + '</span>';
+    }
+    return stack;
   }
 
   function setOutingLoading(loading) {
@@ -1975,7 +2135,7 @@
     var evt = window.AppStorage.addOutingEvent({
       type: "activity",
       activity: activityName,
-      content: "你和" + (outing.companion && outing.companion.name || "") + "在" + outing.placeName + activityName + "。"
+      content: "你和" + getOutingCompanionNames(outing) + "在" + outing.placeName + activityName + "。"
     });
     if (evt) appendOutingEvent(evt);
     triggerOutingAI(activityName);
@@ -2097,7 +2257,7 @@
     var outing = window.AppStorage.endOuting();
     if (!outing) return;
 
-    if (outing.mode === "character") {
+    if (outing.mode === "character" || outing.mode === "multi-character") {
       window.AppStorage.syncOutingMemoryToCharacter(outing);
     }
 
@@ -2108,7 +2268,7 @@
         '  <div style="font-size:40px;margin-bottom:16px;">🏠</div>',
         '  <strong style="display:block;font-size:18px;margin-bottom:8px;">这次出行结束了</strong>',
         '  <p style="color:var(--color-muted);font-size:14px;margin-bottom:24px;">',
-        '    去了 ' + escapeHtml(outing.placeName) + '，和 ' + escapeHtml((outing.companion && outing.companion.name) || "") +
+        '    去了 ' + escapeHtml(outing.placeName) + '，和 ' + escapeHtml(getOutingCompanionNames(outing)) +
         ' 花了 ¥' + Number(outing.spentTotal || 0).toFixed(2),
         '  </p>',
         outing.mode === "character" ? '<p style="color:var(--color-green);font-size:13px;margin-bottom:20px;">📝 记忆已同步到角色</p>' : '',
@@ -2146,7 +2306,7 @@
             '    <span class="outing-history-time">' + escapeHtml(date) + '</span>',
             '  </div>',
             '  <div class="outing-history-meta">',
-            '    <span>' + escapeHtml((outing.companion && outing.companion.name) || "") + '</span>',
+            '    <span>' + escapeHtml(getOutingCompanionNames(outing) || "") + '</span>',
             '    <span>¥' + Number(outing.spentTotal || 0).toFixed(2) + '</span>',
             '  </div>',
             eventsPreview ? [
@@ -2945,43 +3105,161 @@
     return Boolean(settings.apiUrl && settings.apiKey && settings.modelName);
   }
 
+  var characterAutoTasksRunning = false;
+
   function maybeGenerateCharacterMomentOnOpen() {
-    var characters;
-    var candidate;
+    runCharacterAutoTasks({ reason: "open" });
+  }
 
-    if (!isApiConfigured() || maybeGenerateCharacterMomentOnOpen.running) {
-      return;
+  function runCharacterAutoTasks(options) {
+    if (!isApiConfigured() || characterAutoTasksRunning) {
+      return Promise.resolve([]);
+    }
+    characterAutoTasksRunning = true;
+    return Promise.all([
+      maybeGenerateCharacterDiaries(options),
+      maybeGenerateCharacterMoments(options)
+    ]).finally(function () {
+      characterAutoTasksRunning = false;
+    });
+  }
+
+  function maybeGenerateCharacterMoments(options) {
+    if (!isApiConfigured()) {
+      return Promise.resolve([]);
+    }
+    var candidates = window.AppStorage.getCharacters().filter(shouldAutoGenerateMoment);
+    if (!candidates.length) {
+      return Promise.resolve([]);
     }
 
-    characters = window.AppStorage.getCharacters().filter(shouldAutoGenerateMoment);
+    var result = [];
+    var maxGenerate = Math.min(2, candidates.length);
+    var promise = Promise.resolve();
+
+    candidates.slice(0, maxGenerate).forEach(function (character) {
+      promise = promise.then(function () {
+        return generateCharacterMoment(character.id).then(function (moment) {
+          if (moment) {
+            result.push(moment);
+          }
+          if (getActivePage() === "wechatScreen") {
+            renderWechatScreen();
+          }
+        }).catch(function () {
+          // Silent failure is fine for optional auto moments.
+        });
+      });
+    });
+
+    return promise.then(function () {
+      return result;
+    });
+  }
+
+  function shouldAutoGenerateDiary(character) {
+    var settings = getCharacterDiarySettings(character);
+    if (!settings.autoDiaryEnabled || !isApiConfigured() || !character || !character.id) {
+      return false;
+    }
+    if (window.AppStorage.getTodayDiary(character.id)) {
+      return false;
+    }
+    var intervalMap = {
+      daily: 20 * 60 * 60 * 1000,
+      often: 12 * 60 * 60 * 1000,
+      low: 36 * 60 * 60 * 1000
+    };
+    var lastGeneratedAt = Number(character.diarySettings && character.diarySettings.lastGeneratedAt) || 0;
+    if (Date.now() - lastGeneratedAt < intervalMap[settings.frequency]) {
+      return false;
+    }
+    return true;
+  }
+
+  async function generateCharacterDiaryForCharacter(character) {
+    if (!character || !character.id || !isApiConfigured()) {
+      return null;
+    }
+
+    var today = new Date();
+    today.setHours(0, 0, 0, 0);
+    var context = collectCharacterDiaryContext(character, today);
+    var diary = await window.AIService.generateCharacterDiary(character, context);
+    if (!diary || !diary.content) {
+      return null;
+    }
+
+    var saved = window.AppStorage.addDiary({
+      type: "character",
+      characterId: character.id,
+      content: diary.content,
+      title: diary.title || diary.summary || "今日片段",
+      weather: diary.weather || "晴",
+      mood: diary.mood || "",
+      summary: diary.summary || "",
+      date: diary.date || getLocalDateString(new Date()),
+      source: "ai",
+      createdAt: Date.now(),
+      updatedAt: Date.now()
+    });
+
+    window.AppStorage.addCharacterMemory(character.id, {
+      content: "自动生成日记：" + diary.content,
+      source: "diary",
+      createdAt: Date.now()
+    });
+
+    window.AppStorage.updateCharacter(character.id, {
+      diarySettings: Object.assign({}, character.diarySettings || {}, {
+        lastGeneratedAt: Date.now()
+      })
+    });
+
+    return saved;
+  }
+
+  function maybeGenerateCharacterDiaries(options) {
+    if (!isApiConfigured()) {
+      return Promise.resolve([]);
+    }
+    var characters = window.AppStorage.getCharacters().filter(shouldAutoGenerateDiary);
     if (!characters.length) {
-      return;
+      return Promise.resolve([]);
     }
 
-    candidate = characters[Math.floor(Math.random() * characters.length)];
-    maybeGenerateCharacterMomentOnOpen.running = true;
-    generateCharacterMoment(candidate.id).then(function () {
-      if (getActivePage() === "wechatScreen") {
-        renderWechatScreen();
-      }
-    }).catch(function () {
-      // Silent: opening朋友圈 should never be blocked by an optional AI update.
-    }).finally(function () {
-      maybeGenerateCharacterMomentOnOpen.running = false;
+    var result = [];
+    var maxCount = Math.min(2, characters.length);
+    var promise = Promise.resolve();
+
+    characters.slice(0, maxCount).forEach(function (character) {
+      promise = promise.then(function () {
+        return generateCharacterDiaryForCharacter(character).then(function (diary) {
+          if (diary) {
+            result.push(diary);
+          }
+        }).catch(function () {
+          // Silent failure for auto diary generation.
+        });
+      });
+    });
+
+    return promise.then(function () {
+      return result;
     });
   }
 
   function shouldAutoGenerateMoment(character) {
     var settings = getCharacterMomentSettings(character);
     var intervalMap = {
-      low: 36 * 60 * 60 * 1000,
-      normal: 18 * 60 * 60 * 1000,
-      high: 8 * 60 * 60 * 1000
+      low: 24 * 60 * 60 * 1000,
+      normal: 8 * 60 * 60 * 1000,
+      high: 3 * 60 * 60 * 1000
     };
     var chanceMap = {
-      low: 0.08,
-      normal: 0.16,
-      high: 0.28
+      low: 0.35,
+      normal: 0.70,
+      high: 0.90
     };
 
     if (!settings.autoPostEnabled) {
@@ -9307,34 +9585,8 @@
       }
     }
 
-    if (result && Array.isArray(result.memories) && result.memories.length && window.AppStorage.addChatMemory && window.AppStorage.getChatMemories) {
-      var existingChatMems = window.AppStorage.getChatMemories(context.targetType, context.targetId) || [];
-      var now = Date.now();
-      result.memories.forEach(function (memory) {
-        if (!memory || !memory.content) {
-          return;
-        }
-        var recentMems = existingChatMems.slice(0, 30);
-        var isDuplicate = recentMems.some(function (existing) {
-          return isSimilarMemoryContent(existing.content, memory.content);
-        });
-        if (!isDuplicate) {
-          var saved = window.AppStorage.addChatMemory(context.targetType, context.targetId, {
-            title: memory.title || String(memory.content).slice(0, 20),
-            content: memory.content,
-            sourceTime: now,
-            type: "auto",
-            source: context.targetType === "group" ? "group" : (context.targetType === "offline" ? "offline" : "private"),
-            generationId: context.generationId || "",
-            sourceGenerationId: context.generationId || "",
-            createdAt: now
-          });
-          if (saved) {
-            existingChatMems.unshift({ content: memory.content });
-          }
-        }
-      });
-    }
+    // result.memories は出去玩などの専用コンテキストで処理する。
+    // 普通の私聊/群聊/線下では毎ターン自動保存しない（memorySummaryDue 時のみ保存）。
 
     if (context.bodyStateEnabled && result && result.bodyState && window.AppStorage.saveBodyState) {
       if (context.generationId && window.AppStorage.saveBodyStateSnapshot) {
@@ -9730,6 +9982,22 @@
     refreshHomeSummary();
     setActivePage("homeScreen");
     resumeAppApiJobsWhenReady();
+
+    window.setTimeout(function () {
+      runCharacterAutoTasks({ reason: "startup" });
+    }, 5000);
+
+    document.addEventListener("visibilitychange", function () {
+      if (document.visibilityState === "visible") {
+        runCharacterAutoTasks({ reason: "foreground" });
+      }
+    });
+
+    window.setInterval(function () {
+      runCharacterAutoTasks({ reason: "interval" });
+    }, 10 * 60 * 1000);
+
+    console.debug("[Startup Debug] auto tasks initialized");
     console.debug("[Startup Debug] initApp finished", {
       activePage: activePage,
       activeScreens: Array.prototype.map.call(document.querySelectorAll(".screen.active"), function (el) { return el.id; }),
@@ -9793,6 +10061,11 @@
     updateOfflineThoughtsButton: updateOfflineThoughtsButton,
     updateThoughtHeartButtons: updateThoughtHeartButtons,
     buildChatGenerationContext: buildChatGenerationContext,
+    runCharacterAutoTasks: runCharacterAutoTasks,
+    maybeGenerateCharacterMoments: maybeGenerateCharacterMoments,
+    maybeGenerateCharacterDiaries: maybeGenerateCharacterDiaries,
+    generateCharacterDiaryForCharacter: generateCharacterDiaryForCharacter,
+    shouldAutoGenerateDiary: shouldAutoGenerateDiary,
     finalizeChatGenerationContext: finalizeChatGenerationContext,
     buildMemoryContextPack: buildMemoryContextPack,
     formatMemoryContextPack: formatMemoryContextPack,

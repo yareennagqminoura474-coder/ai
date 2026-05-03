@@ -5903,10 +5903,12 @@
     var places = getOutingPlaces();
     var place = places.find(function (p) { return p.id === placeId; }) || null;
     var memorySource = (options && options.memorySource) || { type: "auto", groupId: "" };
+    var companions = Array.isArray(options && options.companions) ? options.companions : (companion ? [companion] : []);
     var outing = {
       id: "outing_" + Date.now(),
       mode: mode,
-      companion: companion || {},
+      companion: companions[0] || companion || {},
+      companions: companions,
       placeId: placeId,
       placeName: place ? place.name : placeId,
       placeDescription: place ? place.description : "",
@@ -6291,20 +6293,151 @@
     return next;
   }
 
-  function removeSyncedOutingMemory(outingId) {
-    var outing = getOutingById(outingId);
-    if (!outing || outing.mode !== "character" || !outing.companion || !outing.companion.characterId) {
+  function getOutingCompanions(outing) {
+    var source = outing || {};
+    if (Array.isArray(source.companions) && source.companions.length) {
+      return source.companions;
+    }
+    if (source.companion && (source.companion.characterId || source.companion.id)) {
+      return [source.companion];
+    }
+    return [];
+  }
+
+  function formatOutingMemoryList(memories) {
+    if (!Array.isArray(memories) || !memories.length) return "";
+    return memories.filter(function (m) {
+      return m && m.content;
+    }).slice(-20).map(function (m) {
+      return (m.title ? "【" + m.title + "】" : "") + String(m.content);
+    }).join("\n");
+  }
+
+  function buildOutingMemorySummary(outing) {
+    var source = outing || {};
+    var parts = [];
+    var placeName = String(source.placeName || source.placeId || "某地");
+    var companions = getOutingCompanions(source);
+    var companionNames = companions.map(function (c) {
+      return String(c && (c.name || c.characterName) || "角色");
+    }).join("、");
+
+    parts.push("和" + (companionNames || "角色") + "一起去了" + placeName + "。");
+
+    if (Array.isArray(source.events) && source.events.length) {
+      var eventSummary = source.events.filter(function (e) {
+        return e && (e.content || e.description);
+      }).slice(0, 8).map(function (e) {
+        return String(e.content || e.description || "");
+      }).join("；");
+      if (eventSummary) {
+        parts.push("期间发生：" + eventSummary + "。");
+      }
+    }
+
+    if (Number(source.spentTotal) > 0) {
+      parts.push("消费合计：" + source.spentTotal + "元。");
+    }
+
+    if (Array.isArray(source.aiMemories) && source.aiMemories.length) {
+      var aiSummary = source.aiMemories.filter(function (m) {
+        return m && m.content;
+      }).slice(0, 6).map(function (m) {
+        return String(m.content);
+      }).join("；");
+      if (aiSummary) {
+        parts.push(aiSummary);
+      }
+    }
+
+    return parts.join(" ");
+  }
+
+  function syncOutingMemoryToCharacter(outing) {
+    var source = outing || {};
+    if (source.mode !== "character" && source.mode !== "multi-character") {
       return false;
     }
-    var characterId = outing.companion.characterId;
-    deleteChatMemory("private", characterId, "memory_outing_" + outing.id);
-    deleteCharacterMemoryById(characterId, "character_memory_outing_" + outing.id);
+    var companions = getOutingCompanions(source);
+    if (!companions.length) return false;
 
-    var groups = getGroups() || [];
-    groups.forEach(function (group) {
-      if (group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1) {
-        deleteChatMemory("group", group.id, "group_memory_outing_" + outing.id + "_" + group.id);
+    var summary = buildOutingMemorySummary(source);
+    if (!summary) return false;
+
+    companions.forEach(function (companion) {
+      if (!companion || !companion.characterId) return;
+      var characterId = String(companion.characterId);
+      var cName = String(companion.name || companion.characterName || "角色");
+
+      upsertChatMemory("private", characterId, {
+        id: "memory_outing_" + source.id + "_" + characterId,
+        type: "outing",
+        title: "一起去了" + (source.placeName || "某地"),
+        content: summary,
+        source: "outing",
+        targetType: "private",
+        targetId: characterId,
+        characterId: characterId,
+        createdAt: Date.now()
+      });
+
+      upsertCharacterMemory(characterId, {
+        id: "character_memory_outing_" + source.id + "_" + characterId,
+        type: "outing",
+        title: "和用户出去玩",
+        content: summary,
+        source: "outing",
+        createdAt: Date.now()
+      });
+
+      var groups = getGroups() || [];
+      groups.forEach(function (group) {
+        if (group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1) {
+          upsertChatMemory("group", group.id, {
+            id: "group_memory_outing_" + source.id + "_" + group.id + "_" + characterId,
+            type: "outing",
+            title: cName + "和用户去了" + (source.placeName || "某地"),
+            content: summary,
+            source: "outing",
+            targetType: "group",
+            targetId: group.id,
+            characterId: characterId,
+            createdAt: Date.now()
+          });
+        }
+      });
+    });
+
+    source.memorySynced = true;
+    source.memorySyncedAt = Date.now();
+    saveOutingData(source);
+    return true;
+  }
+
+  function removeSyncedOutingMemory(outingId) {
+    var outing = getOutingById(outingId);
+    if (!outing || (outing.mode !== "character" && outing.mode !== "multi-character")) {
+      return false;
+    }
+    var companions = getOutingCompanions(outing);
+    if (!companions.length) {
+      return false;
+    }
+
+    companions.forEach(function (companion) {
+      if (!companion || !companion.characterId) {
+        return;
       }
+      var characterId = String(companion.characterId || "");
+      deleteChatMemory("private", characterId, "memory_outing_" + outing.id + "_" + characterId);
+      deleteCharacterMemoryById(characterId, "character_memory_outing_" + outing.id + "_" + characterId);
+
+      var groups = getGroups() || [];
+      groups.forEach(function (group) {
+        if (group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1) {
+          deleteChatMemory("group", group.id, "group_memory_outing_" + outing.id + "_" + group.id + "_" + characterId);
+        }
+      });
     });
 
     if (outing.memorySynced) {
@@ -6317,7 +6450,7 @@
 
   function resyncOutingMemoryIfNeeded(outingId) {
     var outing = getOutingById(outingId);
-    if (!outing || outing.mode !== "character" || !outing.memorySynced) {
+    if (!outing || (outing.mode !== "character" && outing.mode !== "multi-character") || !outing.memorySynced) {
       return false;
     }
     syncOutingMemoryToCharacter(outing);
@@ -6330,18 +6463,9 @@
     return value.length > limit ? value.slice(0, limit) + "..." : value;
   }
 
-  function formatOutingMemoryList(memories) {
-    var list = Array.isArray(memories) ? memories : [];
-    return list.slice(0, 20).map(function (item) {
-      if (!item || !item.content) return "";
-      return (item.title ? item.title + "\n" : "") + item.content;
-    }).filter(Boolean).join("\n\n");
-  }
-
   function getOutingCompanionMemoryContext(outing, options) {
     var source = outing || {};
-    var companion = source.companion || {};
-    var characterId = companion.characterId || companion.id || "";
+    var companions = getOutingCompanions(source);
     var params = options || {};
     var memorySource = params.memorySource || source.memorySource || { type: "auto", groupId: "" };
     var result = {
@@ -6352,94 +6476,119 @@
       sourceLabel: "自动"
     };
 
-    if (!source || source.mode !== "character" || !characterId) {
+    if (!source || (source.mode !== "character" && source.mode !== "multi-character") || !companions.length) {
       return result;
     }
 
-    try {
-      result.privateChatMemoryText = formatOutingMemoryList(getChatMemories("private", characterId));
-    } catch (e) {
-      result.privateChatMemoryText = "";
+    if (memorySource.type === "group" && memorySource.groupId) {
+      result.sourceLabel = "指定群聊";
+    } else if (memorySource.type === "private") {
+      result.sourceLabel = "私聊";
+    } else {
+      result.sourceLabel = "自动";
     }
 
-    try {
-      result.characterMemoryText = formatOutingMemoryList(getCharacterMemory(characterId).slice(-20));
-    } catch (e) {
-      result.characterMemoryText = "";
-    }
+    var privateParts = [];
+    var characterParts = [];
+    var recentParts = [];
+    var groupParts = [];
 
-    try {
-      var privateHistory = getChatHistory(characterId).filter(function (message) {
-        return message && message.content && message.type !== "loading" && message.type !== "error";
-      }).slice(-24);
+    companions.forEach(function (companion) {
+      var companionName = String(companion && companion.name || "角色");
+      var characterId = String(companion && companion.characterId || companion && companion.id || "");
+      var privateMemoryText = "";
+      var characterMemoryText = "";
+      var recentText = "";
+      var groupText = "";
 
-      result.recentPrivateChatText = privateHistory.map(function (message) {
-        if (message.role === "user") {
-          return "用户：" + message.content;
-        }
-        return (message.characterName || companion.name || "角色") + "：" + message.content;
-      }).join("\n");
-    } catch (e) {
-      result.recentPrivateChatText = "";
-    }
-
-    try {
-      var groups = getGroups() || [];
-      var relatedGroups = groups.filter(function (group) {
-        return group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1;
-      });
-
-      if (memorySource.type === "group" && memorySource.groupId) {
-        relatedGroups = relatedGroups.filter(function (group) {
-          return String(group.id) === String(memorySource.groupId);
-        });
-        result.sourceLabel = "指定群聊";
-      } else if (memorySource.type === "private") {
-        relatedGroups = [];
-        result.sourceLabel = "私聊";
-      } else {
-        result.sourceLabel = "自动";
-      }
-
-      result.groupMemoryText = relatedGroups.map(function (group) {
-        var memoryText = "";
-        var recentText = "";
-
+      if (characterId) {
         try {
-          memoryText = formatOutingMemoryList(getChatMemories("group", group.id));
+          privateMemoryText = formatOutingMemoryList(getChatMemories("private", characterId));
         } catch (e) {
-          memoryText = "";
+          privateMemoryText = "";
         }
 
         try {
-          var history = getGroupChatHistory(group.id).filter(function (message) {
-            return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system";
-          }).slice(-18);
+          characterMemoryText = formatOutingMemoryList(getCharacterMemory(characterId).slice(-20));
+        } catch (e) {
+          characterMemoryText = "";
+        }
 
-          recentText = history.map(function (message) {
+        try {
+          var privateHistory = getChatHistory(characterId).filter(function (message) {
+            return message && message.content && message.type !== "loading" && message.type !== "error";
+          }).slice(-24);
+
+          recentText = privateHistory.map(function (message) {
             if (message.role === "user") {
               return "用户：" + message.content;
             }
-            return (message.characterName || companion.name || "角色") + "：" + message.content;
+            return (message.characterName || companionName) + "：" + message.content;
           }).join("\n");
         } catch (e) {
           recentText = "";
         }
 
-        return [
-          "群聊：" + (group.name || "群聊"),
-          memoryText ? "群聊记忆：\n" + memoryText : "",
-          recentText ? "最近群聊：\n" + recentText : ""
-        ].filter(Boolean).join("\n");
-      }).filter(Boolean).join("\n\n");
-    } catch (e) {
-      result.groupMemoryText = "";
-    }
+        try {
+          var groups = getGroups() || [];
+          var relatedGroups = groups.filter(function (group) {
+            return group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1;
+          });
 
-    result.privateChatMemoryText = limitTextForOutingMemory(result.privateChatMemoryText, 1200);
-    result.characterMemoryText = limitTextForOutingMemory(result.characterMemoryText, 1200);
-    result.groupMemoryText = limitTextForOutingMemory(result.groupMemoryText, 1800);
-    result.recentPrivateChatText = limitTextForOutingMemory(result.recentPrivateChatText, 1200);
+          if (memorySource.type === "group" && memorySource.groupId) {
+            relatedGroups = relatedGroups.filter(function (group) {
+              return String(group.id) === String(memorySource.groupId);
+            });
+          } else if (memorySource.type === "private") {
+            relatedGroups = [];
+          }
+
+          groupText = relatedGroups.map(function (group) {
+            var memoryText = "";
+            var recentGroupText = "";
+
+            try {
+              memoryText = formatOutingMemoryList(getChatMemories("group", group.id));
+            } catch (e) {
+              memoryText = "";
+            }
+
+            try {
+              var history = getGroupChatHistory(group.id).filter(function (message) {
+                return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system";
+              }).slice(-18);
+
+              recentGroupText = history.map(function (message) {
+                if (message.role === "user") {
+                  return "用户：" + message.content;
+                }
+                return (message.characterName || companionName) + "：" + message.content;
+              }).join("\n");
+            } catch (e) {
+              recentGroupText = "";
+            }
+
+            return [
+              "群聊：" + (group.name || "群聊"),
+              memoryText ? "群聊记忆：\n" + memoryText : "",
+              recentGroupText ? "最近群聊：\n" + recentGroupText : ""
+            ].filter(Boolean).join("\n");
+          }).filter(Boolean).join("\n\n");
+        } catch (e) {
+          groupText = "";
+        }
+      }
+
+      privateParts.push("【" + companionName + "的私聊记忆】" + (privateMemoryText || "暂无"));
+      characterParts.push("【" + companionName + "的角色记忆】" + (characterMemoryText || "暂无"));
+      recentParts.push("【" + companionName + "的最近私聊】" + (recentText || "暂无"));
+      groupParts.push("【" + companionName + "的群聊记忆】" + (groupText || "暂无"));
+    });
+
+    result.privateChatMemoryText = limitTextForOutingMemory(privateParts.join("\n\n"), 1200);
+    result.characterMemoryText = limitTextForOutingMemory(characterParts.join("\n\n"), 1200);
+    result.recentPrivateChatText = limitTextForOutingMemory(recentParts.join("\n\n"), 1200);
+    result.groupMemoryText = limitTextForOutingMemory(groupParts.join("\n\n"), 1800);
 
     return result;
   }
@@ -6453,81 +6602,11 @@
 
     var store = getOutingStore();
     store.current = null;
-    store.history = store.history || [];
-    store.history.unshift(outing);
-    if (store.history.length > 50) {
-      store.history = store.history.slice(0, 50);
-    }
+    store.history = (store.history || []).concat([outing]);
     saveOutingStore(store);
+
+    syncOutingMemoryToCharacter(outing);
     return outing;
-  }
-
-  function buildOutingMemorySummary(outing) {
-    var aiMemoryText = Array.isArray(outing.aiMemories) && outing.aiMemories.length
-      ? "出行中形成的记忆：" + outing.aiMemories.slice(-6).map(function (m) {
-          return m.content || "";
-        }).filter(Boolean).join("；")
-      : "";
-    return [
-      "和用户一起去了" + outing.placeName + "。",
-      "同行对象：" + (outing.companion && outing.companion.name || ""),
-      "总花费：¥" + Number(outing.spentTotal || 0).toFixed(2),
-      "发生的事：" + (outing.events || []).slice(-8).map(function (e) { return e.content || ""; }).join("；"),
-      (outing.purchases && outing.purchases.length)
-        ? "购买：" + outing.purchases.map(function (p) { return p.itemName + " ¥" + Number(p.price || 0).toFixed(2); }).join("；")
-        : "",
-      aiMemoryText
-    ].filter(Boolean).join("\n");
-  }
-
-  function syncOutingMemoryToCharacter(outing) {
-    if (!outing || outing.mode !== "character" || !outing.companion || !outing.companion.characterId) {
-      return;
-    }
-    var characterId = outing.companion.characterId;
-    var summary = buildOutingMemorySummary(outing);
-
-    upsertChatMemory("private", characterId, {
-      id: "memory_outing_" + outing.id,
-      type: "outing",
-      title: "一起去了" + outing.placeName,
-      content: summary,
-      source: "outing",
-      targetType: "private",
-      targetId: characterId,
-      characterId: characterId,
-      createdAt: Date.now()
-    });
-
-    upsertCharacterMemory(characterId, {
-      id: "character_memory_outing_" + outing.id,
-      type: "outing",
-      title: "和用户出去玩",
-      content: summary,
-      source: "outing",
-      createdAt: Date.now()
-    });
-
-    var groups = getGroups() || [];
-    groups.forEach(function (group) {
-      if (group && Array.isArray(group.memberIds) && group.memberIds.indexOf(characterId) !== -1) {
-        upsertChatMemory("group", group.id, {
-          id: "group_memory_outing_" + outing.id + "_" + group.id,
-          type: "outing",
-          title: (outing.companion.name || "") + "和用户去了" + outing.placeName,
-          content: summary,
-          source: "outing",
-          targetType: "group",
-          targetId: group.id,
-          characterId: characterId,
-          createdAt: Date.now()
-        });
-      }
-    });
-
-    outing.memorySynced = true;
-    outing.memorySyncedAt = Date.now();
-    saveOutingData(outing);
   }
 
   window.AppStorage = {
@@ -6741,6 +6820,7 @@
     getOutingHistory: getOutingHistory,
     deleteOutingHistoryItem: deleteOutingHistoryItem,
     getOutingById: getOutingById,
+    getOutingCompanions: getOutingCompanions,
     getOutingCompanionMemoryContext: getOutingCompanionMemoryContext,
     syncOutingMemoryToCharacter: syncOutingMemoryToCharacter,
     resyncOutingMemoryIfNeeded: resyncOutingMemoryIfNeeded,

@@ -1830,6 +1830,9 @@
     closeToolPanel();
     renderGroupChatMessages(group.id);
     renderGroupList();
+    if (window.AppExtras && typeof window.AppExtras.runCharacterAutoTasks === "function") {
+      window.AppExtras.runCharacterAutoTasks({ reason: "group" });
+    }
   }
 
   async function handleComposerAction() {

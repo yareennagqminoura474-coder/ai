@@ -356,6 +356,9 @@
     renderOfflineMessages({
       autoScrollToBottom: Boolean(captureOfflineScrollState(getElement("offlineMessages")) && captureOfflineScrollState(getElement("offlineMessages")).nearBottom)
     });
+    if (window.AppExtras && typeof window.AppExtras.runCharacterAutoTasks === "function") {
+      window.AppExtras.runCharacterAutoTasks({ reason: "offline" });
+    }
   }
 
   async function advanceOffline() {

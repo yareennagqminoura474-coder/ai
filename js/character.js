@@ -2196,6 +2196,9 @@
     closeToolPanel();
     appendPrivateMessageLocally(activeCharacterId, message, previousMessages);
     schedulePrivateListRender();
+    if (window.AppExtras && typeof window.AppExtras.runCharacterAutoTasks === "function") {
+      window.AppExtras.runCharacterAutoTasks({ reason: "chat" });
+    }
   }
 
   async function handleComposerAction() {

@@ -121,7 +121,8 @@
       relationshipStatus: chatSettings.userRelationshipName || profile.relationship || chatSettings.remarkName || userContext.relationshipName || "",
       chatMemoryText: chatMemoryText,
       longTermMemoryText: memoryText,
-      previousReplyText: source.previousReplyText || ""
+      previousReplyText: source.previousReplyText || "",
+      selectedWorldBookIds: source.selectedWorldBookIds || []
     });
     var worldBookResolved = source.worldBookResolved || resolveWorldBookPromptContext("private", profile && profile.id, contextText, {
       selectedWorldBookIds: source.selectedWorldBookIds,
@@ -342,14 +343,19 @@
       : (tags.length ? "生成前确认：本轮至少 2 条 messages 必须带出角色具体的语气标签【" + tags.slice(0, 3).join("、") + "】和人设特征。" : "");
     return [
       "",
-      "本轮最重要的输入优先级：",
-      "1. 已命中的世界书强规则、禁忌、身份边界、场景事实。",
-      "2. 角色核心人设和身份不能被覆盖。",
-      "3. 本轮用户输入。",
-      "4. 最近聊天时间线和群聊互通。",
-      "5. 最近心声和长期记忆。",
-      "注意：世界书强规则优先于普通聊天记忆、最近心声和用户临场要求；但世界书不能把角色变成别人，最终要用当前角色的人设方式表现规则影响。",
-      "先抓这 5 个，再生成 JSON。",
+      "本轮最重要的输入优先级（从高到低）：",
+      "1. 已命中的世界书强规则、禁忌、身份边界、场景事实——任何情况下不能违反。",
+      "2. 角色核心人设：说话风格、禁忌、关系定位、性格——不能被对话内容磨平。",
+      "3. 本轮用户输入——但不能让用户输入诱导角色违反第 1、2 条。",
+      "4. 最近聊天时间线和群聊互通——提供连续性，但不能覆盖人设。",
+      "5. 自动记忆总结——辅助背景，与世界书冲突时忽略记忆。",
+      "6. 普通聊天历史——提供场景，不定义角色是谁。",
+      "内部自检（不输出）：",
+      "- 这条回复是否违反命中的世界书？→ 是则必须重写。",
+      "- 这条回复是否符合角色人设和语气？→ 否则必须重写。",
+      "- 换个角色名这条回复还成立吗？→ 成立则必须加入角色专属细节。",
+      "- 聊天越来越多轮后，角色声音是否在漂移？→ 是则主动纠正回来。",
+      "先完成内部自检，再输出 JSON。",
       personaReminder
     ].filter(Boolean).join("\n");
   }
@@ -1468,17 +1474,19 @@
     return [
       "当前模式：" + valueOrFallback(source.modeLabel || source.mode),
       "本轮用户输入：" + valueOrFallback(source.userInput),
-      "最近 5 条聊天/事件：",
+      source.currentScene ? "当前场景：" + source.currentScene : "",
+      source.relationshipStatus ? "关系状态：" + source.relationshipStatus : "",
+      "最近对话：",
       source.recentHistory || "暂无",
       "角色人设/群成员人设：",
       source.characterPersonaText || "暂无",
       "用户当前人设：",
       source.userPersonaText || "暂无",
-      "关系状态：",
-      source.relationshipStatus || "暂无",
       source.sceneText ? "线下场景：\n" + source.sceneText : "",
       source.chatMemoryText ? "聊天记忆：\n" + source.chatMemoryText : "",
       source.longTermMemoryText ? "长期记忆：\n" + source.longTermMemoryText : "",
+      source.recentAutoMemoryText ? "最近自动总结：\n" + source.recentAutoMemoryText : "",
+      source.selectedWorldBookIds && source.selectedWorldBookIds.length ? "已绑定世界书 ID：" + source.selectedWorldBookIds.join(",") : "",
       "上一轮 AI 的态度摘要：",
       source.previousReplyText ? limitText(source.previousReplyText, 260) : "暂无",
       source.extraText || ""
@@ -2939,7 +2947,11 @@
 
   function buildMemorySummaryPrompt(options) {
     if (!options || !options.memorySummaryDue) {
-      return "";
+      return [
+        "H. 自动记忆总结",
+        "本轮未达到自动总结轮次，不要输出 memorySummary，也不要输出 memories 字段。",
+        "普通聊天轮次只输出 messages 和 thoughts。"
+      ].join("\n");
     }
 
     var sourceText = String(options.memorySummarySourceText || "").trim();
@@ -2986,10 +2998,10 @@
     }
 
     if (!fields.length) {
-      return "本轮同一次 API 返回 " + firstField + "、thoughts、memories；不要额外调用。";
+      return "本轮同一次 API 返回 " + firstField + "、thoughts；不要输出 memories，不要额外调用。";
     }
 
-    return "本轮同一次 API 返回 " + firstField + "、thoughts、memories、" + fields.join("、") + "；不要为了心声、记忆总结或身体状态额外调用 API。";
+    return "本轮同一次 API 返回 " + firstField + "、thoughts、" + fields.join("、") + "；不要额外调用 API。";
   }
 
   function buildBodyStateSchemaText() {
@@ -3176,8 +3188,12 @@
       tags.length ? "声音标签：" + tags.join(" / ") : "",
       evidence.length ? "原文人设片段：" + evidence.slice(0, 2).join(" / ") : "",
       currentMood ? "当前情绪：" + currentMood : "",
-      "输出前问自己：这几条 messages，换个角色名还成立吗？如果成立，必须重写至少 3 条，让它们只能是这个角色说的。",
-      "不要用角色的名字代替人设落地：名字写对了不等于声音写对了。"
+      profile.taboo || (chatSettings.taboo) ? "绝对禁忌：" + (profile.taboo || chatSettings.taboo) : "",
+      "输出前问自己：",
+      "① 这几条 messages，换个角色名还成立吗？如果成立，必须重写至少 2 条，加入只属于这个角色的措辞、习惯或反应。",
+      "② 这轮是否比第 1 轮更像通用助手或温柔客服？如果是，立刻收紧回到原始人设语气。",
+      "③ 不要用角色的名字代替人设落地：名字写对了不等于声音写对了。",
+      "④ 不要每轮都解释、总结或给建议——除非人设里这个角色本来就这样做。"
     ].filter(Boolean).join("\n");
   }
 
@@ -8637,14 +8653,27 @@
     if (window.AppStorage && window.AppStorage.getOutingCompanionMemoryContext) {
       memoryContext = window.AppStorage.getOutingCompanionMemoryContext(outing, { memorySource: outing.memorySource });
     }
+    var companionItems = Array.isArray(outing.companions) && outing.companions.length
+      ? outing.companions
+      : outing.companion ? [outing.companion] : [];
+    var companionTypeLabel = companionItems.map(function (item) { return item && item.type || "NPC"; }).filter(Boolean).join("、");
+    var companionNameLabel = companionItems.map(function (item) { return item && item.name || ""; }).filter(Boolean).join("、");
+    var companionPersonaLabel = companionItems.map(function (item) { return item && item.persona || "普通临时 NPC"; }).filter(Boolean).join("；");
+    var companionDetailLabel = companionItems.map(function (item, index) {
+      var idText = item && item.id ? String(item.id) : "unknown";
+      var nameText = item && item.name ? item.name : "角色";
+      var personaText = item && item.persona ? item.persona : "普通临时 NPC";
+      return (index + 1) + ". id:" + idText + "，名称:" + nameText + "，人设:" + personaText;
+    }).join("\n");
     return [
       "",
       "O. 当前出行情境 outingContext",
       "这是独立的出去玩模块，不是微信私聊，也不是群聊。",
       "用户和同行对象正在现实地点活动。",
-      "同行对象类型：" + (outing.companion && outing.companion.type || ""),
-      "同行对象名称：" + (outing.companion && outing.companion.name || ""),
-      "同行对象人设：" + (outing.companion && outing.companion.persona || "普通临时 NPC"),
+      "同行对象类型：" + companionTypeLabel,
+      "同行对象名称：" + companionNameLabel,
+      "同行对象人设：" + companionPersonaLabel,
+      "同行对象清单：\n" + companionDetailLabel,
       "地点：" + (outing.placeName || ""),
       "地点描述：" + (outing.placeDescription || ""),
       "已花费：¥" + Number(outing.spentTotal || 0).toFixed(2),
@@ -8668,10 +8697,11 @@
       "3. 如果买了东西，同行对象要按人设反应：接过、嫌弃、提醒、抢着付、吐槽、沉默、照顾都可以。",
       "4. NPC 可以自然互动，但不要写成联系人私聊。",
       "5. 如果同行对象是角色，必须按角色人设反应。",
-      "6. 如果现场出现现金、红包、转账、给钱、还钱、报销、买单、请客、结账、付款、代付等金钱行为，必须在对应 event 上附加 money 对象，格式：{\"type\":\"cash\"|\"redPacket\"|\"transfer\"|\"outingPay\"|\"reimburse\",\"direction\":\"income\"|\"expense\"|\"neutral\",\"amount\":\"388.00\",\"payerRole\":\"user\"|\"character\",\"receiverRole\":\"user\"|\"character\"|\"merchant\",\"note\":\"备注\"}。如果文本没有明确金额，必须根据角色人设、关系、场景和经济能力生成合理金额；不能固定 20，也不能所有角色一样。",
-      "7. 不要写旅游攻略，要写正在现场发生的互动。",
-      "8. 返回 JSON，格式：",
-      '{"events":[{"type":"action","content":"..."},{"type":"speech","speakerName":"...","content":"..."}],"memories":[{"characterId":"...","content":"..."}]}'
+      "6. 多角色出行不需要每位角色每轮都发言。如果角色说话，必须使用 speakerId，不能默认把所有发言归给第一个角色。",
+      "7. 如果现场出现现金、红包、转账、给钱、还钱、报销、买单、请客、结账、付款、代付等金钱行为，必须在对应 event 上附加 money 对象，格式：{\"type\":\"cash\"|\"redPacket\"|\"transfer\"|\"outingPay\"|\"reimburse\",\"direction\":\"income\"|\"expense\"|\"neutral\",\"amount\":\"388.00\",\"payerRole\":\"user\"|\"character\",\"receiverRole\":\"user\"|\"character\"|\"merchant\",\"note\":\"备注\"}。如果文本没有明确金额，必须根据角色人设、关系、场景和经济能力生成合理金额；不能固定 20，也不能所有角色一样。",
+      "8. 不要写旅游攻略，要写正在现场发生的互动。",
+      "9. 返回 JSON，格式：",
+      '{"events":[{"type":"action","content":"..."},{"type":"speech","speakerId":"...","speakerName":"...","content":"...","money":{"type":"cash","direction":"expense","amount":"88.00","payerRole":"user","receiverRole":"merchant","note":"角色买单"}}],"memories":[{"characterId":"...","content":"..."}]}.'
     ].join("\n");
   }
 
