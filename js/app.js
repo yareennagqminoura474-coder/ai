@@ -592,8 +592,16 @@
     if (!source) return null;
     if (source.type === "character") {
       var characterId = String(source.characterId || source.id || "");
-      var name = String(source.name || (legacyCompanion && legacyCompanion.name) || "").trim();
-      var persona = String(source.persona || (legacyCompanion && (legacyCompanion.personality || legacyCompanion.persona)) || "").slice(0, 500);
+      var name = String(
+        source.name ||
+        (legacyCompanion && legacyCompanion.name) ||
+        ""
+      ).trim();
+      var persona = String(
+        source.persona ||
+        (legacyCompanion && (legacyCompanion.personality || legacyCompanion.persona)) ||
+        ""
+      ).slice(0, 500);
       if (!characterId && !name) {
         return null;
       }
@@ -636,7 +644,7 @@
           persona: character.personality || character.persona || ref.persona || ""
         };
       }
-      if (ref.name) {
+      if (ref.characterId || ref.name) {
         return {
           type: "character",
           id: ref.characterId || "snapshot_character",
@@ -690,6 +698,25 @@
     }
   }
 
+  function isBrokenOutingFlowState(flow) {
+    return flow
+      && flow.companionRef
+      && flow.companionRef.type === "character"
+      && !String(flow.companionRef.characterId || "").trim()
+      && !String(flow.companionRef.name || "").trim();
+  }
+
+  function repairInvalidOutingFlowState() {
+    var stored = readStoredOutingFlowState();
+    if (isBrokenOutingFlowState(stored)) {
+      try { localStorage.removeItem(OUTING_FLOW_STATE_KEY); } catch (e) {}
+    }
+    var session = readSessionOutingFlowState();
+    if (isBrokenOutingFlowState(session)) {
+      try { sessionStorage.removeItem(OUTING_FLOW_SESSION_KEY); } catch (e) {}
+    }
+  }
+
   function applyOutingFlowState(flow) {
     var next = normalizeOutingFlowState(flow);
     var resolvedCompanion = resolveOutingCompanion(next);
@@ -702,34 +729,84 @@
     return next;
   }
 
+  var OUTING_FLOW_SESSION_KEY = "myAiApp.outingFlowState.session";
+
+  function readSessionOutingFlowState() {
+    var raw;
+    try { raw = sessionStorage.getItem(OUTING_FLOW_SESSION_KEY); } catch (e) { raw = ""; }
+    if (!raw) return null;
+    var parsed;
+    try { parsed = JSON.parse(raw); } catch (e2) { return null; }
+    if (!parsed || typeof parsed !== "object") return null;
+    return normalizeOutingFlowState(parsed);
+  }
+
+  function writeSessionOutingFlowState(flow) {
+    try {
+      sessionStorage.setItem(OUTING_FLOW_SESSION_KEY, JSON.stringify(flow));
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
   function loadOutingFlowState() {
+    var memory = normalizeOutingFlowState(outingFlowState);
+    var session = readSessionOutingFlowState();
     var stored = readStoredOutingFlowState();
-    if (stored) {
+
+    function hasValidCompanion(flow) {
+      return flow && flow.companionRef && flow.companionRef.name;
+    }
+
+    function isDraftFlow(flow) {
+      return flow && (flow.companionRef || flow.placeId || flow.step !== "home");
+    }
+
+    if (hasValidCompanion(memory)) {
+      return applyOutingFlowState(memory);
+    }
+    if (hasValidCompanion(session)) {
+      return applyOutingFlowState(session);
+    }
+    if (hasValidCompanion(stored)) {
       return applyOutingFlowState(stored);
     }
-    if (outingFlowState && (outingFlowState.companionRef || outingFlowState.placeId || outingFlowState.step !== "home")) {
-      return applyOutingFlowState(outingFlowState);
+    if (isDraftFlow(memory)) {
+      return applyOutingFlowState(memory);
+    }
+    if (isDraftFlow(session)) {
+      return applyOutingFlowState(session);
+    }
+    if (isDraftFlow(stored)) {
+      return applyOutingFlowState(stored);
     }
     return applyOutingFlowState(createEmptyOutingFlowState());
   }
 
   function saveOutingFlowState(patch) {
-    var stored = readStoredOutingFlowState();
-    var base = stored || outingFlowState || createEmptyOutingFlowState();
+    var base = outingFlowState || readSessionOutingFlowState() || readStoredOutingFlowState() || createEmptyOutingFlowState();
     var safePatch = Object.assign({}, patch || {});
-    // 如果 patch 传的是完整 companion 而不是 companionRef，自动转换
     if (safePatch.companion && !safePatch.companionRef) {
       safePatch.companionRef = makeOutingCompanionRef(safePatch.companion);
     }
     delete safePatch.companion;
+    if (safePatch.companionRef) {
+      safePatch.companionRef = normalizeOutingCompanionRef(safePatch.companionRef);
+    }
     var next = normalizeOutingFlowState(Object.assign({}, base, safePatch, { updatedAt: Date.now() }));
-    writeStoredOutingFlowState(next);
-    return applyOutingFlowState(next);
+    applyOutingFlowState(next);
+    writeSessionOutingFlowState(next);
+    if (!writeStoredOutingFlowState(next)) {
+      try { localStorage.removeItem(OUTING_FLOW_STATE_KEY); } catch (e) {}
+    }
+    return next;
   }
 
   function clearOutingFlowState() {
     var empty = createEmptyOutingFlowState();
     try { localStorage.removeItem(OUTING_FLOW_STATE_KEY); } catch (e) {}
+    try { sessionStorage.removeItem(OUTING_FLOW_SESSION_KEY); } catch (e) {}
     return applyOutingFlowState(empty);
   }
 
@@ -776,6 +853,7 @@
     } catch (e) {}
   }
 
+  repairInvalidOutingFlowState();
   migrateOutingFlowStateIfNeeded();
 
   /* ---- openOutingScreen ---- */
@@ -944,7 +1022,7 @@
             : escapeHtml((c.name || "?").slice(0, 1));
           var persona = String(c.personality || c.persona || "").slice(0, 30);
           return [
-            '<button class="outing-character-item" data-outing-char-id="' + escapeHtml(c.id) + '">',
+            '<button type="button" class="outing-character-item" data-outing-char-id="' + escapeHtml(c.id) + '" data-outing-char-name="' + escapeHtml(c.name || "未命名角色") + '" data-outing-char-persona="' + escapeHtml(String(c.personality || c.persona || "").slice(0, 500)) + '">',
             '  <span class="outing-character-avatar">' + avatarHtml + '</span>',
             '  <span class="outing-character-info">',
             '    <span class="outing-character-name">' + escapeHtml(c.name || "未命名") + '</span>',
@@ -970,28 +1048,29 @@
 
     Array.prototype.forEach.call(content.querySelectorAll("[data-outing-char-id]"), function (btn) {
       btn.addEventListener("click", function () {
-        var charId = btn.dataset.outingCharId;
+        var charId = String(btn.dataset.outingCharId || "");
+        var charName = String(btn.dataset.outingCharName || "").trim();
+        var charPersona = String(btn.dataset.outingCharPersona || "").trim();
         var character = characters.find(function (c) { return String(c.id) === String(charId); });
-        if (!character) return;
+        if (!character && !charId) return;
+        var companionRef = {
+          type: "character",
+          characterId: charId,
+          name: charName || (character && character.name) || "未命名角色",
+          persona: (character && (character.personality || character.persona)) || charPersona || ""
+        };
+        companionRef = normalizeOutingCompanionRef(companionRef);
+        if (!companionRef) {
+          showToast("同行对象保存失败，请重试。", true);
+          return;
+        }
         var savedFlow = saveOutingFlowState({
           step: "place-pick",
-          companionRef: makeOutingCompanionRef({
-            type: "character",
-            id: character.id,
-            characterId: character.id,
-            name: character.name || "未命名角色",
-            persona: character.personality || character.persona || ""
-          }),
+          companionRef: companionRef,
           placeId: "",
           memorySource: { type: "auto", groupId: "" }
         });
         debugOutingFlowState("character-selected");
-        var savedCompanion = resolveOutingCompanion(savedFlow);
-        if (!savedFlow.companionRef || !savedCompanion) {
-          showToast("同行对象保存失败，请重试。");
-          renderOutingCharacterPickView();
-          return;
-        }
         renderOutingPlacePickView();
       });
     });
@@ -1027,7 +1106,7 @@
     debugOutingFlowState("render-place-pick");
 
     if (!companion) {
-      showToast("同行对象缺少名称，请重新选择。", true);
+      showToast("同行对象丢失，请重新选择。", true);
       renderOutingHomeView();
       return;
     }
@@ -1156,7 +1235,7 @@
         }
         debugOutingFlowState("depart-clicked");
         if (!finalCompanion) {
-          showToast("同行对象缺少名称，请重新选择。", true);
+          showToast("同行对象丢失，请重新选择。", true);
           renderOutingHomeView();
           return;
         }
@@ -1231,7 +1310,7 @@
     var memorySource = flow.memorySource || { type: "auto", groupId: "" };
 
     if (!companion) {
-      showToast("同行对象缺少名称，请重新选择。", true);
+      showToast("同行对象丢失，请重新选择。", true);
       renderOutingHomeView();
       return;
     }
