@@ -8315,55 +8315,87 @@ textarea::placeholder {
 
 /* 地点选择 */
 .outing-place-list {
-  padding: 8px 16px;
+  padding: 8px 16px 4px;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 12px;
 }
 
 .outing-place-card {
   display: flex;
   flex-direction: column;
-  gap: 4px;
-  padding: 14px;
-  border: none;
-  border-radius: 12px;
+  gap: 6px;
+  padding: 16px;
+  border: 2px solid transparent;
+  border-radius: 14px;
   background: var(--color-surface);
   text-align: left;
   cursor: pointer;
-  transition: opacity 0.15s;
-  box-shadow: 0 1px 3px rgba(0,0,0,0.07);
+  transition: border-color 0.15s, box-shadow 0.15s, transform 0.15s, background 0.15s;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.08);
   width: 100%;
+  position: relative;
 }
 
 .outing-place-card:active {
-  opacity: 0.7;
+  opacity: 0.85;
+}
+
+.outing-place-card.active {
+  border-color: var(--color-green, #4caf7d);
+  background: rgba(76, 175, 80, 0.07);
+  box-shadow: 0 4px 14px rgba(76, 175, 80, 0.25);
+  transform: translateY(-2px);
+}
+
+.outing-place-card-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .outing-place-name {
   font-size: 15px;
-  font-weight: 600;
+  font-weight: 700;
   color: var(--color-text);
 }
 
+.outing-place-selected-badge {
+  flex-shrink: 0;
+  font-size: 11px;
+  font-weight: 600;
+  color: #fff;
+  background: var(--color-green, #4caf7d);
+  padding: 3px 10px;
+  border-radius: 99px;
+  letter-spacing: 0.3px;
+}
+
 .outing-place-desc {
-  font-size: 12px;
+  font-size: 13px;
   color: var(--color-muted);
   line-height: 1.5;
 }
 
 .outing-place-meta {
   display: flex;
-  gap: 10px;
-  margin-top: 4px;
+  gap: 8px;
+  margin-top: 2px;
 }
 
 .outing-place-meta span {
   font-size: 11px;
   color: var(--color-muted);
   background: var(--color-bg);
-  padding: 2px 8px;
+  padding: 2px 9px;
   border-radius: 99px;
+}
+
+.outing-place-activities {
+  font-size: 12px;
+  color: var(--color-muted);
+  margin-top: 2px;
 }
 
 /* 角色选择列表 */
@@ -8745,20 +8777,52 @@ textarea::placeholder {
 /* 出发按钮 */
 .outing-depart-btn {
   display: block;
-  width: calc(100% - 32px);
-  margin: 16px 16px 0;
-  padding: 14px;
+  width: 100%;
+  padding: 15px;
   border: none;
-  border-radius: 12px;
+  border-radius: 14px;
   background: var(--color-green);
   color: #fff;
-  font-size: 16px;
+  font-size: 17px;
   font-weight: 700;
   cursor: pointer;
+  opacity: 0.75;
+  transition: opacity 0.15s, box-shadow 0.15s;
+  letter-spacing: 0.5px;
+}
+
+.outing-depart-btn.ready {
+  opacity: 1;
+  box-shadow: 0 4px 14px rgba(76, 175, 80, 0.4);
 }
 
 .outing-depart-btn:active {
   opacity: 0.8;
+}
+
+.outing-secondary-btn {
+  display: block;
+  width: 100%;
+  padding: 12px;
+  border: 1.5px solid var(--color-muted, #aaa);
+  border-radius: 14px;
+  background: transparent;
+  color: var(--color-muted);
+  font-size: 14px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.outing-secondary-btn:active {
+  opacity: 0.7;
+}
+
+.outing-place-confirm-row {
+  padding: 16px 16px 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
 }
 
 .outing-section-title {

@@ -727,18 +727,26 @@
     var priceSymbols = ["", "¥", "¥¥", "¥¥¥", "¥¥¥¥"];
     var companionName = outingPendingCompanion ? outingPendingCompanion.name : "";
     var selectedPlace = places.find(function (p) { return p.id === outingSelectedPlaceId; }) || null;
+    var startBtnClass = outingSelectedPlaceId ? "outing-depart-btn ready" : "outing-depart-btn";
 
     var placeCards = places.map(function (place) {
       var price = priceSymbols[place.priceLevel] || "¥";
-      var activeClass = selectedPlace && selectedPlace.id === place.id ? " active" : "";
+      var isSelected = selectedPlace && selectedPlace.id === place.id;
+      var activeClass = isSelected ? " active" : "";
+      var badge = isSelected ? '<span class="outing-place-selected-badge">✓ 已选</span>' : "";
+      var activitiesText = (place.activities || []).slice(0, 3).join("、");
       return [
-        '<button class="outing-place-card' + activeClass + '" data-outing-place-id="' + escapeHtml(place.id) + '">',
-        '  <span class="outing-place-name">' + escapeHtml(place.name) + '</span>',
-        '  <span class="outing-place-desc">' + escapeHtml(String(place.description || "").slice(0, 40)) + '</span>',
-        '  <span class="outing-place-meta">',
+        '<button type="button" class="outing-place-card' + activeClass + '" data-outing-place-id="' + escapeHtml(place.id) + '">',
+        '  <div class="outing-place-card-header">',
+        '    <span class="outing-place-name">' + escapeHtml(place.name) + '</span>',
+        badge,
+        '  </div>',
+        '  <span class="outing-place-desc">' + escapeHtml(String(place.description || "").slice(0, 60)) + '</span>',
+        '  <div class="outing-place-meta">',
         '    <span>' + escapeHtml(place.openingHours || "自定义") + '</span>',
         '    <span>' + price + '</span>',
-        '  </span>',
+        '  </div>',
+        activitiesText ? '<span class="outing-place-activities">可做：' + escapeHtml(activitiesText) + '</span>' : "",
         '</button>'
       ].join("");
     }).join("");
@@ -759,14 +767,13 @@
     }
 
     content.innerHTML = [
-      '<div class="outing-back-row"><button id="outingPlaceBack">← 返回</button></div>',
+      '<div class="outing-back-row"><button type="button" id="outingPlaceBack">← 返回</button></div>',
       '<p class="outing-section-title">和 ' + escapeHtml(companionName) + ' 去哪里？</p>',
       memorySourceHtml,
       '<div class="outing-place-list">' + placeCards + '</div>',
-      selectedPlace ? renderSelectedPlaceDetail(selectedPlace) : '<div class="outing-place-detail-empty">请选择一个地点以查看详情。</div>',
       '<div class="outing-place-confirm-row">',
-      '  <button class="outing-depart-btn" id="outingPlaceStartBtn">出发</button>',
-      '  <button class="outing-secondary-btn" id="outingCustomPlaceBtn">自定义地点</button>',
+      '  <button type="button" class="' + startBtnClass + '" id="outingPlaceStartBtn">出发</button>',
+      '  <button type="button" class="outing-secondary-btn" id="outingCustomPlaceBtn">自定义地点</button>',
       '</div>'
     ].join("");
 
@@ -808,13 +815,6 @@
       });
     }
 
-    var customBtn = getElement("outingCustomPlaceBtn");
-    if (customBtn) {
-      customBtn.addEventListener("click", function () {
-        openOutingCustomPlaceModal();
-      });
-    }
-
     var startBtn = getElement("outingPlaceStartBtn");
     if (startBtn) {
       startBtn.addEventListener("click", function () {
@@ -823,6 +823,13 @@
           return;
         }
         doStartOuting(outingSelectedPlaceId);
+      });
+    }
+
+    var customBtn = getElement("outingCustomPlaceBtn");
+    if (customBtn) {
+      customBtn.addEventListener("click", function () {
+        openOutingCustomPlaceModal();
       });
     }
   }
