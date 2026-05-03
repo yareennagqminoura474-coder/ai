@@ -724,6 +724,53 @@
     localStorage.removeItem(STORAGE_KEYS.groupChatPrefix + groupId);
   }
 
+  function clearGroupChatConversationOnly(groupId) {
+    if (!groupId) {
+      return false;
+    }
+
+    if (typeof flushGroupChatHistorySave === "function") {
+      flushGroupChatHistorySave(groupId);
+    }
+    deleteGroupChatHistory(groupId);
+    return true;
+  }
+
+  function clearGroupChatDeep(groupId) {
+    if (!groupId) {
+      return false;
+    }
+
+    if (typeof flushGroupChatHistorySave === "function") {
+      flushGroupChatHistorySave(groupId);
+    }
+    deleteGroupChatHistory(groupId);
+
+    if (typeof clearChatMemories === "function") {
+      clearChatMemories("group", groupId);
+    }
+    if (typeof clearGroupThoughts === "function") {
+      clearGroupThoughts(groupId);
+    }
+    if (typeof clearBodyState === "function") {
+      clearBodyState("group", groupId);
+    }
+    if (typeof clearBodyStateSnapshots === "function") {
+      clearBodyStateSnapshots("group", groupId);
+    }
+    if (typeof resetChatRoundCounter === "function") {
+      resetChatRoundCounter("group", groupId);
+    }
+    if (typeof resetGroupMemoryState === "function") {
+      resetGroupMemoryState(groupId);
+    }
+    if (window.AppExtras && typeof window.AppExtras.clearMemoryContextCache === "function") {
+      window.AppExtras.clearMemoryContextCache("group", groupId);
+    }
+
+    return true;
+  }
+
   function getEmojiPacks() {
     var emojis = parseJson(localStorage.getItem(STORAGE_KEYS.emojiPacks), []);
     return Array.isArray(emojis) ? emojis : [];
@@ -6678,6 +6725,8 @@
     resetPrivateCharacterState: resetPrivateCharacterState,
     resetPrivateChatState: resetPrivateChatState,
     clearGroupThoughts: clearGroupThoughts,
+    clearGroupChatConversationOnly: clearGroupChatConversationOnly,
+    clearGroupChatDeep: clearGroupChatDeep,
     clearChatAll: clearChatAll,
     resetGroupMemoryState: resetGroupMemoryState,
     resetAllCharacterMemoryAndStates: resetAllCharacterMemoryAndStates,

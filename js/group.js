@@ -3304,17 +3304,91 @@
       return;
     }
 
-    if (!window.confirm("确定要清空这个群聊的聊天记录吗？群聊记录、群聊记忆、群聊心声和身体状态都会一起清空，但不会删除群聊、成员、世界书绑定和钱包账单。")) {
+    if (!window.showWeChatSheet) {
+      if (!window.confirm("确定要清空这个群聊吗？")) {
+        return;
+      }
+
+      if (window.confirm("是否连群聊记忆、心声、身体状态也一起清空？点击确定=彻底清空，点击取消=只清聊天记录。")) {
+        if (window.AppStorage && typeof window.AppStorage.clearGroupChatDeep === "function") {
+          window.AppStorage.clearGroupChatDeep(group.id);
+        } else if (window.AppStorage && typeof window.AppStorage.clearChatAll === "function") {
+          window.AppStorage.clearChatAll("group", group.id);
+        }
+      } else {
+        if (window.AppStorage && typeof window.AppStorage.clearGroupChatConversationOnly === "function") {
+          window.AppStorage.clearGroupChatConversationOnly(group.id);
+        } else if (window.AppStorage && typeof window.AppStorage.deleteGroupChatHistory === "function") {
+          window.AppStorage.deleteGroupChatHistory(group.id);
+        }
+      }
+
+      if (typeof showToast === "function") {
+        showToast("已清空群聊");
+      } else {
+        window.alert("已清空群聊");
+      }
+      if (typeof updateThoughtButton === "function") {
+        updateThoughtButton(group.id);
+      }
+      scheduleGroupRender(group.id);
+      scheduleGroupListRender();
       return;
     }
 
-    window.AppStorage.clearChatAll("group", group.id);
-    window.alert("已清空群聊聊天记录和相关会话状态");
-    if (typeof updateThoughtButton === "function") {
-      updateThoughtButton(group.id);
-    }
-    scheduleGroupRender(group.id);
-    scheduleGroupListRender();
+    showWeChatSheet([
+      '<div class="wechat-sheet-header">',
+      '  <h3>清空群聊</h3>',
+      '</div>',
+      '<div class="sheet-section">',
+      '  <p>你想怎么清空这个群聊？</p>',
+      '  <button type="button" class="outline-button" data-clear-group-mode="history">只清聊天记录</button>',
+      '  <button type="button" class="outline-button danger" data-clear-group-mode="deep">聊天记录和群聊记忆都清空</button>',
+      '  <button type="button" class="outline-button" data-close-sheet>取消</button>',
+      '</div>'
+    ].join(""), function (sheet) {
+      sheet.addEventListener("click", function (event) {
+        var button = event.target.closest("[data-clear-group-mode]");
+
+        if (button) {
+          if (button.dataset.clearGroupMode === "history") {
+            if (window.AppStorage && typeof window.AppStorage.clearGroupChatConversationOnly === "function") {
+              window.AppStorage.clearGroupChatConversationOnly(group.id);
+            } else if (window.AppStorage && typeof window.AppStorage.deleteGroupChatHistory === "function") {
+              window.AppStorage.deleteGroupChatHistory(group.id);
+            }
+          }
+
+          if (button.dataset.clearGroupMode === "deep") {
+            if (window.AppStorage && typeof window.AppStorage.clearGroupChatDeep === "function") {
+              window.AppStorage.clearGroupChatDeep(group.id);
+            } else if (window.AppStorage && typeof window.AppStorage.clearChatAll === "function") {
+              window.AppStorage.clearChatAll("group", group.id);
+            }
+          }
+
+          if (typeof closeWeChatSheet === "function") {
+            closeWeChatSheet();
+          }
+          if (typeof showToast === "function") {
+            showToast("已清空群聊");
+          } else {
+            window.alert("已清空群聊");
+          }
+          if (typeof updateThoughtButton === "function") {
+            updateThoughtButton(group.id);
+          }
+          scheduleGroupRender(group.id);
+          scheduleGroupListRender();
+        }
+
+        if (event.target.closest("[data-close-sheet]")) {
+          if (typeof closeWeChatSheet === "function") {
+            closeWeChatSheet();
+          }
+        }
+      });
+    });
   }
 
   function renderUserPersonaOptions(selectedId) {
@@ -3455,14 +3529,8 @@
       return;
     }
 
-    if (button.dataset.groupSettingsAction === "clear-chat-history" && window.confirm("确定要清空这个群聊的聊天记录吗？群聊记录、群聊记忆、群聊心声和身体状态都会一起清空，但不会删除群聊、成员、世界书绑定和钱包账单。")) {
-      window.AppStorage.clearChatAll("group", group.id);
-      window.alert("已清空群聊聊天记录和相关会话状态");
-      if (typeof updateThoughtButton === "function") {
-        updateThoughtButton(group.id);
-      }
-      scheduleGroupRender(group.id);
-      scheduleGroupListRender();
+    if (button.dataset.groupSettingsAction === "clear-chat-history") {
+      clearActiveGroupChatHistory();
       return;
     }
   }

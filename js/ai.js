@@ -1492,6 +1492,7 @@
 
     return [
       "【群成员私聊记忆互通】",
+      "私聊互通记忆只能影响角色对彼此的态度、称呼和潜台词，不能强行把话题拉回旧私聊。",
       text
     ].join("\n");
   }
@@ -2116,6 +2117,12 @@
     if (mode === "reenterGroup") {
       return "群聊重回";
     }
+    if (mode === "freeChat") {
+      return "群聊自由聊天";
+    }
+    if (mode === "replyToUser") {
+      return "群聊回复用户";
+    }
     if (mode === "offline") {
       return "线下";
     }
@@ -2296,6 +2303,7 @@
       valueOrFallback(source.userInput),
       source.sceneText ? "当前场景：\n" + source.sceneText : "",
       source.beforeContext || "",
+      source.topicAnchorText ? "本轮话题锚点：\n" + source.topicAnchorText : "",
       worldBookSection,
       buildLongRangeMemoryContextSection(source.requestOptions || source),
       source.contextLabel || "最近 10-16 条上下文：",
@@ -2397,7 +2405,7 @@
   }
 
   function buildGroupMessageSchema() {
-    return "{\"messages\":[{\"characterId\":\"角色id\",\"characterName\":\"角色名\",\"type\":\"text\",\"content\":\"角色回复内容\",\"replyTarget\":\"user|character|scene\",\"replyToCharacterId\":\"被回复角色id或空\",\"beat\":\"接话|打断|反驳|拆台|护短|起哄|冷场|转移|沉默|补刀|回应用户\"},{\"characterId\":\"角色id\",\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\",\"replyTarget\":\"user\",\"beat\":\"回应用户\"},{\"characterId\":\"角色id\",\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\",\"replyTarget\":\"user\",\"beat\":\"回应用户\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"此刻情绪\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}";
+    return "{\"messages\":[{\"characterId\":\"角色id\",\"characterName\":\"角色名\",\"type\":\"text\",\"content\":\"角色回复内容\",\"replyTarget\":\"user|character|scene\",\"replyToCharacterId\":\"被回复角色id或空\",\"replyTo\":\"user|previous|topic|memory\",\"continuityReason\":\"说明这条消息为什么接得上，只给程序检查，不展示\",\"beat\":\"接话|打断|反驳|拆台|护短|起哄|冷场|转移|沉默|补刀|回应用户\"},{\"characterId\":\"角色id\",\"type\":\"transfer\",\"amount\":\"50000.00\",\"content\":\"拿着，别嘴硬。\",\"note\":\"给你周转\",\"transferDecision\":\"accept/reject\",\"replyTarget\":\"user\",\"replyTo\":\"user|previous|topic|memory\",\"continuityReason\":\"说明这条消息为什么接得上，只给程序检查，不展示\",\"beat\":\"回应用户\"},{\"characterId\":\"角色id\",\"type\":\"redPacket\",\"amount\":\"88.88\",\"content\":\"自己点开。\",\"note\":\"红包\",\"redPacketDecision\":\"accept/reject\",\"replyTarget\":\"user\",\"replyTo\":\"user|previous|topic|memory\",\"continuityReason\":\"说明这条消息为什么接得上，只给程序检查，不展示\",\"beat\":\"回应用户\"}],\"moneyDecisions\":[{\"type\":\"transfer\",\"decision\":\"accept\",\"characterId\":\"角色id\"}],\"transferDecision\":null,\"redPacketDecision\":null,\"actions\":[],\"thoughts\":[{\"characterId\":\"角色id\",\"content\":\"内心内容\",\"mood\":\"此刻情绪\",\"visibleSummary\":\"一句摘要\"}],\"memories\":[{\"characterId\":\"角色id\",\"content\":\"要写入记忆的内容\"}]}";
   }
 
   function buildOfflineEventSchema() {
@@ -3756,17 +3764,46 @@
     return [
       "",
       "群聊本轮最重要的输入优先级：",
-      "1. 已命中的世界书强规则、禁忌、身份边界、场景事实。",
-      "2. 每个发言角色自己的核心人设、身份、关系位置和说话方式。",
-      "3. 本轮用户输入。",
-      "4. 最近群聊时间线、私聊互通、连续记忆包。",
-      "5. 最近心声和长期记忆。",
+      "1. 用户最新输入 latestUserInput。",
+      "2. 最近 8 到 12 条群聊消息。",
+      "3. 本轮话题锚点 topicAnchorText。",
+      "4. 群公告、群氛围、当前群成员状态。",
+      "5. 世界书强规则。",
+      "6. 该群聊聊天记忆 chatMemoryText。",
+      "7. 角色长期记忆。",
+      "8. 私聊互通记忆 privateBridgeText（只能影响角色态度与潜台词，不能改变本轮话题）。",
+      "如果旧记忆和用户最新输入冲突，以用户最新输入和最近群聊为准。",
       hasWorld
         ? "本轮已命中世界书：至少 2 条可见 messages 必须体现世界书影响，但不能说'世界书/设定要求'。"
         : "本轮未命中世界书：不要编世界书规则，只按人设、关系、记忆和用户输入推进。",
       "群聊失败条件：所有角色像同一个人、只换名字；或所有人都温柔解释；或命中世界书却没人受到影响。",
+      "本轮需从群成员中选择 2 到 4 个最该说话的角色，允许少数角色连续接话、打断或转移，不要让所有人轮流答题。",
       "逐角色提醒：",
       characterHints || "暂无"
+    ].join("\n");
+  }
+
+  function buildGroupTopicAnchor(latestUserInput, promptMessages) {
+    var recent = (Array.isArray(promptMessages) ? promptMessages : [])
+      .filter(function (message) {
+        return message && message.content
+          && message.type !== "loading"
+          && message.type !== "error"
+          && message.type !== "system"
+          && message.role !== "system";
+      })
+      .slice(-8)
+      .map(function (message) {
+        var name = message.role === "user" ? "用户" : (message.characterName || "角色");
+        return name + "：" + summarizeMessageForAI(message);
+      })
+      .join("\n");
+
+    return [
+      "【本轮话题锚点】",
+      latestUserInput ? "用户最新输入：" + latestUserInput : "用户没有新输入",
+      recent ? "最近连续对话：\n" + recent : "最近连续对话：暂无",
+      "本轮所有群聊消息必须围绕这个锚点继续，禁止突然跳到无关记忆、无关设定、无关旧事。"
     ].join("\n");
   }
 
@@ -3929,6 +3966,7 @@
       buildWorldRuleEnforcement(resolvedWorldBookContext, worldBookMeta),
       buildMatchedWorldBooksSection(resolvedWorldBookContext, worldBookMeta),
       buildGroupPromptPriorityHint(characters, resolvedWorldBookContext, worldBookMeta),
+      requestOptions.topicAnchorText ? requestOptions.topicAnchorText : "",
       buildWorldPersonaMessageLock(resolvedWorldBookContext, groupMode),
       buildGroupWorldPersonaLock(characters, resolvedWorldBookContext, worldBookMeta),
       buildParticipantDossier(characters, sharedMemories),
@@ -4009,6 +4047,31 @@
     };
     result = normalizeAiResult(rawContent, parsed, normalizationSettings);
     result.replies = inferGroupMessageChainFields(result.replies);
+    var recentTextsForValidation = (requestOptions.recentHistory || "") + "\n" + (requestOptions.privateBridgeText || "");
+    var seenMessages = {};
+    result.replies = (Array.isArray(result.replies) ? result.replies : []).filter(function (message) {
+      var content = String(message && message.content || "").trim();
+      if (!content || !message || !message.characterId) {
+        return false;
+      }
+      if (seenMessages[content]) {
+        return false;
+      }
+      seenMessages[content] = true;
+      return !isGroupReplyOffTopic(message, requestOptions.latestUserInput, recentTextsForValidation);
+    });
+    var speakerCount = {};
+    result.replies = result.replies.filter(function (message) {
+      if (!message || !message.characterId || !message.content) {
+        return false;
+      }
+      var key = String(message.characterId || "");
+      speakerCount[key] = (speakerCount[key] || 0) + 1;
+      if (speakerCount[key] > 3 && String(message.content || "").length > 120) {
+        return false;
+      }
+      return true;
+    });
     var regenerateDiff = requestOptions.regenerateRequest ? checkRegenerateDifference(
       requestOptions.rejectedReplyText || requestOptions.oldReplyText,
       result.replies || replies || messages
@@ -4354,6 +4417,8 @@
     var recentCharacterLinesMap = buildGroupRecentCharacterLinesMap(characters, promptMessages);
     var timeGapInfo = detectRecentTimeGapText(promptMessages);
     latestUserInput = getLatestUserInputForPrompt(groupHistory);
+    var topicAnchorText = buildGroupTopicAnchor(latestUserInput, promptMessages);
+    requestOptions.topicAnchorText = topicAnchorText;
     if (window.AppExtras && window.AppExtras.buildMemoryContextPack && group && group.id) {
       var _grpMemPack = window.AppExtras.buildMemoryContextPack("group", group.id, {
         latestUserInput: latestUserInput,
@@ -4455,7 +4520,46 @@
       : "";
 
 
-    var groupTaskMode = requestOptions.regenerateRequest ? "reenterGroup" : "group";
+    var groupTaskMode = requestOptions.regenerateRequest ? "reenterGroup" : (requestOptions.freeChat ? "freeChat" : (requestOptions.replyToUser ? "replyToUser" : "group"));
+
+    requestOptions.privateBridgeText = privateBridgeText;
+
+    if (localStorage.getItem("myAiApp.debugWorldBook") === "1") {
+      console.debug("[WorldBook Debug][group prompt final]", {
+        groupId: group && group.id,
+        selectedWorldBookIds: selectedWorldBookIds,
+        matchedCount: worldBookMeta && worldBookMeta.matchedCount,
+        hasMatchedEntries: worldBookMeta && worldBookMeta.hasMatchedEntries,
+        reason: worldBookMeta && worldBookMeta.reason,
+        worldBookContextPreview: String(worldBookContext || "").slice(0, 800),
+        memberIds: (characters || []).map(function (c) { return c && c.id; })
+      });
+    }
+
+    groupSettingsText = group && group.settings
+      ? [
+          "群公告：" + (group.settings.announcement || "暂无"),
+          "本群每次最少回复条数：" + Math.max(MIN_CHAT_REPLY_COUNT, Number(group.settings.minReplyCount) || 0) + "（本轮硬性至少 " + MIN_CHAT_REPLY_COUNT + " 条有真实内容的自然消息）",
+          "本群每次最多安全条数：" + Math.max(MIN_CHAT_REPLY_COUNT, Number(group.settings.maxReplyCount) || 12),
+          "本群最少参与角色数：" + (group.settings.minParticipantCount || 2),
+          "是否允许特殊消息类型：" + (group.settings.allowSpecialMessages === false ? "否，只使用 text" : "是")
+        ].join("\n")
+      : "";
+
+    var groupTaskMode = requestOptions.regenerateRequest ? "reenterGroup" : (requestOptions.freeChat ? "freeChat" : (requestOptions.replyToUser ? "replyToUser" : "group"));
+
+    if (localStorage.getItem("myAiApp.debugGroupPrompt") === "1") {
+      console.debug("[Group Prompt Debug]", {
+        groupId: group && group.id,
+        latestUserInput: latestUserInput,
+        recentHistoryLength: String(history || "").length,
+        chatMemoryTextLength: String(chatMemoryText || "").length,
+        privateBridgeTextLength: String(privateBridgeText || "").length,
+        worldBookContextLength: String(worldBookContext || "").length,
+        selectedSpeakers: (characters || []).map(function (character) { return character && character.name; }).filter(Boolean),
+        topicAnchorTextPreview: topicAnchorText ? topicAnchorText.slice(0, 1000) : ""
+      });
+    }
 
     return [
       {
