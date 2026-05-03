@@ -3096,7 +3096,119 @@ textarea::placeholder {
 .diary-list,
 .simple-list {
   display: grid;
+  gap: 18px;
+}
+
+.diary-preview-card {
+  cursor: pointer;
+  border-radius: 22px;
+  background: #ffffff;
+  border: 1px solid rgba(228, 232, 226, 0.75);
+  box-shadow: 0 12px 30px rgba(29, 37, 33, 0.07);
+  padding: 22px 20px 24px;
+  transition: transform 0.16s ease, box-shadow 0.16s ease;
+}
+
+.diary-preview-card:active {
+  transform: scale(0.985);
+}
+
+.diary-preview-card:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 16px 34px rgba(29, 37, 33, 0.1);
+}
+
+.diary-feed-top {
+  display: flex;
+  align-items: center;
   gap: 12px;
+  margin-bottom: 22px;
+}
+
+.diary-feed-avatar-wrap {
+  flex-shrink: 0;
+}
+
+.diary-feed-avatar,
+.diary-feed-avatar-fallback {
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+}
+
+.diary-feed-avatar {
+  object-fit: cover;
+  background: #f5f7f8;
+}
+
+.diary-feed-avatar-fallback {
+  display: grid;
+  place-items: center;
+  background: #eef4f6;
+  color: #4f5f68;
+  font-weight: 800;
+  font-size: 18px;
+}
+
+.diary-feed-info strong {
+  display: block;
+  font-size: 18px;
+  color: #111827;
+  line-height: 1.2;
+  font-weight: 800;
+}
+
+.diary-feed-meta {
+  color: #9aa2a0;
+  font-size: 14px;
+  line-height: 1.4;
+  margin-top: 4px;
+}
+
+.diary-feed-tag {
+  display: none;
+}
+
+.diary-feed-title {
+  display: none;
+}
+
+.diary-feed-summary {
+  margin: 0;
+  color: #111827;
+  font-size: 20px;
+  line-height: 1.75;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  text-align: center;
+  word-break: break-word;
+  position: relative;
+  padding: 4px 0;
+}
+
+.diary-feed-summary::before {
+  content: '“';
+  position: absolute;
+  left: 0;
+  top: -4px;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.diary-feed-summary::after {
+  content: '”';
+  position: absolute;
+  right: 0;
+  bottom: -4px;
+  font-size: 24px;
+  line-height: 1;
+}
+
+.diary-feed-summary {
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .world-book-toolbar {

@@ -6734,6 +6734,59 @@
     ].join("");
   }
 
+  function getDiaryPreviewText(content, limit) {
+    var text = String(content || "").replace(/\s+/g, " ").trim();
+
+    if (!text) {
+      return "暂无内容";
+    }
+
+    if (text.length <= (limit || 90)) {
+      return text;
+    }
+
+    return text.slice(0, limit || 90) + "……";
+  }
+
+  function getDiaryAuthorInfo(diary) {
+    var characters = window.AppStorage.getCharacters ? window.AppStorage.getCharacters() : [];
+    var character = diary && diary.characterId
+      ? characters.find(function (item) {
+          return item && String(item.id) === String(diary.characterId);
+        })
+      : null;
+
+    if (diary && diary.type === "character" && character) {
+      return {
+        name: character.name || diary.characterName || "未命名角色",
+        avatar: character.avatar || "",
+        label: "角色日记"
+      };
+    }
+
+    if (diary && diary.type === "character") {
+      return {
+        name: diary.characterName || "未命名角色",
+        avatar: "",
+        label: "角色日记"
+      };
+    }
+
+    return {
+      name: "我",
+      avatar: "",
+      label: "我的日记"
+    };
+  }
+
+  function renderDiaryAvatar(author) {
+    if (author && author.avatar) {
+      return '<img class="diary-feed-avatar" src="' + escapeHtml(author.avatar) + '" alt="">';
+    }
+
+    return '<div class="diary-feed-avatar diary-feed-avatar-fallback">' + escapeHtml((author && author.name || "日").slice(0, 1)) + '</div>';
+  }
+
   function renderDiaryList(diaries, type) {
     if (!diaries.length) {
       return '<div class="soft-empty">还没有日记</div>';
@@ -6742,26 +6795,25 @@
     return [
       '<div class="diary-list">',
       diaries.map(function (diary) {
+        var author = getDiaryAuthorInfo(diary);
+
         return [
-          '<article class="diary-card" data-diary-id="' + escapeHtml(diary.id) + '">',
-          '  <div class="diary-date">' + escapeHtml(diary.date) + " · " + escapeHtml(diary.weather || "未记录") + "</div>",
-          '  <input data-diary-edit="title" type="text" value="' + escapeHtml(diary.title) + '" placeholder="标题">',
-          '  <textarea data-diary-edit="content">' + escapeHtml(diary.content) + "</textarea>",
-          '  <div class="settings-inline-grid">',
-          '    <label><span>心情</span><input data-diary-edit="mood" type="text" value="' + escapeHtml(diary.mood) + '"></label>',
-          '    <label><span>小结</span><input data-diary-edit="summary" type="text" value="' + escapeHtml(diary.summary) + '"></label>',
-          "  </div>",
-          '  <div class="settings-action-row">',
-          '    <button class="outline-button" type="button" data-diary-action="detail">详情</button>',
-          '    <button class="outline-button" type="button" data-diary-action="save-diary" data-diary-type="' + type + '">保存</button>',
-          '    <button class="outline-button" type="button" data-diary-action="memory">写入记忆</button>',
-          '    <button class="outline-button danger" type="button" data-diary-action="delete-diary">删除</button>',
-          "  </div>",
-          "</article>"
-        ].join("");
-      }).join(""),
-      "</div>"
-    ].join("");
+          '<article class="diary-card diary-preview-card" data-diary-id="' + escapeHtml(diary.id) + '" data-diary-action="detail">',
+          '  <div class="diary-feed-top">',
+          '    <div class="diary-feed-avatar-wrap">' + renderDiaryAvatar(author) + '</div>',
+          '    <div class="diary-feed-info">',
+          '      <strong>' + escapeHtml(author.name) + '</strong>',
+          '      <div class="diary-feed-meta">' + escapeHtml(diary.date) + ' · ' + escapeHtml(diary.weather || '未记录') + '</div>',
+          '    </div>',
+          '  </div>',
+          '  <div class="diary-feed-tag">' + escapeHtml(author.label) + '</div>',
+          '  <h3 class="diary-feed-title">' + escapeHtml(diary.title || '无题') + '</h3>',
+          '  <p class="diary-feed-summary">' + escapeHtml(getDiaryPreviewText(diary.content, 110)) + '</p>',
+          '</article>'
+        ].join('');
+      }).join(''),
+      '</div>'
+    ].join('');
   }
 
   function bindDiaryActions(content) {
@@ -6837,20 +6889,70 @@
       return;
     }
 
+    var author = getDiaryAuthorInfo(diary);
+
     showWeChatSheet([
       '<div class="wechat-sheet-header">',
       '  <span></span>',
       "  <h3>日记详情</h3>",
       '  <button type="button" data-close-sheet>关闭</button>',
       "</div>",
-      '<article class="diary-detail-book">',
-      '  <div class="diary-date">' + escapeHtml(diary.date) + " · " + escapeHtml(diary.weather || "未记录") + "</div>",
-      "  <h3>" + escapeHtml(diary.title || "无题") + "</h3>",
-      '  <p class="diary-detail-content">' + escapeHtml(diary.content || "暂无正文") + "</p>",
-      '  <div class="thought-meta"><span>今日心情：' + escapeHtml(diary.mood || "未记录") + "</span></div>",
-      '  <p class="thought-summary">' + escapeHtml(diary.summary || "还没有一句话小结") + "</p>",
+      '<article class="diary-detail-book diary-detail-card">',
+      '  <div class="diary-feed-top">',
+      '    <div class="diary-feed-avatar-wrap">' + renderDiaryAvatar(author) + '</div>',
+      '    <div class="diary-feed-info">',
+      '      <strong>' + escapeHtml(author.name) + '</strong>',
+      '      <div class="diary-feed-meta">' + escapeHtml(author.label) + ' · ' + escapeHtml(diary.date) + ' · ' + escapeHtml(diary.weather || '未记录') + '</div>',
+      '    </div>',
+      '  </div>',
+      '  <label class="wechat-sheet-field"><span>标题</span><input data-diary-edit="title" type="text" value="' + escapeHtml(diary.title || '') + '"></label>',
+      '  <label class="wechat-sheet-field"><span>正文</span><textarea data-diary-edit="content">' + escapeHtml(diary.content || '') + '</textarea></label>',
+      '  <label class="wechat-sheet-field"><span>今日心情</span><input data-diary-edit="mood" type="text" value="' + escapeHtml(diary.mood || '') + '"></label>',
+      '  <label class="wechat-sheet-field"><span>一句话小结</span><input data-diary-edit="summary" type="text" value="' + escapeHtml(diary.summary || '') + '"></label>',
+      '  <div class="wechat-sheet-actions">',
+      '    <button class="outline-button" type="button" data-close-sheet>关闭</button>',
+      '    <button class="outline-button" type="button" data-diary-action="memory">写入记忆</button>',
+      '    <button class="outline-button danger" type="button" data-diary-action="delete-diary">删除</button>',
+      '    <button class="full-button" type="button" data-diary-action="save-diary">保存</button>',
+      '  </div>',
       "</article>"
-    ].join(""), bindSheetCloseButtons);
+    ].join(""), function (sheet) {
+      bindSheetCloseButtons(sheet);
+
+      var saveButton = sheet.querySelector('[data-diary-action="save-diary"]');
+      var memoryButton = sheet.querySelector('[data-diary-action="memory"]');
+      var deleteButton = sheet.querySelector('[data-diary-action="delete-diary"]');
+
+      if (saveButton) {
+        saveButton.addEventListener('click', function () {
+          window.AppStorage.updateDiary(diaryId, {
+            title: getScopedFieldValue(sheet, '[data-diary-edit="title"]'),
+            content: getScopedFieldValue(sheet, '[data-diary-edit="content"]'),
+            mood: getScopedFieldValue(sheet, '[data-diary-edit="mood"]'),
+            summary: getScopedFieldValue(sheet, '[data-diary-edit="summary"]')
+          });
+          renderDiaryScreen();
+          closeWeChatSheet();
+        });
+      }
+
+      if (memoryButton) {
+        memoryButton.addEventListener('click', function () {
+          writeDiaryToMemory(diaryId);
+          closeWeChatSheet();
+        });
+      }
+
+      if (deleteButton) {
+        deleteButton.addEventListener('click', function () {
+          if (window.confirm('确定删除这篇日记吗？')) {
+            window.AppStorage.deleteDiary(diaryId);
+            renderDiaryScreen();
+            closeWeChatSheet();
+          }
+        });
+      }
+    });
   }
 
   function writeDiaryToMemory(diaryId) {
