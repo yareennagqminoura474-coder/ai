@@ -419,24 +419,110 @@
     ].filter(Boolean).join("\n");
   }
 
-  function buildGroupConversationChainRules() {
+  function buildGroupConversationChainRules(options) {
+    var source = options || {};
+    var isGroupColdStart = Boolean(source.isGroupColdStart);
+    if (!isGroupColdStart) {
+      return [
+        "",
+        "N+. 群聊话茬链规则 groupConversationChain",
+        "群聊不是每个角色轮流回答用户。以下是本轮必须满足的结构：",
+        "1. 每轮至少 40% 的消息必须是角色回复另一个角色，而不是回复用户。",
+        "2. 至少 1 条消息要接上另一个角色刚说的话。",
+        "3. 至少 1 条消息可以是：打断、反驳、拆台、护短、转移话题、起哄、冷场、补刀之一。",
+        "4. 不相关的角色可以不说话；沉默也是角色反应。",
+        "5. 不要所有人都解释、安慰、建议。",
+        "6. 不要所有人都用完整句。允许：短句、半句、表情、停顿、阴阳怪气、转移。",
+        "7. 每个角色的发言要带自己的立场，不要只是换名字。",
+        "8. 如果角色之间人设有冲突，允许真的冲突，不要自动和稀泥。",
+        "输出格式：每条 message 必须带以下内部字段（不在 UI 显示，但必须生成）：",
+        "- replyTarget: 'user' | 'character' | 'scene'（本条在回复谁）",
+        "- replyToCharacterId: 如果 replyTarget 是 character，填写被回复的角色 ID；否则为空",
+        "- beat: 接话|打断|反驳|拆台|护短|起哄|冷场|转移|沉默|补刀|回应用户",
+        "自检：生成后检查——如果所有 replyTarget 都是 user，失败，必须重写至少 2 条改为 character-to-character。"
+      ].join("\n");
+    }
+
     return [
       "",
       "N+. 群聊话茬链规则 groupConversationChain",
       "群聊不是每个角色轮流回答用户。以下是本轮必须满足的结构：",
-      "1. 每轮至少 40% 的消息必须是角色回复另一个角色，而不是回复用户。",
-      "2. 至少 1 条消息要接上另一个角色刚说的话。",
-      "3. 至少 1 条消息可以是：打断、反驳、拆台、护短、转移话题、起哄、冷场、补刀之一。",
-      "4. 不相关的角色可以不说话；沉默也是角色反应。",
-      "5. 不要所有人都解释、安慰、建议。",
-      "6. 不要所有人都用完整句。允许：短句、半句、表情、停顿、阴阳怪气、转移。",
-      "7. 每个角色的发言要带自己的立场，不要只是换名字。",
-      "8. 如果角色之间人设有冲突，允许真的冲突，不要自动和稀泥。",
-      "输出格式：每条 message 必须带以下内部字段（不在 UI 显示，但必须生成）：",
+      "1. 本轮仍要有角色之间接话，但不要从第一条就进入完整群戏；前 3 条优先完成入场过渡。",
+      "2. 第 4 条以后至少 1-2 条消息是角色回复另一个角色即可；冷启动第一轮重点是入场过渡，不追求成熟群聊的 40% 互聊比例。",
+      "3. 至少 1 条消息要接上另一个角色刚说的话。",
+      "4. 至少 1 条消息可以是：打断、反驳、拆台、护短、转移话题、起哄、冷场、补刀之一；冷启动时可轻一点，避免一上来很激烈。",
+      "5. 不相关的角色可以不说话；沉默也是角色反应。",
+      "6. 不要所有人都解释、安慰、建议。",
+      "7. 不要所有人都用完整句。允许：短句、半句、表情、停顿、阴阳怪气、转移。",
+      "8. 每个角色的发言要带自己的立场，不要只是换名字。",
+      "输出格式：每条 message 必须带以下内部字段（不在 UI 显示，但必须生成)：",
       "- replyTarget: 'user' | 'character' | 'scene'（本条在回复谁）",
       "- replyToCharacterId: 如果 replyTarget 是 character，填写被回复的角色 ID；否则为空",
       "- beat: 接话|打断|反驳|拆台|护短|起哄|冷场|转移|沉默|补刀|回应用户",
-      "自检：生成后检查——如果所有 replyTarget 都是 user，失败，必须重写至少 2 条改为 character-to-character。"
+      "自检：生成后检查——如果第 4 条以后仍然完全没有角色对角色接话，失败；前 3 条可以主要回复 user 或 scene。"
+    ].join("\n");
+  }
+
+  function detectGroupColdStartFromHistory(groupHistory) {
+    var promptMessages = (Array.isArray(groupHistory) ? groupHistory : []).filter(function (message) {
+      return message
+        && message.content
+        && message.type !== "loading"
+        && message.type !== "error"
+        && message.type !== "system"
+        && message.role !== "system";
+    });
+
+    var latestUserMessageIndex = -1;
+    for (var i = promptMessages.length - 1; i >= 0; i -= 1) {
+      if (promptMessages[i].role === "user") {
+        latestUserMessageIndex = i;
+        break;
+      }
+    }
+
+    var beforeLatestUser = latestUserMessageIndex === -1
+      ? promptMessages.slice()
+      : promptMessages.slice(0, latestUserMessageIndex);
+
+    var priorCharacterMessages = beforeLatestUser.filter(function (message) {
+      return message && message.role === "character" && message.content;
+    });
+
+    var priorUserMessages = beforeLatestUser.filter(function (message) {
+      return message && message.role === "user" && message.content;
+    });
+
+    return priorCharacterMessages.length === 0 && priorUserMessages.length === 0;
+  }
+
+  function buildGroupColdStartRules(isGroupColdStart, latestUserInput, characters) {
+    if (!isGroupColdStart) {
+      return "";
+    }
+
+    return [
+      "",
+      "N0. 群聊冷启动 / 首轮破冰规则 groupColdStart",
+      "这是这个群聊第一次被用户一句话点亮。群里之前没有自然聊天记录，所以不能假装大家已经聊了很久。",
+      "本轮的核心不是马上进入完整群戏，而是做真实微信群的入场过渡：有人先看到、有人慢半拍、有人试探、有人只冒泡一句。",
+      "第一条必须像群里第一个人刚看见用户消息后的自然反应，不能直接深度总结、不能直接进入争吵、不能像早就接着前文。",
+      "前 3 条必须完成过渡：",
+      "1. 第 1 条：一个角色先短反应，可以是‘嗯？’‘你刚说什么？’‘怎么突然说这个。’‘……’‘我看见了。’这类入场，不要长篇。",
+      "2. 第 2 条：另一个角色被带进来，可以问一句、接一句、吐槽一句、或者只冒泡。",
+      "3. 第 3 条：才开始把用户那句话接住，但仍然不要一下子全员深聊。",
+      "第 4 条以后才能逐渐出现角色之间接话、拆台、护短、转移，但强度要从轻到重。",
+      "不要让所有人立刻都像熟练开会一样围着用户表态。",
+      "不要第一轮就假装存在之前的群内旧梗、冲突或未展示过的共同事件。",
+      "允许 2-3 个角色发言即可；其他人可以沉默。冷淡角色尤其可以只丢一句。",
+      "本轮至少 10 条仍然保留，但前半段要像破冰，不要像剧情已经开到中段。",
+      "如果用户第一句话很短或很普通，不要强行拔高成重大事件；可以让群成员先确认、调侃、试探、慢慢把话题接住。",
+      "冷启动时的节奏建议：",
+      "1-2 条：看见/冒泡/短反应。",
+      "3-4 条：确认用户在说什么，轻微接话。",
+      "5-7 条：两个角色开始有态度差异。",
+      "8-10 条：形成一个小话题钩子，给用户继续说的空间。",
+      "冷启动失败条件：第一条就长篇解释；第一轮就激烈争吵；所有角色同时深度回应；像已经聊了很多轮。"
     ].join("\n");
   }
 
@@ -524,8 +610,10 @@
     });
   }
 
-  function validateGroupConversationChain(messages) {
+  function validateGroupConversationChain(messages, options) {
     var list = Array.isArray(messages) ? messages : [];
+    var opts = options || {};
+    var isGroupColdStart = Boolean(opts.isGroupColdStart);
     var characterToCharacterCount = 0;
     var hasChain = false;
     var hasConflictOrShift = false;
@@ -550,8 +638,67 @@
       }
     });
 
+    if (isGroupColdStart) {
+      var speakerMap = {};
+      var longExplanationCount = 0;
+      var shortIntroCount = 0;
+      var afterIntroCharacterLinks = 0;
+
+      list.forEach(function (message, index) {
+        if (!message) return;
+        if (message.characterId) {
+          speakerMap[String(message.characterId)] = true;
+        }
+
+        var content = String(message.content || "").trim();
+        if (content.length > 60 && /因为|所以|其实|我理解|这说明|建议|可以先/.test(content)) {
+          longExplanationCount += 1;
+        }
+
+        if (index < 3) {
+          if (content.length <= 24 || /嗯|啊|欸|？|\?|……|怎么|来了|看见|冒泡|说吧|什么/.test(content)) {
+            shortIntroCount += 1;
+          }
+        } else {
+          if (message.replyTarget === "character" || message.replyToCharacterId) {
+            afterIntroCharacterLinks += 1;
+          }
+        }
+      });
+
+      var speakerCount = Object.keys(speakerMap).length;
+      var ok = list.length < 5 || (
+        speakerCount >= 2 &&
+        shortIntroCount >= 2 &&
+        afterIntroCharacterLinks >= 1 &&
+        longExplanationCount <= Math.ceil(list.length * 0.35)
+      );
+
+      return {
+        ok: ok,
+        isGroupColdStart: true,
+        reason: ok ? "ok" : "group-cold-start-too-abrupt",
+        speakerCount: speakerCount,
+        shortIntroCount: shortIntroCount,
+        afterIntroCharacterLinks: afterIntroCharacterLinks,
+        longExplanationCount: longExplanationCount,
+        characterToCharacterCount: characterToCharacterCount,
+        hasChain: hasChain,
+        hasConflictOrShift: hasConflictOrShift
+      };
+    }
+
+    var minCharacterToCharacter = Math.ceil(list.length * 0.35);
+    var okNormal = list.length < 3 || (
+      characterToCharacterCount >= minCharacterToCharacter &&
+      hasConflictOrShift &&
+      hasChain
+    );
+
     return {
-      ok: list.length < 3 || (characterToCharacterCount >= Math.ceil(list.length * 0.35) && hasChain && hasConflictOrShift),
+      ok: okNormal,
+      isGroupColdStart: false,
+      reason: okNormal ? "ok" : "group-too-linear",
       characterToCharacterCount: characterToCharacterCount,
       hasChain: hasChain,
       hasConflictOrShift: hasConflictOrShift
@@ -1843,6 +1990,7 @@
   async function repairOnlineMessages(context, messages, reason) {
     var source = context || {};
     var currentMessages = Array.isArray(messages) ? messages : [];
+    var isGroupColdStart = Boolean(source.isGroupColdStart);
     var reasons = String(reason || "").split(/;+/).map(function (item) {
       return String(item || "").trim();
     }).filter(function (item) { return item; });
@@ -1867,13 +2015,15 @@
       hasReason("regenerate-too-similar")
         ? "当前修复原因：新回复和上一版太相似。必须换第一反应、语气角度、推进顺序和收束方式。"
         : "",
-      hasReason("group-too-linear")
-        ? "当前修复原因：群聊太像角色排队回答用户，必须改成角色之间互相接话、插话、反驳或转移。至少 40% 的消息要是角色回复另一个角色（replyTarget: character），至少 1 条要接话，至少 1 条要有打断/反驳/拆台/护短/起哄/冷场/转移之一。每条消息必须带 replyTarget、replyToCharacterId、beat 字段。"
+      hasReason("group-too-linear") || hasReason("group-cold-start-too-abrupt")
+        ? isGroupColdStart
+          ? "当前修复原因：群聊冷启动阶段，消息太像直线回复用户。请保留入场/破冰/过渡节奏，适度让角色之间自然冒泡、确认、回忆、顺带接话，不要一上来直接全员争执。每条消息仍要带 replyTarget、replyToCharacterId、beat 字段。"
+          : "当前修复原因：群聊太像角色排队回答用户，必须改成角色之间互相接话、插话、反驳或转移。至少 40% 的消息要是角色回复另一个角色（replyTarget: character），至少 1 条要接话，至少 1 条要有打断/反驳/拆台/护短/起哄/冷场/转移之一。每条消息必须带 replyTarget、replyToCharacterId、beat 字段。"
         : "",
       hasReason("robotic-template")
         ? "当前修复原因：回复出现 AI 总结腔或人机模板，例如【你刚刚说的】【我理解你】【我能感觉到你】【你的意思是】。必须改成角色本人的即时反应、短句、停顿、反问、回避、嘴硬、插话或转移。不要再总结用户的话，不要以总结句开头。"
         : "",
-      "只返回 JSON，格式为 '{\"messages\":[{\"characterId\":\"\",\"type\":\"\",\"content\":\"\"}]}'。",
+      "请修复上述 messages，仅返回聊天脚本格式：MESSAGE_START ... MESSAGE_END；可以附加 EXTRAS_JSON_START/EXTRAS_JSON_END，但不要返回原始 JSON 外壳或解释。",
       source.mode === "group" ? "当前模式：线上群聊。" : "当前模式：线上私聊。",
       source.latestUserInput ? "本轮用户输入：" + source.latestUserInput : "本轮用户输入：暂无。",
       source.worldBookContext ? "本轮世界书状态：" + source.worldBookContext : "本轮未命中世界书或未绑定世界书。",
@@ -1881,8 +2031,9 @@
       source.participantPersonaText ? "群成员人设：" + source.participantPersonaText : "",
       source.mode === "group" ? [
         "这是群聊 repair。",
-        "必须保留群聊 JSON messages 格式。",
-        "每条 message 必须有正确 characterId / characterName / type / content。",
+        "必须保留群聊聊天脚本格式 MESSAGE_START ... MESSAGE_END。",
+        "每条 message 必须有正确 CHARACTER_ID / SPEAKER / TYPE / CONTENT / REPLY_TARGET / REPLY_TO_CHARACTER_ID / BEAT 字段。",
+        "不要返回 JSON 外壳。",
         "修复目标：",
         "1. 让不同角色明显像不同的人。",
         "2. 如果命中世界书，至少 2 条 messages 体现世界书影响。",
@@ -1893,7 +2044,11 @@
         reason === "worldbook-impact-not-visible" ? "本次主要修复原因：命中世界书但消息里看不出任何影响，必须让至少 2 条消息体现世界书边界或规则的现实感。" : "",
         reason === "group-persona-not-distinct" ? "本次主要修复原因：各角色语气和句式太相似，必须让每个角色的声音、态度、立场明显不同。" : "",
         reason === "too-generic-assistant-tone" ? "本次主要修复原因：多条消息有客服/助手语气，必须换成角色自己的说话方式，不能'我理解/慢慢来/没关系/我会陪着你'。" : "",
-        reason && reason.indexOf("group-too-linear") !== -1 ? "本次主要修复原因：群聊太像排队答题，必须让角色互相接话/插话/反驳/冷场/转移，不要所有人都回复用户。每条 message 需包含 replyTarget、replyToCharacterId、beat 字段。" : ""
+        reason && (reason.indexOf("group-too-linear") !== -1 || reason.indexOf("group-cold-start-too-abrupt") !== -1)
+          ? (reason.indexOf("group-cold-start-too-abrupt") !== -1
+              ? "本次主要修复原因：群聊冷启动阶段，消息太像直线回复用户。请保留入场/破冰/过渡节奏，适度让角色之间自然冒泡、确认、回忆、顺带接话，不要一上来直接全员争执。每条 message 需包含 replyTarget、replyToCharacterId、beat 字段。"
+              : "本次主要修复原因：群聊太像排队答题，必须让角色互相接话/插话/反驳/冷场/转移，不要所有人都回复用户。每条 message 需包含 replyTarget、replyToCharacterId、beat 字段。")
+          : ""
       ].filter(Boolean).join("\n") : ""
     ].filter(function (line) { return line !== "" && line != null; });
 
@@ -3368,7 +3523,7 @@
       repaired: repaired
     });
 
-    return normalized;
+    return normalized.replies;
   }
 
   function buildPrivateChatDirectorMessages(character, chatHistory, options) {
@@ -3436,9 +3591,7 @@
     var requestOptions = options || {};
     var userContext = buildUserContext(group && group.settings || {});
     var latestUserInput = getLatestUserInputForPrompt(groupHistory);
-    var promptMessages = (Array.isArray(groupHistory) ? groupHistory : []).filter(function (message) {
-      return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system" && message.role !== "system";
-    });
+    var isGroupColdStart = detectGroupColdStartFromHistory(groupHistory);
     var history = promptMessages.slice(-MAIN_HISTORY_WINDOW).map(function (message) {
       if (message.role === "user") {
         return "用户：" + summarizeMessageForAI(message);
@@ -3454,6 +3607,9 @@
       ].join("\n");
     }).join("\n\n") || "暂无角色信息";
     var worldBookContext = requestOptions.worldBookContext || "";
+    var groupStartStateText = isGroupColdStart
+      ? "群聊状态：这是本群第一次可见互动。此前没有角色聊天记录。请先做入场/破冰/过渡，不要假装已经聊了很久。"
+      : "群聊状态：已有可见上下文，请承接最近话题和角色关系。";
     return [
       {
         role: "system",
@@ -3471,11 +3627,16 @@
         content: [
           "当前群成员：",
           memberText,
+          groupStartStateText,
           "用户刚刚说：" + (latestUserInput || "[无输入]"),
           "最近群聊上下文：" + (history || "暂无"),
           "你的任务：生成至少 10 条聊天脚本消息。",
           "至少 2 个角色参与；如果群成员足够，优先 2-4 个角色；不要让每个角色排队回答用户。",
-          "至少 40% 的消息要是角色对角色，不是直接对用户；至少 1 条接住另一个角色的话；至少 1 条带打断/反驳/拆台/护短/起哄/冷场/转移。",
+          buildGroupConversationChainRules({ isGroupColdStart: isGroupColdStart }),
+          buildGroupColdStartRules(isGroupColdStart, latestUserInput, characters),
+          isGroupColdStart
+            ? "冷启动时：前 3 条优先入场过渡；第 4 条以后至少 2 条角色对角色接话即可。可以轻微吐槽、确认、冒泡、转移，不要一上来强冲突。"
+            : "至少 40% 的消息要是角色对角色，不是直接对用户；至少 1 条接住另一个角色的话；至少 1 条带打断/反驳/拆台/护短/起哄/冷场/转移。",
           "角色说话要有明显不同：句长、称呼、语气、态度、节奏应不同。",
           "输出只使用聊天脚本：",
           "MESSAGE_START",
@@ -4097,6 +4258,7 @@
     if (requestOptions.regenerateRequest && !effectiveRegenerateInstruction) {
       effectiveRegenerateInstruction = "用户没有填写具体要求，但点击重回代表上一版不满意；请明显换一个方向、语气和推进方式，不要同义复述。";
     }
+    var isGroupColdStart = detectGroupColdStartFromHistory(groupHistory);
     var messages = buildGroupChatDirectorMessages(group, characters, groupHistory, sharedMemories, requestOptions);
     var rawContent = await sendConfiguredChatMessages(messages);
     var scriptResult = parseChatScriptFromText(rawContent, {
@@ -4155,6 +4317,7 @@
     if (needRepair) {
       var repairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
         mode: "group",
+        isGroupColdStart: isGroupColdStart,
         characters: characters,
         regenerateRequest: requestOptions.regenerateRequest,
         regenerateInstruction: effectiveRegenerateInstruction,
@@ -4226,7 +4389,7 @@
     var templateToneCountAfter = templateToneCountBefore;
     var removedTemplateMessages = 0;
 
-    var groupChainQuality = validateGroupConversationChain(result.replies);
+    var groupChainQuality = validateGroupConversationChain(result.replies, { isGroupColdStart: isGroupColdStart });
     var groupRoboticIssues = detectRoboticReplyIssues(result.replies, "group");
     var repairReasons = [];
     if (regenerateDiff && !regenerateDiff.ok) {
@@ -4239,7 +4402,7 @@
       repairReasons.push(groupPersonaWorldQuality.reason || "group-persona-worldbook-quality");
     }
     if (!groupChainQuality.ok) {
-      repairReasons.push("group-too-linear");
+      repairReasons.push(groupChainQuality.reason || (isGroupColdStart ? "group-cold-start-too-abrupt" : "group-too-linear"));
     }
     if (groupRoboticIssues.length) {
       repairReasons.push("robotic-template");
@@ -4248,6 +4411,7 @@
     if (repairReasons.length) {
       var repairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
         mode: "group",
+        isGroupColdStart: isGroupColdStart,
         regenerateRequest: requestOptions.regenerateRequest,
         regenerateInstruction: effectiveRegenerateInstruction,
         rejectedReplyText: requestOptions.rejectedReplyText,
@@ -4282,10 +4446,11 @@
           requestOptions.latestUserInput
         );
 
-        groupChainQuality = validateGroupConversationChain(result.replies);
+        groupChainQuality = validateGroupConversationChain(result.replies, { isGroupColdStart: isGroupColdStart });
         if (!groupChainQuality.ok) {
           var secondRepairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
             mode: "group",
+            isGroupColdStart: isGroupColdStart,
             latestUserInput: requestOptions.latestUserInput,
             worldBookContext: requestOptions.worldBookContext,
             participantPersonaText: (characters || []).map(function (character) {
@@ -4295,7 +4460,7 @@
                 "语气标签：" + ((detectPersonaVoiceProfile(character || {}, requestOptions.worldBookContext || "").tags || []).join(" / ") || "无明确标签")
               ].join("\n");
             }).join("\n\n")
-          }), result.replies, "group-too-linear");
+          }), result.replies, groupChainQuality.reason || "group-too-linear");
           if (Array.isArray(secondRepairMessages) && secondRepairMessages.length) {
             result.replies = normalizeReplyList("", secondRepairMessages, normalizationSettings);
             result.replies = inferGroupMessageChainFields(result.replies);
@@ -4353,8 +4518,11 @@
       mode: "group",
       targetId: group && group.id,
       userInput: requestOptions.latestUserInput,
+      isGroupColdStart: isGroupColdStart,
+      groupChainQuality: groupChainQuality,
+      repairReasons: repairReasons,
       intent: coverage.intent,
-      rawMessageCount: replies.length,
+      rawMessageCount: getOutputMessages(parsed).length,
       normalizedMessageCount: result.replies.length,
       templateToneCountBefore: templateToneCountBefore,
       templateToneCountAfter: templateToneCountAfter,
