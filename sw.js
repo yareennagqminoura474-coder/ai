@@ -1,5 +1,5 @@
 const CACHE_BASE = "ai-phone-cache-v20260505-";
-let CACHE_NAME = CACHE_BASE + "74";
+let CACHE_NAME = CACHE_BASE + "76";
 
 function parseCacheVersion(key) {
   if (!key || typeof key !== "string") {

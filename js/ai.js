@@ -496,6 +496,131 @@
     return priorCharacterMessages.length === 0 && priorUserMessages.length === 0;
   }
 
+  function createAiVariationNonce() {
+    return [
+      Date.now().toString(36),
+      Math.random().toString(36).slice(2, 10)
+    ].join("-");
+  }
+
+  function pickRandomItem(items) {
+    var list = Array.isArray(items) ? items.filter(Boolean) : [];
+    if (!list.length) return "";
+    return list[Math.floor(Math.random() * list.length)];
+  }
+
+  function compactVariationText(text) {
+    return String(text || "")
+      .replace(/\s+/g, "")
+      .replace(/[，。！？、；：,.!?;:\"“”‘’'（）()【】\[\]{}<>《》\-—_…~～]/g, "")
+      .trim()
+      .slice(0, 120);
+  }
+
+  function getGroupVariationCacheKey(groupId) {
+    return "myAiApp.groupVariationCache." + String(groupId || "default");
+  }
+
+  function getGroupVariationCache(groupId) {
+    try {
+      return JSON.parse(localStorage.getItem(getGroupVariationCacheKey(groupId)) || "[]");
+    } catch (error) {
+      return [];
+    }
+  }
+
+  function saveGroupVariationCache(groupId, items) {
+    try {
+      localStorage.setItem(getGroupVariationCacheKey(groupId), JSON.stringify((items || []).slice(-8)));
+    } catch (error) {
+      /* ignore */
+    }
+  }
+
+  function rememberGroupVariationResult(groupId, latestUserInput, replies) {
+    var text = (Array.isArray(replies) ? replies : []).map(function (reply) {
+      return reply && reply.content || "";
+    }).filter(Boolean).join("\n");
+
+    var fingerprint = compactVariationText(text);
+    if (!fingerprint) return;
+
+    var cache = getGroupVariationCache(groupId);
+    cache.push({
+      input: compactVariationText(latestUserInput),
+      fingerprint: fingerprint,
+      createdAt: Date.now()
+    });
+    saveGroupVariationCache(groupId, cache);
+  }
+
+  function buildRecentGroupVariationAvoidance(groupId, latestUserInput) {
+    var inputKey = compactVariationText(latestUserInput);
+    if (!inputKey) return "";
+
+    var cache = getGroupVariationCache(groupId).filter(function (item) {
+      return item && item.input === inputKey && item.fingerprint;
+    }).slice(-3);
+
+    if (!cache.length) return "";
+
+    return [
+      "",
+      "Z++. 避免复刻上一版 variationAvoidance",
+      "用户可能在清空聊天后重复发送了同一句话。下面是最近几次同输入的回复指纹，只用于避免复刻，不要输出。",
+      cache.map(function (item, index) {
+        return (index + 1) + ". " + item.fingerprint;
+      }).join("\n"),
+      "本轮必须换：第一个发言角色、前 3 条节奏、角色接话顺序、收束钩子。不要只替换几个词。"
+    ].join("\n");
+  }
+
+  function buildGroupVariationDirective(options) {
+    var source = options || {};
+    var isGroupColdStart = Boolean(source.isGroupColdStart);
+    var nonce = source.variationNonce || createAiVariationNonce();
+
+    var openerStyles = [
+      "先由最容易注意到消息的角色短反应",
+      "先由最不想说话但被打扰的角色冒泡",
+      "先由最爱接话的角色轻轻挑起话题",
+      "先由一个角色误解用户一句，再被另一个角色纠正",
+      "先由一个角色只发很短一句，另一个角色才把话接住",
+      "先出现一秒冷场，再有人慢半拍回应"
+    ];
+
+    var rhythmStyles = [
+      "前半段更碎、更短，后半段才形成小话题",
+      "先轻后重，不要一开始就全员表态",
+      "先像刚看到消息，再慢慢有人接话",
+      "让一个角色明显想转移话题，另一个角色把话题拉回来",
+      "让一个角色只旁观一句，不要所有人都积极"
+    ];
+
+    var relationAngles = [
+      "偏试探",
+      "偏吐槽",
+      "偏冷场",
+      "偏护短",
+      "偏看热闹",
+      "偏慢半拍",
+      "偏不想接但还是接了"
+    ];
+
+    return [
+      "",
+      "Z+. 本轮随机扰动 variationDirective",
+      "本段只用于打破重复生成，绝不能输出到 CONTENT，不能让角色提到随机、种子、规则或系统。",
+      "variationNonce：" + nonce,
+      "本轮入场方式：" + pickRandomItem(openerStyles),
+      "本轮节奏：" + pickRandomItem(rhythmStyles),
+      "本轮群聊角度：" + pickRandomItem(relationAngles),
+      isGroupColdStart
+        ? "这是冷启动第一轮。即使用户输入和上次一样，也必须换一个第一个说话的人、换一种入场节奏、换一种接话角度。"
+        : "如果最近输入和之前相似，也要换接话顺序、角色参与组合和第一反应，不要复刻上一版。"
+    ].join("\n");
+  }
+
   function buildGroupColdStartRules(isGroupColdStart, latestUserInput, characters) {
     if (!isGroupColdStart) {
       return "";
@@ -3628,6 +3753,11 @@
           "当前群成员：",
           memberText,
           groupStartStateText,
+          buildGroupVariationDirective({
+            isGroupColdStart: isGroupColdStart,
+            variationNonce: requestOptions.variationNonce
+          }),
+          buildRecentGroupVariationAvoidance(group && group.id, latestUserInput),
           "用户刚刚说：" + (latestUserInput || "[无输入]"),
           "最近群聊上下文：" + (history || "暂无"),
           "你的任务：生成至少 10 条聊天脚本消息。",
@@ -4258,9 +4388,24 @@
     if (requestOptions.regenerateRequest && !effectiveRegenerateInstruction) {
       effectiveRegenerateInstruction = "用户没有填写具体要求，但点击重回代表上一版不满意；请明显换一个方向、语气和推进方式，不要同义复述。";
     }
+    var variationNonce = requestOptions.variationNonce || createAiVariationNonce();
     var isGroupColdStart = detectGroupColdStartFromHistory(groupHistory);
-    var messages = buildGroupChatDirectorMessages(group, characters, groupHistory, sharedMemories, requestOptions);
-    var rawContent = await sendConfiguredChatMessages(messages);
+    var settings = window.AppStorage && window.AppStorage.getSettings
+      ? window.AppStorage.getSettings()
+      : {};
+    var baseTemperature = Number(settings.temperature);
+    if (!Number.isFinite(baseTemperature)) {
+      baseTemperature = 0.8;
+    }
+    var groupTemperatureOverride = requestOptions.temperatureOverride !== undefined
+      ? Number(requestOptions.temperatureOverride)
+      : Math.max(baseTemperature, isGroupColdStart ? 0.95 : 0.85);
+    var messages = buildGroupChatDirectorMessages(group, characters, groupHistory, sharedMemories, Object.assign({}, requestOptions, {
+      variationNonce: variationNonce
+    }));
+    var rawContent = await sendConfiguredChatMessages(messages, {
+      temperatureOverride: groupTemperatureOverride
+    });
     var scriptResult = parseChatScriptFromText(rawContent, {
       mode: "group",
       characters: characters
@@ -4318,6 +4463,7 @@
       var repairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
         mode: "group",
         isGroupColdStart: isGroupColdStart,
+        variationNonce: variationNonce,
         characters: characters,
         regenerateRequest: requestOptions.regenerateRequest,
         regenerateInstruction: effectiveRegenerateInstruction,
@@ -4412,6 +4558,7 @@
       var repairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
         mode: "group",
         isGroupColdStart: isGroupColdStart,
+        variationNonce: variationNonce,
         regenerateRequest: requestOptions.regenerateRequest,
         regenerateInstruction: effectiveRegenerateInstruction,
         rejectedReplyText: requestOptions.rejectedReplyText,
@@ -4519,6 +4666,13 @@
       targetId: group && group.id,
       userInput: requestOptions.latestUserInput,
       isGroupColdStart: isGroupColdStart,
+      variationNonce: variationNonce,
+      variationFingerprint: compactVariationText((Array.isArray(result.replies) ? result.replies.map(function (reply) {
+        return reply && reply.content || "";
+      }) : []).join("\n")),
+      variationAvoidanceCount: getGroupVariationCache(group && group.id).filter(function (item) {
+        return item && item.input === compactVariationText(requestOptions.latestUserInput);
+      }).length,
       groupChainQuality: groupChainQuality,
       repairReasons: repairReasons,
       intent: coverage.intent,
@@ -4549,6 +4703,7 @@
 
     result.thoughts = assignGroupAuxiliaryCharacterIds(result.thoughts, validIds);
     result.memories = assignGroupAuxiliaryCharacterIds(result.memories, validIds);
+    rememberGroupVariationResult(group && group.id, requestOptions.latestUserInput, result.replies);
 
     return result;
   }
@@ -5871,12 +6026,14 @@
     };
   }
 
-  async function sendConfiguredChatMessages(messages) {
+  async function sendConfiguredChatMessages(messages, options) {
+    var source = options || {};
     var settings = window.AppStorage.getSettings();
     var apiUrl = settings.apiUrl.trim();
     var apiKey = settings.apiKey.trim();
     var modelName = settings.modelName.trim();
     var temperature = Number(settings.temperature);
+    var temperatureOverride = source.temperatureOverride;
     var chatUrl;
     var response;
     var data;
@@ -5906,7 +6063,7 @@
       requestBody = {
         model: modelName,
         messages: messages,
-        temperature: Number.isFinite(temperature) ? Math.max(0, Math.min(2, temperature)) : 0.8
+        temperature: Number.isFinite(temperatureOverride) ? Math.max(0, Math.min(2, temperatureOverride)) : (Number.isFinite(temperature) ? Math.max(0, Math.min(2, temperature)) : 0.8)
       };
       response = await fetch(chatUrl, {
         method: "POST",
