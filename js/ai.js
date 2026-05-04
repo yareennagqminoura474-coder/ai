@@ -580,7 +580,7 @@
       "- 这条回复是否符合角色人设和语气？→ 否则必须重写。",
       "- 换个角色名这条回复还成立吗？→ 成立则必须加入角色专属细节。",
       "- 聊天越来越多轮后，角色声音是否在漂移？→ 是则主动纠正回来。",
-      "先完成内部自检，再输出 JSON。",
+      "先完成内部自检，再输出聊天脚本；不要把自检过程写进 CONTENT。",
       personaReminder
     ].filter(Boolean).join("\n");
   }
@@ -1240,7 +1240,7 @@
       "2. 关系反应：这个角色想拉近、拉远、压住、试探、转移还是清算？",
       "3. 隐藏反应：真实情绪藏在哪里，会通过称呼、停顿、反问、动作露出什么？",
       "最终回复不必照抄这 3 句，但必须沿用其中最符合当前上下文的一种声音。",
-      "规则：这 3 种反应不能输出到 JSON；它们只是帮助模型锁定角色声音。",
+      "规则：这 3 种反应不能输出到 CONTENT，也不能写进可见聊天气泡；只作为内部校准。",
       "如果本轮用户输入很短，也要从关系惯性和最近心声里判断；如果上一轮还在生气、吃醋、冷处理、克制，本轮不能突然普通朋友。",
       "如果角色是强势，不要校准成请求许可；如果角色是嘴硬，不要校准成直接坦白；如果角色是冷淡，不要校准成长篇安慰；如果角色是黏人，不要校准成普通朋友。"
     ].filter(function (line) {
@@ -1903,7 +1903,7 @@
         return String(index + 1) + ". [" + (reply.characterId || "?") + "] " + String(reply.content || "");
       }).join("\n") : "无消息。",
       "本轮不合格原因：" + String(reason || "unknown"),
-      "请修复上述 messages，仅返回 JSON，不要添加解释。"
+      "请修复上述 messages，仅返回聊天脚本格式：MESSAGE_START ... MESSAGE_END；可以附加 EXTRAS_JSON_START/EXTRAS_JSON_END，但不要返回原始 JSON 外壳或解释。"
     ];
 
     try {
@@ -1911,7 +1911,14 @@
         { role: "system", content: systemLines.join("\n") },
         { role: "user", content: userLines.join("\n") }
       ]);
-      var parsed = parseJsonFromText(rawContent);
+      var scriptResult = parseChatScriptFromText(rawContent, {
+        mode: source.mode === "group" ? "group" : "private",
+        characters: Array.isArray(source.characters) ? source.characters : []
+      });
+      if (hasChatScriptPayload(scriptResult)) {
+        return getOutputMessages(scriptResult);
+      }
+      var parsed = parseJsonFromText(rawContent) || ultimateChatTextPurifier(rawContent);
       return getOutputMessages(parsed);
     } catch (error) {
       return null;
@@ -3031,11 +3038,13 @@
       return "";
     }
 
-    value = value
-      .replace(/你刚刚说的([一-鿿，。！？、；：\s]{0,10})/g, "你这句$1")
-      .replace(/刚刚那句([一-鿿，。！？、；：\s]{0,10})/g, "那句$1")
-      .replace(/从你刚刚的话里/g, "从这里")
-      .replace(/你前面说的这些/g, "你这些话");
+    if (!source.onlineMode) {
+      value = value
+        .replace(/你刚刚说的([一-鿿，。！？、；：\s]{0,10})/g, "你这句$1")
+        .replace(/刚刚那句([一-鿿，。！？、；：\s]{0,10})/g, "那句$1")
+        .replace(/从你刚刚的话里/g, "从这里")
+        .replace(/你前面说的这些/g, "你这些话");
+    }
 
     value = value
       .replace(/[ \t]+\n/g, "\n")
@@ -3283,12 +3292,18 @@
     if (requestOptions.regenerateRequest && !effectiveRegenerateInstruction) {
       effectiveRegenerateInstruction = "用户没有填写具体要求，但点击重回代表上一版不满意；请明显换一个方向、语气和推进方式，不要同义复述。";
     }
-    var messages = buildPrivateReplyMessages(character, chatHistory, requestOptions);
+    var messages = buildPrivateChatDirectorMessages(character, chatHistory, requestOptions);
     var rawContent = await sendConfiguredChatMessages(messages);
-    var parsed = parseJsonFromText(rawContent);
-    var replies = getOutputMessages(parsed);
+    var scriptResult = parseChatScriptFromText(rawContent, {
+      mode: "private",
+      currentCharacterId: character && character.id,
+      characters: [character]
+    });
+    var jsonParsed = parseJsonFromText(rawContent);
+    var parserPath = hasChatScriptPayload(scriptResult) ? "script" : jsonParsed ? "json" : "purifier";
+    var parsed = hasChatScriptPayload(scriptResult) ? scriptResult : jsonParsed || ultimateChatTextPurifier(rawContent);
     var normalizationSettings = {
-      replies: replies,
+      replies: getOutputMessages(parsed),
       min: MIN_CHAT_REPLY_COUNT,
       max: MAX_CHAT_REPLY_COUNT,
       defaultType: "text",
@@ -3303,93 +3318,35 @@
       thoughtsHint: requestOptions.thoughtsHint,
       recentCharacterLinesText: requestOptions.recentCharacterLinesText
     };
-    var normalized = normalizeAiResult(rawContent, parsed, normalizationSettings);
-    var regenerateDiff = requestOptions.regenerateRequest ? checkRegenerateDifference(
-      requestOptions.rejectedReplyText || requestOptions.oldReplyText,
-      normalized.replies || replies || messages
-    ) : null;
-    var coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, normalized.replies);
+    var normalized = normalizeAiResult(rawContent, parsed || {}, normalizationSettings);
+    var needRepair = !Array.isArray(normalized.replies) || !normalized.replies.length;
     var repaired = false;
-    var templateToneCountBefore = countTemplateTone(normalized.replies);
-    var templateToneCountAfter = templateToneCountBefore;
-    var removedTemplateMessages = 0;
+    var coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, normalized.replies);
 
-    var roboticIssues = detectRoboticReplyIssues(normalized.replies, "private");
-    if (roboticIssues.length) {
-      var roboticRepairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
-        mode: "private",
-        latestUserInput: requestOptions.latestUserInput,
-        worldBookContext: requestOptions.worldBookContext,
-        characterPersonaText: [
-          "角色名：" + valueOrFallback(character.name),
-          buildMergedCharacterPersona(character)
-        ].join("\n")
-      }), normalized.replies, "robotic-template");
-      if (Array.isArray(roboticRepairMessages) && roboticRepairMessages.length) {
-        normalized.replies = normalizeReplyList("", roboticRepairMessages, normalizationSettings);
-        repaired = true;
-      }
+    if (!needRepair) {
+      needRepair = repliesHaveVisibleFormatLeak(normalized.replies);
+    }
+    if (!needRepair) {
+      needRepair = normalized.replies.some(function (reply) {
+        return hasAssistantLeak(reply && reply.content);
+      });
     }
 
-    if (regenerateDiff && !regenerateDiff.ok) {
-      var similarityRepairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
+    if (needRepair) {
+      var repairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
         mode: "private",
-        regenerateRequest: requestOptions.regenerateRequest,
-        regenerateInstruction: effectiveRegenerateInstruction,
-        rejectedReplyText: requestOptions.rejectedReplyText,
-        oldReplyText: requestOptions.oldReplyText,
+        characters: [character],
         latestUserInput: requestOptions.latestUserInput,
         worldBookContext: requestOptions.worldBookContext,
         characterPersonaText: [
           "角色名：" + valueOrFallback(character.name),
           buildMergedCharacterPersona(character)
         ].join("\n")
-      }), normalized.replies || replies || messages, "regenerate-too-similar");
-
-      if (Array.isArray(similarityRepairMessages) && similarityRepairMessages.length) {
-        normalized.replies = normalizeReplyList("", similarityRepairMessages, normalizationSettings);
-        regenerateDiff = checkRegenerateDifference(
-          requestOptions.rejectedReplyText || requestOptions.oldReplyText,
-          normalized.replies || replies || messages
-        );
-        repaired = true;
-      }
-
-      if (regenerateDiff && !regenerateDiff.ok) {
-        var similarityCleaned = filterOnlineTemplateReplies(normalized.replies);
-        if (similarityCleaned.length) {
-          normalized.replies = similarityCleaned;
-        }
-      }
-    }
-
-    if (!coverage.ok) {
-      var repairMessages = await repairOnlineMessages({
-        mode: "private",
-        latestUserInput: requestOptions.latestUserInput,
-        worldBookContext: requestOptions.worldBookContext,
-        characterPersonaText: [
-          "角色名：" + valueOrFallback(character.name),
-          buildMergedCharacterPersona(character)
-        ].join("\n")
-      }, normalized.replies, coverage.reason);
+      }), normalized.replies || getOutputMessages(parsed) || [], "parse-failure");
 
       if (Array.isArray(repairMessages) && repairMessages.length) {
         normalized.replies = normalizeReplyList("", repairMessages, normalizationSettings);
         repaired = true;
-        coverage = checkOnlineIntentCoverage(requestOptions.latestUserInput, normalized.replies);
-      }
-    }
-
-    if (!coverage.ok) {
-      var cleaned = filterOnlineTemplateReplies(normalized.replies);
-      if (cleaned.length) {
-        removedTemplateMessages = normalized.replies.length - cleaned.length;
-        templateToneCountAfter = countTemplateTone(cleaned);
-        normalized.replies = cleaned;
-      }
-      if (!normalized.replies.length) {
-        normalized.replies = [{ type: "text", content: "这次没回出来，换个方式重试一下。" }];
       }
     }
 
@@ -3398,10 +3355,9 @@
       targetId: character && character.id,
       userInput: requestOptions.latestUserInput,
       intent: coverage.intent,
-      rawMessageCount: replies.length,
+      rawMessageCount: getOutputMessages(parsed).length,
       normalizedMessageCount: normalized.replies.length,
-      templateToneCountBefore: templateToneCountBefore,
-      templateToneCountAfter: templateToneCountAfter,
+      parserPath: parserPath,
       templateToneCount: coverage.templateCount,
       intentCovered: coverage.ok,
       qualityReason: coverage.reason,
@@ -3409,11 +3365,133 @@
       regenerateInstruction: requestOptions.regenerateInstruction || effectiveRegenerateInstruction || "",
       regenerateSimilarity: regenerateDiff ? regenerateDiff.similarity : null,
       regenerateDifferentEnough: regenerateDiff ? regenerateDiff.ok : null,
-      repaired: repaired,
-      removedTemplateMessages: removedTemplateMessages
+      repaired: repaired
     });
 
     return normalized;
+  }
+
+  function buildPrivateChatDirectorMessages(character, chatHistory, options) {
+    var profile = character || {};
+    var chatSettings = profile.chatSettings || {};
+    var requestOptions = options || {};
+    var userContext = buildUserContext(chatSettings);
+    var latestUserInput = getLatestUserInputForPrompt(chatHistory);
+    var memories = chatSettings.memoryEnabled === false ? [] : getMemoryForCharacter(profile.id);
+    var chatMemories = getChatMemoriesForPrompt("private", profile.id, requestOptions.chatMemories);
+    var recentGroupContextText = profile.id && window.AppStorage && typeof window.AppStorage.getRecentGroupContextForCharacter === "function"
+      ? window.AppStorage.getRecentGroupContextForCharacter(profile.id, 16)
+      : "";
+    var worldBookResolved = resolveWorldBookPromptContext("private", profile && profile.id, [
+      "用户输入：" + latestUserInput,
+      "角色人设：" + buildMergedCharacterPersona(profile),
+      "聊天记忆：" + (formatChatMemoryList(chatMemories) || "暂无"),
+      "长期记忆：" + (formatMemoryList(memories) || "暂无")
+    ].join("\n"), {
+      selectedWorldBookIds: getSelectedWorldBookIds("private", profile && profile.id, requestOptions),
+      relatedTargetIds: profile && profile.id ? [profile.id] : [],
+      characterIds: profile && profile.id ? [profile.id] : []
+    });
+    var worldBookContext = worldBookResolved && worldBookResolved.worldBookContext ? worldBookResolved.worldBookContext : "";
+
+    return [
+      {
+        role: "system",
+        content: [
+          "你不是 AI、助手、客服、系统。你就是角色本人。",
+          "角色名：" + valueOrFallback(profile.name),
+          "核心人设：" + valueOrFallback(buildMergedCharacterPersona(profile)),
+          "说话习惯：" + valueOrFallback(profile.speakingStyle),
+          "关系位置：" + valueOrFallback(profile.relationship),
+          "禁忌：" + valueOrFallback(profile.taboo || profile.chatSettings && profile.chatSettings.taboo),
+          "当前情绪：" + valueOrFallback(profile.currentMood || profile.chatSettings && profile.chatSettings.currentMood),
+          "最近相关记忆：" + (formatChatMemoryList(chatMemories) || "暂无"),
+          "世界与记忆：" + (worldBookContext || "暂无"),
+          "不要把以上内容当资料念给用户。不要在可见气泡里说：系统、设定、世界书、记忆、后台或助手。",
+          "不要在 CONTENT 的可见气泡内容里写 JSON、MESSAGE_START、MESSAGE_END、CONTENT、字段名或解释。协议字段只用于解析，不能出现在 CONTENT 正文里。"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: [
+          "用户在你眼里：" + valueOrFallback(userContext.name) + "；" + (userContext.persona || "暂无"),
+          "你们的关系：" + (profile.relationship || userContext.relationshipName || "暂无"),
+          "用户刚刚说：" + (latestUserInput || "[无输入]"),
+          "你的任务：先判断角色第一反应，然后像真人连续发消息。",
+          "生成至少 10 条消息。不要拆句凑数；可以用短句、停顿、表情、反问、回避、改口、沉默、语音式文字。",
+          "私聊第一条要表现即时反应，不要以‘我理解你/你的意思是/从你刚刚的话里’开头。",
+          "输出只使用聊天脚本：",
+          "MESSAGE_START",
+          "TYPE: text",
+          "CONTENT: ...",
+          "MESSAGE_END",
+          "可选：EXTRAS_JSON_START / EXTRAS_JSON_END，用于 thoughts/memories/actions/moneyDecisions/bodyState/memorySummary。",
+          "不要输出可见气泡里的额外字段名。"
+        ].join("\n")
+      }
+    ];
+  }
+
+  function buildGroupChatDirectorMessages(group, characters, groupHistory, sharedMemories, options) {
+    var requestOptions = options || {};
+    var userContext = buildUserContext(group && group.settings || {});
+    var latestUserInput = getLatestUserInputForPrompt(groupHistory);
+    var promptMessages = (Array.isArray(groupHistory) ? groupHistory : []).filter(function (message) {
+      return message && message.content && message.type !== "loading" && message.type !== "error" && message.type !== "system" && message.role !== "system";
+    });
+    var history = promptMessages.slice(-MAIN_HISTORY_WINDOW).map(function (message) {
+      if (message.role === "user") {
+        return "用户：" + summarizeMessageForAI(message);
+      }
+      return "角色：" + summarizeMessageForAI(message);
+    }).join("\n");
+    var memberText = (Array.isArray(characters) ? characters : []).map(function (character) {
+      return [
+        "角色ID：" + valueOrFallback(character && character.id),
+        "角色名：" + valueOrFallback(character && character.name),
+        "人设：" + valueOrFallback(buildMergedCharacterPersona(character)),
+        "与用户关系：" + valueOrFallback(character && character.relationship)
+      ].join("\n");
+    }).join("\n\n") || "暂无角色信息";
+    var worldBookContext = requestOptions.worldBookContext || "";
+    return [
+      {
+        role: "system",
+        content: [
+          "你是群聊导演，但可见内容里不能说自己是导演。你只调度群成员本人发言。",
+          "群名：" + valueOrFallback(group && group.name),
+          "群公告：" + valueOrFallback(group && group.settings && group.settings.announcement),
+          "群氛围：" + valueOrFallback(group && group.settings && group.settings.atmosphere),
+          "不要在可见气泡里说：系统、设定、世界书、后台、助手、导演、JSON。",
+          "每条可见消息必须是真人式聊天，不要像排队答题。"
+        ].join("\n")
+      },
+      {
+        role: "user",
+        content: [
+          "当前群成员：",
+          memberText,
+          "用户刚刚说：" + (latestUserInput || "[无输入]"),
+          "最近群聊上下文：" + (history || "暂无"),
+          "你的任务：生成至少 10 条聊天脚本消息。",
+          "至少 2 个角色参与；如果群成员足够，优先 2-4 个角色；不要让每个角色排队回答用户。",
+          "至少 40% 的消息要是角色对角色，不是直接对用户；至少 1 条接住另一个角色的话；至少 1 条带打断/反驳/拆台/护短/起哄/冷场/转移。",
+          "角色说话要有明显不同：句长、称呼、语气、态度、节奏应不同。",
+          "输出只使用聊天脚本：",
+          "MESSAGE_START",
+          "CHARACTER_ID: 角色id",
+          "SPEAKER: 角色名",
+          "TYPE: text",
+          "CONTENT: ...",
+          "REPLY_TARGET: user/character/scene",
+          "REPLY_TO_CHARACTER_ID: ...",
+          "BEAT: 接话/打断/反驳/拆台/护短/起哄/冷场/转移/沉默/补刀/回应用户",
+          "MESSAGE_END",
+          "可选：EXTRAS_JSON_START / EXTRAS_JSON_END，用于 thoughts/memories/actions/moneyDecisions/bodyState/memorySummary。",
+          "协议字段只能作为外层脚本字段，不能进入 CONTENT。"
+        ].join("\n")
+      }
+    ];
   }
 
   function buildPersonaCountHint(profile) {
@@ -4019,18 +4097,23 @@
     if (requestOptions.regenerateRequest && !effectiveRegenerateInstruction) {
       effectiveRegenerateInstruction = "用户没有填写具体要求，但点击重回代表上一版不满意；请明显换一个方向、语气和推进方式，不要同义复述。";
     }
-    var messages = buildGroupMessages(group, characters, groupHistory, sharedMemories, requestOptions);
+    var messages = buildGroupChatDirectorMessages(group, characters, groupHistory, sharedMemories, requestOptions);
     var rawContent = await sendConfiguredChatMessages(messages);
-    var parsed = parseJsonFromText(rawContent);
+    var scriptResult = parseChatScriptFromText(rawContent, {
+      mode: "group",
+      characters: characters
+    });
+    var jsonParsed = parseJsonFromText(rawContent);
+    var parserPath = hasChatScriptPayload(scriptResult) ? "script" : jsonParsed ? "json" : "purifier";
+    var parsed = hasChatScriptPayload(scriptResult) ? scriptResult : jsonParsed || ultimateChatTextPurifier(rawContent);
     var replyLimit = getGroupReplyLimit(group);
     var validIds = (characters || []).map(function (character) {
       return character.id;
     });
-    var replies = getOutputMessages(parsed);
     var result;
 
     var normalizationSettings = {
-      replies: replies,
+      replies: getOutputMessages(parsed),
       min: MIN_CHAT_REPLY_COUNT,
       max: replyLimit,
       defaultType: "text",
@@ -4047,6 +4130,59 @@
     };
     result = normalizeAiResult(rawContent, parsed, normalizationSettings);
     result.replies = inferGroupMessageChainFields(result.replies);
+    result.replies = (Array.isArray(result.replies) ? result.replies : []).filter(function (reply) {
+      return reply && reply.characterId && validIds.indexOf(reply.characterId) !== -1 && reply.content;
+    });
+    var needRepair = !Array.isArray(result.replies) || !result.replies.length;
+    var repaired = false;
+
+    if (!needRepair) {
+      needRepair = !result.replies.some(function (message) {
+        return message && message.characterId && validIds.indexOf(message.characterId) !== -1;
+      });
+    }
+
+    if (!needRepair) {
+      needRepair = repliesHaveVisibleFormatLeak(result.replies);
+    }
+
+    if (!needRepair) {
+      needRepair = result.replies.some(function (reply) {
+        return hasAssistantLeak(reply && reply.content);
+      });
+    }
+
+    if (needRepair) {
+      var repairMessages = await repairOnlineMessages(Object.assign({}, requestOptions, {
+        mode: "group",
+        characters: characters,
+        regenerateRequest: requestOptions.regenerateRequest,
+        regenerateInstruction: effectiveRegenerateInstruction,
+        rejectedReplyText: requestOptions.rejectedReplyText,
+        oldReplyText: requestOptions.oldReplyText,
+        latestUserInput: requestOptions.latestUserInput,
+        worldBookContext: requestOptions.worldBookContext,
+        worldBookMeta: requestOptions.worldBookMeta,
+        matchedWorldBookEntries: requestOptions.matchedWorldBookEntries,
+        participantPersonaText: (characters || []).map(function (character) {
+          return [
+            "群成员：" + valueOrFallback(character && character.name),
+            "人设：" + buildMergedCharacterPersona(character),
+            "语气标签：" + ((detectPersonaVoiceProfile(character || {}, requestOptions.worldBookContext || "").tags || []).join(" / ") || "无明确标签")
+          ].join("\n");
+        }).join("\n\n")
+      }), result.replies || getOutputMessages(parsed) || [], "parse-failure");
+
+      if (Array.isArray(repairMessages) && repairMessages.length) {
+        result.replies = normalizeReplyList("", repairMessages, normalizationSettings);
+        result.replies = inferGroupMessageChainFields(result.replies);
+        result.replies = (Array.isArray(result.replies) ? result.replies : []).filter(function (reply) {
+          return reply && reply.characterId && validIds.indexOf(reply.characterId) !== -1 && reply.content;
+        });
+        repaired = true;
+      }
+    }
+
     var recentTextsForValidation = (requestOptions.recentHistory || "") + "\n" + (requestOptions.privateBridgeText || "");
     var seenMessages = {};
     result.replies = (Array.isArray(result.replies) ? result.replies : []).filter(function (message) {
@@ -5915,6 +6051,287 @@
     }
 
     return null;
+  }
+ 
+  function parseChatScriptFromText(rawContent, options) {
+    var source = options || {};
+    var result = {
+      messages: [],
+      thoughts: [],
+      memories: [],
+      actions: [],
+      moneyDecisions: [],
+      bodyState: null,
+      memorySummary: null
+    };
+
+    if (!rawContent || typeof rawContent !== "string") {
+      return result;
+    }
+
+    if (isMyAiAppDebugEnabled("debugChatScript")) {
+      try {
+        console.debug("[ChatScriptDebug] rawContent", String(rawContent || "").slice(0, 2000));
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    var blockRegex = /MESSAGE_START\s*([\s\S]*?)\s*MESSAGE_END/g;
+    var match;
+    var messages = [];
+
+    while ((match = blockRegex.exec(rawContent)) !== null) {
+      var block = match[1] || "";
+      var message = parseScriptMessageBlock(block, source);
+      if (message) {
+        messages.push(message);
+      }
+    }
+
+    if (messages.length) {
+      result.messages = dedupeScriptMessages(messages);
+    }
+
+    var extras = parseExtrasJsonBlock(rawContent);
+    if (extras) {
+      result.thoughts = Array.isArray(extras.thoughts) ? extras.thoughts : [];
+      result.memories = Array.isArray(extras.memories) ? extras.memories : [];
+      result.actions = Array.isArray(extras.actions) ? extras.actions : [];
+      result.moneyDecisions = Array.isArray(extras.moneyDecisions) ? extras.moneyDecisions : [];
+      result.bodyState = extras.bodyState || null;
+      result.memorySummary = extras.memorySummary || null;
+    }
+
+    if (isMyAiAppDebugEnabled("debugChatScript")) {
+      try {
+        console.debug("[ChatScriptDebug] parsed script", result);
+      } catch (e) {
+        /* ignore */
+      }
+    }
+
+    return result;
+  }
+
+  function hasChatScriptPayload(parsed) {
+    return parsed && typeof parsed === "object" && (
+      (Array.isArray(parsed.messages) && parsed.messages.length) ||
+      (Array.isArray(parsed.thoughts) && parsed.thoughts.length) ||
+      (Array.isArray(parsed.memories) && parsed.memories.length) ||
+      (Array.isArray(parsed.actions) && parsed.actions.length) ||
+      (Array.isArray(parsed.moneyDecisions) && parsed.moneyDecisions.length) ||
+      Boolean(parsed.bodyState) ||
+      Boolean(parsed.memorySummary)
+    );
+  }
+
+  function parseScriptMessageBlock(block, options) {
+    var source = options || {};
+    var lines = String(block || "").split(/\r?\n/);
+    var fields = {};
+    var contentLines = [];
+    var capturingContent = false;
+
+    lines.forEach(function (line) {
+      var trimmed = String(line || "").replace(/\r$/, "");
+      var fieldMatch = trimmed.match(/^([A-Z_]+)\s*:\s*(.*)$/);
+      if (fieldMatch) {
+        var key = fieldMatch[1];
+        var value = fieldMatch[2] || "";
+
+        if (key === "CONTENT") {
+          capturingContent = true;
+          contentLines.push(value);
+        } else {
+          capturingContent = false;
+          fields[key] = value.trim();
+        }
+      } else if (capturingContent) {
+        contentLines.push(trimmed);
+      }
+    });
+
+    fields.CONTENT = contentLines.join("\n").trim();
+    var message = {
+      type: normalizeMessageType(fields.TYPE || "text"),
+      content: sanitizeVisibleChatContent(fields.CONTENT || "")
+    };
+
+    if (fields.CHARACTER_ID) {
+      message.characterId = String(fields.CHARACTER_ID).trim();
+    }
+    if (fields.SPEAKER) {
+      message.speaker = String(fields.SPEAKER).trim();
+    }
+    if (fields.AMOUNT) {
+      message.amount = String(fields.AMOUNT).trim();
+    }
+    if (fields.NOTE) {
+      message.note = String(fields.NOTE).trim();
+    }
+    if (fields.REPLY_TARGET) {
+      message.replyTarget = String(fields.REPLY_TARGET).trim();
+    }
+    if (fields.REPLY_TO_CHARACTER_ID) {
+      message.replyToCharacterId = String(fields.REPLY_TO_CHARACTER_ID).trim();
+    }
+    if (fields.BEAT) {
+      message.beat = String(fields.BEAT).trim();
+    }
+
+    if (!message.characterId) {
+      if (source.mode === "group") {
+        var speakerName = String(message.speaker || "").trim().toLowerCase();
+        if (speakerName && Array.isArray(source.characters)) {
+          var matched = source.characters.find(function (character) {
+            return String(character && character.name || "").trim().toLowerCase() === speakerName;
+          });
+          if (matched && matched.id) {
+            message.characterId = String(matched.id);
+          }
+        }
+        if (!message.characterId) {
+          return null;
+        }
+      } else {
+        message.characterId = String(source.currentCharacterId || "");
+      }
+    }
+
+    if (!message.content && message.type === "text") {
+      return null;
+    }
+
+    return message;
+  }
+
+  function parseExtrasJsonBlock(rawContent) {
+    if (!rawContent || typeof rawContent !== "string") {
+      return null;
+    }
+
+    var match = /EXTRAS_JSON_START\s*([\s\S]*?)\s*EXTRAS_JSON_END/.exec(rawContent);
+    if (!match) {
+      return null;
+    }
+
+    var jsonText = String(match[1] || "").replace(/^```json\s*/i, "").replace(/^```\s*/i, "").replace(/```$/i, "").trim();
+    if (!jsonText) {
+      return null;
+    }
+
+    try {
+      return JSON.parse(jsonText);
+    } catch (error) {
+      return null;
+    }
+  }
+
+  function stripKnownJsonFieldMarkers(value) {
+    return String(value || "")
+      .replace(/(^|[\s{,\[])"(?:content|message|type|characterId|replyTarget|replyToCharacterId|beat)"\s*:\s*/gi, "$1")
+      .replace(/(^|[\s{,\[])(?:content|message|type|characterId|replyTarget|replyToCharacterId|beat)\s*:\s*/gi, "$1");
+  }
+
+  function ultimateChatTextPurifier(rawContent) {
+    var text = String(rawContent || "");
+    text = text
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .replace(/MESSAGE_START/g, " ")
+      .replace(/MESSAGE_END/g, " ")
+      .replace(/EXTRAS_JSON_START/g, " ")
+      .replace(/EXTRAS_JSON_END/g, " ")
+      .replace(/(^|\s)(CHARACTER_ID|SPEAKER|TYPE|CONTENT|AMOUNT|NOTE|REPLY_TARGET|REPLY_TO_CHARACTER_ID|BEAT)\s*:/gi, "$1")
+      .replace(/(^|[\s{,\[])(?:content|message|type|characterId|replyTarget|replyToCharacterId|beat)\s*:\s*/gi, "$1");
+
+    var looksLikeJson = /^\s*[\[{]/.test(text) || /"(?:content|message|type|characterId|replyTarget|replyToCharacterId|beat)"\s*\:/.test(text);
+    if (looksLikeJson) {
+      text = text.replace(/[{}\[\],]/g, " ");
+    }
+
+    text = text.replace(/\s*\n\s*/g, "\n").trim();
+
+    if (!text) {
+      return { messages: [] };
+    }
+
+    var lines = String(text || "").split(/\r?\n/).map(function (line) {
+      return sanitizeVisibleChatContent(line).trim();
+    }).filter(function (line) {
+      return line && !/^\s*[:\-\*\d+\.\s]*$/.test(line);
+    });
+
+    if (!lines.length) {
+      return { messages: [] };
+    }
+
+    return {
+      messages: lines.map(function (content) {
+        return {
+          type: "text",
+          content: content
+        };
+      })
+    };
+  }
+
+  function sanitizeVisibleChatContent(text) {
+    if (!text || typeof text !== "string") {
+      return "";
+    }
+
+    var value = String(text || "");
+
+    value = value
+      .replace(/```json/gi, "")
+      .replace(/```/g, "")
+      .replace(/MESSAGE_START/g, "")
+      .replace(/MESSAGE_END/g, "")
+      .replace(/EXTRAS_JSON_START/g, "")
+      .replace(/EXTRAS_JSON_END/g, "")
+      .replace(/(^|\s)(CHARACTER_ID|SPEAKER|TYPE|CONTENT|AMOUNT|NOTE|REPLY_TARGET|REPLY_TO_CHARACTER_ID|BEAT)\s*:/gi, "$1")
+      .replace(/^[\s\[\]{},]+$/gm, "");
+
+    value = stripKnownJsonFieldMarkers(value);
+    value = value
+      .replace(/^\s*,\s*$/gm, "")
+      .replace(/\n{3,}/g, "\n\n")
+      .trim();
+
+    return value;
+  }
+
+  function dedupeScriptMessages(messages) {
+    var seen = {};
+    return (Array.isArray(messages) ? messages : []).filter(function (message) {
+      if (!message || typeof message !== "object") {
+        return false;
+      }
+      var key = String(message.characterId || "") + "|" + String(message.type || "") + "|" + String(message.content || "").trim();
+      if (!key || seen[key]) {
+        return false;
+      }
+      seen[key] = true;
+      return true;
+    });
+  }
+
+  function hasVisibleFormatLeak(text) {
+    var value = String(text || "");
+    return /MESSAGE_START|MESSAGE_END|EXTRAS_JSON_START|EXTRAS_JSON_END|CHARACTER_ID\s*:|SPEAKER\s*:|TYPE\s*:|CONTENT\s*:|REPLY_TARGET\s*:|REPLY_TO_CHARACTER_ID\s*:|BEAT\s*:|"content"\s*:|"message"\s*:/i.test(value);
+  }
+
+  function repliesHaveVisibleFormatLeak(replies) {
+    return (Array.isArray(replies) ? replies : []).some(function (reply) {
+      return hasVisibleFormatLeak(reply && reply.content);
+    });
+  }
+
+  function hasAssistantLeak(text) {
+    var value = String(text || "");
+    return /我是AI|我是助手|我是系统|系统提示|后台|根据记录|根据系统|助手说|AI说/i.test(value);
   }
 
   function normalizeAiResult(rawContent, parsed, options) {
@@ -9190,6 +9607,7 @@
     summarizeMessageForAI: summarizeMessageForAI,
     normalizeReplyList: normalizeReplyList,
     normalizeAiMessageText: normalizeAiMessageText,
+    sanitizeVisibleChatContent: sanitizeVisibleChatContent,
     sendChatRequest: sendChatRequest,
     sendPrivateChatRequest: sendPrivateChatRequest,
     buildGroupSystemPrompt: buildGroupSystemPrompt,

@@ -29,23 +29,31 @@
       .replace(/'/g, "&#039;");
   }
 
+  function cleanVisibleChatText(text) {
+    var value = String(text || "").trim();
+    if (window.AIService && typeof window.AIService.sanitizeVisibleChatContent === "function") {
+      return String(window.AIService.sanitizeVisibleChatContent(value)).trim();
+    }
+    return value;
+  }
+
   function normalizeDisplayText(text, options) {
     var source = options || {};
     var role = String(source.role || source.sender || "").toLowerCase();
     var type = String(source.type || "").toLowerCase();
 
     if (role === "user" || type === "user" || type === "offlineuseraction") {
-      return String(text || "").trim();
+      return cleanVisibleChatText(text);
     }
 
     if (window.AIService && window.AIService.normalizeAiMessageText) {
-      return window.AIService.normalizeAiMessageText(text, {
+      return cleanVisibleChatText(window.AIService.normalizeAiMessageText(text, {
         onlineMode: true,
         mode: "group"
-      });
+      }));
     }
 
-    return String(text || "").trim();
+    return cleanVisibleChatText(text);
   }
 
   function normalizeMoneyAmount(value) {
@@ -2255,16 +2263,13 @@
       if (oldBodyState && window.AppStorage.saveBodyState) {
         window.AppStorage.saveBodyState("group", group.id, oldBodyState);
       }
-      messages = before.concat(oldMessages, [{
-        id: String(Date.now()),
-        role: "character",
-        characterId: characters[0].id,
-        characterName: characters[0].name,
-        content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
-        type: "error",
-        createdAt: Date.now(),
-        generationId: generationId
-      }], after);
+      messages = removeGroupLoadingByGeneration(window.AppStorage.getGroupChatHistory(group.id), generationId);
+      var errorContent = error && error.message ? error.message : "回复失败，已取消本轮生成。";
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast(errorContent);
+      } else {
+        showEmptyAiReplyToast();
+      }
     } finally {
       if (messages) {
         window.AppStorage.saveGroupChatHistory(group.id, messages);
@@ -2284,7 +2289,7 @@
     var memWriteCount = 0;
     for (var i = 0; i < items.length; i++) {
       var reply = items[i];
-      var character = getCharacterById(reply.characterId) || characters[0];
+      var character = getCharacterById(reply.characterId);
       var createdAt;
       var message;
 
@@ -2359,7 +2364,7 @@
       targetId: group.id,
       messages: items,
       renderOne: function (reply, index) {
-        var character = getCharacterById(reply.characterId) || characters[0];
+        var character = getCharacterById(reply.characterId);
         var createdAt = startAt + index;
         var message;
 
@@ -2818,16 +2823,12 @@
       messages = null;
     } catch (error) {
       messages = removeGroupLoadingByGeneration(window.AppStorage.getGroupChatHistory(group.id), generationId);
-      messages.push({
-        id: String(Date.now()),
-        role: "character",
-        characterId: characters[0].id,
-        characterName: characters[0].name,
-        content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
-        type: "error",
-        createdAt: Date.now(),
-        generationId: generationId
-      });
+      var errorContent = error && error.message ? error.message : "回复失败，已取消本轮生成。";
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast(errorContent);
+      } else {
+        showEmptyAiReplyToast();
+      }
     } finally {
       if (messages) {
         window.AppStorage.saveGroupChatHistory(group.id, messages);

@@ -76,23 +76,31 @@
     return Boolean(normalizeMoneyMessage(message));
   }
 
+  function cleanVisibleChatText(text) {
+    var value = String(text || "").trim();
+    if (window.AIService && typeof window.AIService.sanitizeVisibleChatContent === "function") {
+      return String(window.AIService.sanitizeVisibleChatContent(value)).trim();
+    }
+    return value;
+  }
+
   function normalizeDisplayText(text, options) {
     var source = options || {};
     var role = String(source.role || source.sender || "").toLowerCase();
     var type = String(source.type || "").toLowerCase();
 
     if (role === "user" || type === "user" || type === "offlineuseraction") {
-      return String(text || "").trim();
+      return cleanVisibleChatText(text);
     }
 
     if (window.AIService && window.AIService.normalizeAiMessageText) {
-      return window.AIService.normalizeAiMessageText(text, {
+      return cleanVisibleChatText(window.AIService.normalizeAiMessageText(text, {
         onlineMode: true,
         mode: "private"
-      });
+      }));
     }
 
-    return String(text || "").trim();
+    return cleanVisibleChatText(text);
   }
 
   function showEmptyAiReplyToast() {
@@ -2676,14 +2684,13 @@
       if (oldBodyState && window.AppStorage.saveBodyState) {
         window.AppStorage.saveBodyState("private", requestCharacterId, oldBodyState);
       }
-      messages = before.concat(oldMessages, [{
-        id: String(Date.now()),
-        role: "character",
-        type: "error",
-        content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
-        createdAt: Date.now(),
-        generationId: generationId
-      }], after);
+      messages = removeLoadingMessagesByGeneration(window.AppStorage.getChatHistory(requestCharacterId), generationId);
+      var errorContent = error && error.message ? error.message : "回复失败，已取消本轮生成。";
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast(errorContent);
+      } else {
+        showEmptyAiReplyToast();
+      }
     } finally {
       if (getCharacterById(requestCharacterId)) {
         if (messages) {
@@ -3406,7 +3413,6 @@
     var messages;
     var historyForRequest;
     var loadingMessage;
-    var errorContent;
     var generationId;
 
     if (!requestCharacterId || !character) {
@@ -3469,19 +3475,17 @@
       });
       messages = null;
     } catch (error) {
-      errorContent = error && error.message === window.AIService.MISSING_SETTINGS_MESSAGE
-        ? window.AIService.MISSING_SETTINGS_MESSAGE
-        : "回复失败：" + (error && error.message ? error.message : "未知错误");
-
       messages = removeLoadingMessagesByGeneration(window.AppStorage.getChatHistory(requestCharacterId), generationId);
-      messages.push({
-        id: String(Date.now()),
-        role: "character",
-        type: "error",
-        content: errorContent,
-        createdAt: Date.now(),
-        generationId: generationId
-      });
+
+      var errorContent = error && error.message
+        ? error.message
+        : "回复失败，已取消本轮生成。";
+
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast(errorContent, true);
+      } else {
+        showEmptyAiReplyToast();
+      }
     } finally {
       if (getCharacterById(requestCharacterId)) {
         if (messages) {
@@ -3697,14 +3701,12 @@
       });
     } catch (error) {
       messages = removeLoadingMessagesByGeneration(window.AppStorage.getChatHistory(characterId), generationId);
-      messages.push({
-        id: String(Date.now()),
-        role: "character",
-        type: "error",
-        content: "回复失败：" + (error && error.message ? error.message : "未知错误"),
-        createdAt: Date.now(),
-        generationId: generationId
-      });
+      var errorContent = error && error.message ? error.message : "回复失败，已取消本轮生成。";
+      if (window.AppExtras && window.AppExtras.showToast) {
+        window.AppExtras.showToast(errorContent);
+      } else {
+        showEmptyAiReplyToast();
+      }
       window.AppStorage.saveChatHistory(characterId, messages);
       schedulePrivateRender(characterId);
       schedulePrivateListRender();
